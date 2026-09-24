@@ -16,23 +16,6 @@ import (
 	"github.com/metacubex/tls"
 )
 
-// A SOCKS5 outbound with tls: true dials its own TLS connection per proxied connection,
-// exactly as the HTTP proxy does, and NewSocks5 already builds one config in the
-// constructor and reuses it verbatim for every dial. Without a ClientSessionCache
-// metacubex/tls disables resumption, so every proxied connection ran a full handshake
-// and re-verified the server certificate.
-//
-// On iOS that verification is an XPC round trip to trustd. Measured on real chains, the
-// platform verifier costs 2.18 ms for apple.com against 50 microseconds for the pure-Go
-// one, so the per-connection cost being avoided here is the expensive one -- and this
-// change is worth more before the platform-verifier problem is fixed than after it, not
-// less.
-//
-// Scope is deliberately identical to http.go's: this TCP proxy only. QUIC-based proxies
-// manage their own session tickets, and arming a cache in the shared ca.GetTLSConfig
-// breaks TUIC v5 authentication deterministically. SOCKS5 also has no
-// client-fingerprint option, so it uses metacubex/tls rather than utls and needs no
-// separate cache type.
 
 func TestNewSocks5ArmsSessionCache(t *testing.T) {
 	proxy, err := NewSocks5(Socks5Option{
@@ -58,10 +41,6 @@ func TestNewSocks5ArmsSessionCache(t *testing.T) {
 	}
 }
 
-// TestNewSocks5TLSConfigResumes proves the armed cache actually resumes on the proxy's
-// own config, and counts the certificate verifications that resumption removes -- the
-// quantity that matters, since a resumed handshake does not re-send the server
-// certificate and so cannot trigger a verification at all.
 func TestNewSocks5TLSConfigResumes(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -80,7 +59,7 @@ func TestNewSocks5TLSConfigResumes(t *testing.T) {
 	}
 	listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{
 		Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}},
-		MaxVersion:   tls.VersionTLS12, // the ticket arrives in-handshake; simplest to assert
+		MaxVersion:   tls.VersionTLS12,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -115,9 +94,6 @@ func TestNewSocks5TLSConfigResumes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Clone shares the proxy's ClientSessionCache. SkipCertVerify above means
-	// metacubex/tls skips chain building, so the verification counter is installed
-	// explicitly to observe what a real (non-pinned) config would pay.
 	verifications := 0
 	config := proxy.tlsConfig.Clone()
 	config.MaxVersion = tls.VersionTLS12

@@ -54,11 +54,6 @@ func TestValidateGeoSiteDatForIOS(t *testing.T) {
 }
 
 func TestSupportedGeoIPDatabaseTypeMirrorsUpstreamTypeMaxmind(t *testing.T) {
-	// Upstream component/mmdb loads any DatabaseType as a MaxMind country DB
-	// (named sing-geoip/Meta-geoip0 fast paths, everything else via default:
-	// typeMaxmind, which reads country.iso_code), so an allow-list of type labels
-	// would reject valid MaxMind country DBs it uses. Any non-empty type is
-	// accepted; only an empty type is rejected.
 	for _, dbType := range []string{
 		"GeoIP2-Enterprise",
 		"GeoIP2-Precision-Enterprise",
@@ -128,17 +123,6 @@ func TestValidateGeodataRejectsSymlinkAndOversizedFile(t *testing.T) {
 	}
 }
 
-// An ASN database whose DatabaseType is not one of the three strings the
-// allow-list names is still a database upstream loads. `LookupASN`
-// (component/mmdb/reader.go:75-89) switches on the type, and its default branch
-// logs "Unsupported ASN type" and returns ("", "") -- it does not error and it
-// does not stop the reader being constructed. So on desktop the config starts,
-// ASN rules simply never match; refusing the resource here turns that into a
-// config that will not start at all on iOS.
-//
-// The names below are real shipping products, not invented ones: MaxMind
-// renamed its Lite ASN build, DB-IP publishes the non-compat spelling, and
-// ipinfo's paid tier ships a different filename in the same field.
 func TestASNDatabaseTypeIsNotAnAllowList(t *testing.T) {
 	for _, databaseType := range []string{
 		"DBIP-ASN-Lite",
@@ -154,22 +138,6 @@ func TestASNDatabaseTypeIsNotAnAllowList(t *testing.T) {
 	}
 }
 
-// Concatenating .dat files yields duplicate codes, and duplicates are not an
-// error -- but not for the reason the first version of this comment gave.
-//
-// It claimed the merged file "resolves exactly like the official one plus the
-// additions". That is wrong, and it contradicted the sentence beside it: first
-// match wins, so a second entry under a code the official file already carries
-// is never reached and its domains are dead weight. Appending only adds
-// categories whose codes are NEW. Measured on this fixture: GEOSITE,cn resolves
-// to [example.cn] and private.example is unreachable.
-//
-// What survives is the narrow claim, which is the one that matters here:
-// upstream reads a file with duplicate codes without complaint -- linear scan,
-// first match, stop (component/geodata/standard/standard.go:47-60; the
-// memconservative byte scan Hako forces on iOS does the same). Refusing the
-// whole file turns "some appended entries are inert" into "nothing loads", which
-// is strictly worse for the user and is a rule upstream does not have.
 func TestConcatenatedDatIsNotADuplicateCodeError(t *testing.T) {
 	marshal := func(code, domain string) []byte {
 		list := &georouter.GeoSiteList{Entry: []*georouter.GeoSite{{
@@ -199,7 +167,6 @@ func TestConcatenatedDatIsNotADuplicateCodeError(t *testing.T) {
 	}
 }
 
-// The GeoIP half of the same shape.
 func TestConcatenatedGeoIPDatIsNotADuplicateCodeError(t *testing.T) {
 	marshal := func(code string, ip []byte, prefix uint32) []byte {
 		list := &georouter.GeoIPList{Entry: []*georouter.GeoIP{{
@@ -221,27 +188,6 @@ func TestConcatenatedGeoIPDatIsNotADuplicateCodeError(t *testing.T) {
 	}
 }
 
-// A blank CountryCode has to stay rejected, and the reason is the loader iOS
-// actually runs.
-//
-// The runtime profile forces `memconservative` (runtime_profile.go:151,
-// config_pipeline.go:126) precisely to keep the extension's heap down. That
-// loader does not `proto.Unmarshal` the file: it hand-scans the wire format and
-// requires every entry to begin with field 1, `0x0A`
-// (component/geodata/memconservative/decode.go:44-48). proto3 omits an empty
-// string field entirely, so an entry with a blank CountryCode starts at `0x12`
-// and the scan aborts with errInvalidGeodataFile.
-//
-// What happens next is the memory event: cache.go:54-64 catches that and falls
-// back to `os.ReadFile` plus a full `proto.Unmarshal` of the entire list, once
-// per requested country code. The bundled GeoIP.dat is 17 MB and the validator
-// admits files up to 128 MB, against a Network Extension living under roughly
-// 50 MiB. One blank entry anywhere in the file converts every geoip lookup into
-// a whole-file decode.
-//
-// So this one is stricter than upstream AND platform-required, which is the bar
-// -- unlike the duplicate-code and empty-list rules deleted alongside it, which
-// were stricter than upstream and cost the extension nothing.
 func TestBlankCountryCodeStaysRejected(t *testing.T) {
 	blank, err := proto.Marshal(&georouter.GeoIPList{Entry: []*georouter.GeoIP{
 		{CountryCode: "cn", Cidr: []*georouter.CIDR{{Ip: []byte{1, 0, 0, 0}, Prefix: 8}}},
@@ -268,14 +214,6 @@ func TestBlankCountryCodeStaysRejected(t *testing.T) {
 	}
 }
 
-// The other half of what 042a3785d deleted: an entry that names a code but
-// carries no members. Restoring that rejection used to pass the whole suite,
-// which meant nothing recorded the decision either way.
-//
-// Upstream builds a matcher from the empty list and it matches nothing --
-// `trie.NewDomainSet()` returns nil for an empty trie and `Has` nil-guards
-// (component/trie/domain_set.go:75-77); `NewGeoIPMatcher(nil)` constructs. An
-// empty category is an empty result, not a broken file.
 func TestEmptyCategoriesAreAcceptedNotRejected(t *testing.T) {
 	ip, err := proto.Marshal(&georouter.GeoIPList{Entry: []*georouter.GeoIP{
 		{CountryCode: "cn", Cidr: []*georouter.CIDR{{Ip: []byte{1, 0, 0, 0}, Prefix: 8}}},
@@ -302,28 +240,14 @@ func TestEmptyCategoriesAreAcceptedNotRejected(t *testing.T) {
 	}
 }
 
-// A defect inside one category must not refuse the file. Upstream resolves a .dat
-// by finding the FIRST entry whose code matches the code that was asked for
-// (component/geodata/standard/standard.go:38-44) and builds a matcher from that
-// entry alone, so `NewGeoIPMatcher`'s "invalid IP" (condition.go:162-165) fails
-// `us` and leaves `cn` working; on the geosite side the succinct matcher iOS uses
-// by default (geoSiteMatcher = "succinct", utils.go:16 and :137-141) has no
-// default branch in its type switch (condition.go:67-88), so a domain type it does
-// not know is skipped without an error at all.
-//
-// An empty file is the same story: upstream reports "country %s not found" for the
-// code that was asked for, and only then.
-//
-// What these whole-file rejections did: one bad byte in a category nobody
-// references refused a .dat that the kernel would have loaded fine.
 func TestPerEntryDefectsDoNotRefuseTheWholeFile(t *testing.T) {
 	site := mustMarshalGeodata(t, &georouter.GeoSiteList{Entry: []*georouter.GeoSite{
 		{CountryCode: "cn", Domain: []*georouter.Domain{
 			{Type: georouter.Domain_Domain, Value: "example.cn"},
 		}},
 		{CountryCode: "broken", Domain: []*georouter.Domain{
-			{Type: georouter.Domain_Type(99), Value: "example.invalid"}, // unknown type
-			{Type: georouter.Domain_Full, Value: "   "},                 // unusable value
+			{Type: georouter.Domain_Type(99), Value: "example.invalid"},
+			{Type: georouter.Domain_Full, Value: "   "},
 		}},
 	}})
 	if err := ValidateGeodataForIOS("geosite", "dat", writeGeodataFixture(t, site)); err != nil {
@@ -333,15 +257,13 @@ func TestPerEntryDefectsDoNotRefuseTheWholeFile(t *testing.T) {
 	ip := mustMarshalGeodata(t, &georouter.GeoIPList{Entry: []*georouter.GeoIP{
 		{CountryCode: "cn", Cidr: []*georouter.CIDR{{Ip: []byte{1, 0, 0, 0}, Prefix: 8}}},
 		{CountryCode: "broken", Cidr: []*georouter.CIDR{
-			{Ip: []byte{1, 2, 3}, Prefix: 8}, // not a 4- or 16-byte address
+			{Ip: []byte{1, 2, 3}, Prefix: 8},
 		}},
 	}})
 	if err := ValidateGeodataForIOS("geoip", "dat", writeGeodataFixture(t, ip)); err != nil {
 		t.Errorf("one bad category refused the whole GeoIP.dat: %v", err)
 	}
 
-	// A list with no entries is content, and content-wise it is fine: upstream
-	// only fails when a code is looked up and missing.
 	if err := validateGeoIPDat(mustMarshalGeodata(t, &georouter.GeoIPList{})); err != nil {
 		t.Errorf("a GeoIP.dat carrying no entries was refused: %v", err)
 	}
@@ -349,24 +271,11 @@ func TestPerEntryDefectsDoNotRefuseTheWholeFile(t *testing.T) {
 		t.Errorf("a GeoSite.dat carrying no entries was refused: %v", err)
 	}
 
-	// The boundary that stays, stated out loud so it is not mistaken for a
-	// content rule: an empty list encodes to zero bytes, and a zero-length FILE
-	// is refused by the shared read helper (resource_file.go:21) before any
-	// format is known, for providers as much as geodata. That guard is stricter
-	// than upstream -- proto.Unmarshal of nothing yields an empty list and every
-	// lookup then reports "not found" -- and it is not platform-required either.
-	// It is kept deliberately, on the one ground the deleted content rules could
-	// not claim: the only file it can refuse is a file with no data in it, so it
-	// cannot falsely reject anything a user actually has. Deleting it belongs to
-	// an audit of the read path, not of geodata content.
 	if err := ValidateGeodataForIOS("geoip", "dat", writeGeodataFixture(t, nil)); err == nil {
 		t.Error("a zero-length file was accepted; the read-path guard is gone")
 	}
 }
 
-// The scoped entry point is where per-code content is judged, and it judges it by
-// running upstream's own constructor -- the same call the runtime makes -- so it
-// cannot be stricter than the kernel by construction.
 func TestScopedValidationJudgesOnlyTheRequestedCodes(t *testing.T) {
 	ip := writeGeodataFixture(t, mustMarshalGeodata(t, &georouter.GeoIPList{Entry: []*georouter.GeoIP{
 		{CountryCode: "cn", Cidr: []*georouter.CIDR{{Ip: []byte{1, 0, 0, 0}, Prefix: 8}}},
@@ -384,9 +293,6 @@ func TestScopedValidationJudgesOnlyTheRequestedCodes(t *testing.T) {
 		t.Errorf("the error does not name the code that failed: %v", err)
 	}
 
-	// Upstream normalizes before it looks up: EqualFold on the code
-	// (standard.go:39), leading '!' and an '@attr' suffix stripped by
-	// LoadGeoSiteMatcher (utils.go:74-87).
 	site := writeGeodataFixture(t, mustMarshalGeodata(t, &georouter.GeoSiteList{Entry: []*georouter.GeoSite{
 		{CountryCode: "cn", Domain: []*georouter.Domain{{Type: georouter.Domain_Domain, Value: "example.cn"}}},
 	}}))
@@ -400,15 +306,6 @@ func TestScopedValidationJudgesOnlyTheRequestedCodes(t *testing.T) {
 		t.Error("a code the file does not carry was accepted")
 	}
 
-	// And it tracks the matchers exactly, including where they are lenient. An
-	// unknown domain type falls through succinct's type switch with no default
-	// and is silently skipped (condition.go:67-88); an invalid regex fails BOTH
-	// constructors (both compile it via matcherTypeMap). Same file, same code
-	// path, two different answers -- which is the point of asking the
-	// constructors instead of writing our own rule. The both-fail vector is a
-	// bad regex rather than a bad trie value, because a trie-invalid value like
-	// "   " is exactly what mph accepts -- see
-	// TestScopedValidationAcceptsWhatEitherRuntimeMatcherAccepts.
 	mixed := writeGeodataFixture(t, mustMarshalGeodata(t, &georouter.GeoSiteList{Entry: []*georouter.GeoSite{
 		{CountryCode: "skipped", Domain: []*georouter.Domain{
 			{Type: georouter.Domain_Type(99), Value: "example.invalid"},
@@ -423,8 +320,6 @@ func TestScopedValidationJudgesOnlyTheRequestedCodes(t *testing.T) {
 	if err := ValidateGeodataCodesForIOS("geosite", "dat", mixed, "broken"); err == nil {
 		t.Error("a value no matcher accepts was accepted")
 	}
-	// No codes named means no per-code opinion, which is what the unscoped entry
-	// point already promises.
 	if err := ValidateGeodataCodesForIOS("geoip", "dat", ip, "  "); err != nil {
 		t.Errorf("naming no codes still judged the file: %v", err)
 	}
@@ -439,25 +334,16 @@ func mustMarshalGeodata(t *testing.T, message proto.Message) []byte {
 	return encoded
 }
 
-// The runtime's geosite matcher is chosen by the user-facing `geosite-matcher:`
-// field (config.go:437 -> executor.go:422 -> SetSiteMatcher; "mph"/"hybrid"
-// selects NewMphMatcherGroup), and bind/hako neither strips nor reads that
-// field. So a preflight judging with ONE constructor can be stricter than the
-// kernel the user actually runs: the two disagree in both directions -- the
-// succinct trie refuses a value like "   " that mph accepts, and mph errors on
-// an unknown domain type that succinct silently skips. Acceptance is therefore
-// the UNION: a category passes if either constructor builds it, and fails only
-// when no matcher the runtime could choose would load it.
 func TestScopedValidationAcceptsWhatEitherRuntimeMatcherAccepts(t *testing.T) {
 	site := writeGeodataFixture(t, mustMarshalGeodata(t, &georouter.GeoSiteList{Entry: []*georouter.GeoSite{
 		{CountryCode: "succinct-only", Domain: []*georouter.Domain{
-			{Type: georouter.Domain_Type(99), Value: "example.invalid"}, // mph errors, succinct skips
+			{Type: georouter.Domain_Type(99), Value: "example.invalid"},
 		}},
 		{CountryCode: "mph-only", Domain: []*georouter.Domain{
-			{Type: georouter.Domain_Full, Value: "   "}, // succinct trie refuses, mph accepts
+			{Type: georouter.Domain_Full, Value: "   "},
 		}},
 		{CountryCode: "neither", Domain: []*georouter.Domain{
-			{Type: georouter.Domain_Regex, Value: "("}, // invalid regex fails both
+			{Type: georouter.Domain_Regex, Value: "("},
 		}},
 	}}))
 	if err := ValidateGeodataCodesForIOS("geosite", "dat", site, "succinct-only"); err != nil {
@@ -475,15 +361,6 @@ func TestScopedValidationAcceptsWhatEitherRuntimeMatcherAccepts(t *testing.T) {
 	}
 }
 
-// The App's verdict on an MMDB and the core's verdict must be the same
-// verdict.
-//
-// The App validates a candidate, publishes it atomically, and then rewrites
-// the download URLs away -- so a file the two layers disagree about is not a
-// retry, it is a profile whose GEOIP and IP-ASN rules build nothing after the
-// next extension start, with "validated and saved" on the record and no error
-// anywhere. maximumGeodataResourceBytes stays at 128 MiB because a .dat really
-// can be that big; an MMDB is held to the number component/mmdb opens it at.
 func TestTheAppValidatorAndTheCoreAgreeOnAnMMDB(t *testing.T) {
 	source, err := os.ReadFile(filepath.Join("..", "..", "component", "mmdb", "testdata", "country-a.mmdb"))
 	if err != nil {
@@ -498,12 +375,6 @@ func TestTheAppValidatorAndTheCoreAgreeOnAnMMDB(t *testing.T) {
 			t.Fatalf("%s: an ordinary database must be accepted by both, app=%v core=%v", kind, appAccepts, coreAccepts)
 		}
 
-		// Valid, and one byte past the ceiling: a real database at the front
-		// (the search tree and data section sit at the offsets its metadata
-		// names) and another copy at the end (where the metadata marker is
-		// found), with a hole between them. maxminddb opens it; the ceiling
-		// is the only thing that refuses it, which is what makes a
-		// disagreement visible.
 		oversized := filepath.Join(t.TempDir(), "oversized.mmdb")
 		file, err := os.Create(oversized)
 		if err != nil {
@@ -533,12 +404,6 @@ func TestTheAppValidatorAndTheCoreAgreeOnAnMMDB(t *testing.T) {
 	}
 }
 
-// An oversized MMDB is refused by its SIZE, before it is read.
-//
-// The ceiling used to be chosen after the read: everything came in under the
-// .dat allowance and an MMDB over its own limit was rejected afterwards, so a
-// hundred-megabyte file was read in full -- and the caller was still holding
-// its own copy -- before anything said no. The format decides the bound now.
 func TestAnOversizedMMDBIsRefusedBeforeItIsRead(t *testing.T) {
 	directory := t.TempDir()
 	oversized := filepath.Join(directory, "Country.mmdb")
@@ -546,7 +411,6 @@ func TestAnOversizedMMDBIsRefusedBeforeItIsRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Sparse: the point is the size the file reports, not spending the disk.
 	if err := file.Truncate(mmdb.MaxDatabaseBytes + 1); err != nil {
 		file.Close()
 		t.Fatal(err)
@@ -565,10 +429,6 @@ func TestAnOversizedMMDBIsRefusedBeforeItIsRead(t *testing.T) {
 		}
 	}
 
-	// The other direction: a .dat of the same size is NOT refused for its
-	// size -- it fails to parse instead, which is a different sentence, and
-	// without this the test would pass just as happily if both ceilings were
-	// the smaller one.
 	dat := filepath.Join(directory, "GeoSite.dat")
 	if err := os.Rename(oversized, dat); err != nil {
 		t.Fatal(err)

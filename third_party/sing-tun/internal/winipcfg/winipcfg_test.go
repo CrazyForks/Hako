@@ -3,21 +3,6 @@
  * Copyright (C) 2019-2022 WireGuard LLC. All Rights Reserved.
  */
 
-/*
-
-Some tests in this file require:
-
-- A dedicated network adapter
-	Any network adapter will do. It may be virtual (WireGuardNT, Wintun,
-	etc.). The adapter name must contain string "winipcfg_test".
-	Tests will add, remove, flush DNS servers, change adapter IP address, manipulate
-	routes etc.
-	The adapter will not be returned to previous state, so use an expendable one.
-
-- Elevation
-	Run go test as Administrator
-
-*/
 
 package winipcfg
 
@@ -32,10 +17,9 @@ import (
 )
 
 const (
-	testInterfaceMarker = "winipcfg_test" // The interface we will use for testing must contain this string in its name
+	testInterfaceMarker = "winipcfg_test"
 )
 
-// TODO: Add IPv6 tests.
 var (
 	nonexistantIPv4ToAdd      = netip.MustParsePrefix("172.16.1.114/24")
 	nonexistentRouteIPv4ToAdd = RouteData{
@@ -148,7 +132,6 @@ func TestIPInterface(t *testing.T) {
 	for _, i := range ifcs {
 		_, err := i.LUID.IPInterface(windows.AF_INET)
 		if err == windows.ERROR_NOT_FOUND {
-			// Ignore isatap and similar adapters without IPv4.
 			continue
 		}
 		if err != nil {

@@ -9,10 +9,6 @@ import (
 )
 
 func providerUpdateIntervalSeconds(raw any) (int64, error) {
-	// Mihomo defines this field by converting seconds to time.Duration. iOS
-	// moves HTTP refresh scheduling into the App, but the resource plan must
-	// keep the same representable domain instead of accepting a value that
-	// would wrap in the upstream provider implementation.
 	return providerDurationUnits(raw, time.Second, "provider interval", "second")
 }
 
@@ -30,9 +26,6 @@ func providerDurationUnits(raw any, unit time.Duration, label, unitLabel string)
 	return value, nil
 }
 
-// providerNonPositiveDurationAllowedUnits mirrors fields for which upstream
-// gives non-positive values a defined default/disable meaning, while still
-// rejecting positive values that overflow time.Duration during conversion.
 func providerNonPositiveDurationAllowedUnits(raw any, unit time.Duration, label, unitLabel string) (int64, error) {
 	value, err := providerIntegerUnits(raw, label, unitLabel)
 	if err != nil {

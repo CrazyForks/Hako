@@ -19,8 +19,6 @@ package header
 import "strconv"
 
 func _() {
-	// An "invalid array index" compiler error signifies that the constant values have changed.
-	// Re-run the stringer command to generate them again.
 	var x [1]struct{}
 	_ = x[ndpSourceLinkLayerAddressOptionType-1]
 	_ = x[ndpTargetLinkLayerAddressOptionType-2]

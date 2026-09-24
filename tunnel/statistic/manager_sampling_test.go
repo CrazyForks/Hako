@@ -9,20 +9,6 @@ import (
 	"github.com/TokenPLS/Hako/common/atomic"
 )
 
-// The rate sampler used to be an unconditional 1 Hz ticker started at package init and never
-// stopped: it ran for the life of every process importing this package, with no reader and no
-// tunnel required. sing-box has no process-lifetime accounting ticker at all -- its equivalents
-// live inside clash-api HTTP handlers with defer tick.Stop(), so they exist only while a client is
-// attached.
-//
-// Two things are worth testing, and the second one is the reason this change was ranked last and
-// nearly skipped:
-//
-//   - the sampler stops when nobody reads, and a read restarts it;
-//   - resuming does NOT publish the traffic that accumulated while it was stopped. Publishing it
-//     would display a whole idle span as one second of traffic -- a rate spike that never
-//     happened. A naive "pause the ticker" implementation has exactly that bug, which is why
-//     pause-gating this was explicitly rejected earlier.
 
 func waitUntil(t *testing.T, deadline time.Duration, condition func() bool) bool {
 	t.Helper()
@@ -40,9 +26,7 @@ func TestResumingDoesNotPublishTheIdleAccumulation(t *testing.T) {
 	manager := newTestManager()
 	go manager.handle()
 
-	// Nobody has read a rate, so the sampler is idle from the start. Push a large amount of
-	// traffic: this is the accumulation that must never be published as one second's worth.
-	const idleBytes = 500 << 20 // 500 MiB, far more than any real second
+	const idleBytes = 500 << 20
 	manager.PushUploaded("direct", idleBytes)
 	manager.PushDownloaded("direct", idleBytes)
 	time.Sleep(1500 * time.Millisecond)
@@ -52,8 +36,6 @@ func TestResumingDoesNotPublishTheIdleAccumulation(t *testing.T) {
 			"sampling at all", up, down)
 	}
 
-	// Now read, which wakes the sampler. The 500 MiB accumulated while it was stopped must be
-	// discarded rather than published.
 	manager.Now()
 
 	if !waitUntil(t, 3*time.Second, func() bool {
@@ -62,7 +44,6 @@ func TestResumingDoesNotPublishTheIdleAccumulation(t *testing.T) {
 		t.Fatalf("the sampler did not clear the idle accumulation: uploadTemp=%d", manager.uploadTemp.Load())
 	}
 
-	// Give it a couple of sampling ticks and confirm no spike was ever published.
 	time.Sleep(2500 * time.Millisecond)
 	if up := manager.uploadBlip.Load(); up >= idleBytes {
 		t.Fatalf("published %d bytes/s after resuming; the whole idle span was reported as one "+
@@ -77,7 +58,6 @@ func TestSamplerPublishesRealTrafficWhileBeingRead(t *testing.T) {
 	manager := newTestManager()
 	go manager.handle()
 
-	// Wake it and keep it awake, the way a once-per-second poller does.
 	manager.Now()
 
 	const perSecond = 3 << 20
@@ -100,13 +80,10 @@ func TestSamplerStopsWhenNobodyReads(t *testing.T) {
 	manager.Now()
 	manager.PushUploaded("direct", 4<<20)
 
-	// Wait for a published rate, so we know it was running.
 	if !waitUntil(t, 4*time.Second, func() bool { return manager.uploadBlip.Load() > 0 }) {
 		t.Fatal("never published a rate while being read")
 	}
 
-	// Stop reading for longer than the idle timeout, then push traffic. A stopped sampler leaves
-	// it in temp; a running one would move it into blip.
 	time.Sleep(sampleIdleTimeout + time.Second)
 	manager.uploadTemp.Store(0)
 	manager.PushUploaded("direct", 7<<20)
@@ -118,9 +95,6 @@ func TestSamplerStopsWhenNobodyReads(t *testing.T) {
 	}
 }
 
-// TestSnapshotDoesNotWakeTheSampler: Snapshot returns totals and connections, not rates. Waking
-// the sampler for it would put a 1 Hz ticker back for every caller that never looks at a rate,
-// which is most of them.
 func TestSnapshotDoesNotWakeTheSampler(t *testing.T) {
 	manager := newTestManager()
 	go manager.handle()
@@ -137,8 +111,6 @@ func TestSnapshotDoesNotWakeTheSampler(t *testing.T) {
 	}
 }
 
-// newTestManager builds a manager with its own counters so tests never race the package-level
-// DefaultManager, whose sampler is already running.
 func newTestManager() *Manager {
 	return &Manager{
 		uploadTemp:         atomic.NewInt64(0),

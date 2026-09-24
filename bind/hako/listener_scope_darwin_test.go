@@ -123,8 +123,6 @@ func TestListenerScopeBindsLoopbackListenerToLoopbackInterface(t *testing.T) {
 	if got := boundInterfaceOf(t, tcpListenerRaw(t, listener), false); got != loopback {
 		t.Fatalf("IP_BOUND_IF = %d, want loopback index %d", got, loopback)
 	}
-	// The bind must not cost the listener its reachability on the interface
-	// loopback traffic actually arrives on.
 	dialAndAccept(t, listener, listener.Addr().String())
 }
 
@@ -166,10 +164,6 @@ func TestListenerScopeBindsLoopbackPacketConn(t *testing.T) {
 }
 
 func TestListenerScopeLeavesNonLoopbackListenersUnbound(t *testing.T) {
-	// Function-level on purpose: the wildcard path through the full inbound
-	// face gains companions, whose primary is wrapped out of SyscallConn
-	// reach. The hook alone decides binding, so it is what must stay silent
-	// for a non-loopback address.
 	lc := net.ListenConfig{Control: listenerScopeControl}
 	listener, err := lc.Listen(context.Background(), "tcp4", "0.0.0.0:0")
 	if err != nil {
@@ -259,14 +253,12 @@ func TestListenerScopeCompanionCloseIsIdempotentAndReleasesPorts(t *testing.T) {
 	if err := listener.Close(); err != nil {
 		t.Fatalf("first close: %v", err)
 	}
-	_ = listener.Close() // second close must not panic
+	_ = listener.Close()
 
 	if _, err := listener.Accept(); !errors.Is(err, net.ErrClosed) {
 		t.Fatalf("Accept after close = %v, want net.ErrClosed", err)
 	}
 
-	// Every socket the wrapped listener owned must be released, or the next
-	// start of the same configuration fails on its own leftovers.
 	relisten, err := lc.Listen(context.Background(), "tcp", ":"+port)
 	if err != nil {
 		t.Fatalf("relisten after close: %v", err)
@@ -299,8 +291,6 @@ func TestNewServiceInstallsListenerScopeHooksByProcessPlacement(t *testing.T) {
 }
 
 func TestListenerScopeSkipsNonHostPortAddresses(t *testing.T) {
-	// The controller's unix-socket listener rides the same inbound face; an
-	// address that does not split into host:port must pass through untouched.
 	if err := listenerScopeControl("unix", "/tmp/hako-test.sock", nil); err != nil {
 		t.Fatalf("listenerScopeControl on a unix address: %v", err)
 	}

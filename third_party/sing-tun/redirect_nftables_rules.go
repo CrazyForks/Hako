@@ -733,7 +733,7 @@ func (r *autoRedirect) nftablesCreateMark(nft *nftables.Conn, table *nftables.Ta
 			&expr.Meta{
 				Key:      expr.MetaKeyMARK,
 				Register: 1,
-			}, // output meta mark set myMark ct mark set meta mark
+			},
 			&expr.Ct{
 				Key:            expr.CtKeyMARK,
 				Register:       1,
@@ -985,9 +985,6 @@ func (r *autoRedirect) nftablesCreateDNSHijackRulesForFamily(
 		},
 	}
 	if chain.Hooknum == nftables.ChainHookOutput {
-		// It looks like we can't hijack DNS requests sent to loopback.
-		// https://serverfault.com/questions/363899/iptables-dnat-from-loopback
-		// and tproxy is not available in output
 		exprs = append(exprs,
 			&expr.Meta{
 				Key:      expr.MetaKeyOIFNAME,

@@ -9,12 +9,6 @@ import (
 	"github.com/TokenPLS/Hako/tunnel/statistic"
 )
 
-// The widget shows bytes and connections in three buckets -- proxy, direct, reject --
-// by the outbound a connection finally left through. The bucket is decided once, when
-// the tracker is built, from the same reserved-name table the proxy-only counters have
-// used since, so the widget's proxy bytes are the release evidence's proxy
-// bytes. The per-byte path then adds to a bucket picked by a switch, which is cheaper
-// than the map lookup by name it replaces.
 
 func trackedConn(t *testing.T, m *statistic.Manager, adapter C.ProxyAdapter) C.Conn {
 	t.Helper()
@@ -84,8 +78,6 @@ func TestBytesLandInTheBucketOfTheFinalOutbound(t *testing.T) {
 	}
 }
 
-// Bytes pushed through a tracker use the bucket decided at construction, not a lookup
-// per push.
 func TestTrackerBytesUseTheBucketDecidedAtConstruction(t *testing.T) {
 	m := statistic.NewManagerForTest()
 	client, server := net.Pipe()

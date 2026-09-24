@@ -1,7 +1,5 @@
 //go:build with_quic
 
-// Adapted from sing-box common/networkquality at
-// 4bccd6fae19526425acf76efc263333c7aea6fce (GPL-3.0-or-later).
 package networkquality
 
 import (
@@ -30,8 +28,6 @@ func NewHTTP3MeasurementClientFactory(dialer N.Dialer) (MeasurementClientFactory
 }
 
 func newHTTP3MeasurementClientFactory(dialer N.Dialer, tlsConfig *metaTLS.Config) (MeasurementClientFactory, error) {
-	// HTTP/3 multiplexes streams over one QUIC connection. The HTTP/1.1-only
-	// singleConnection and disableKeepAlives knobs therefore do not apply.
 	return func(connectEndpoint string, _, _ bool, readCounters, writeCounters []N.CountFunc) (*stdHTTP.Client, error) {
 		transport := &http3.Transport{
 			TLSClientConfig:        cloneTLSConfig(tlsConfig),
@@ -85,9 +81,6 @@ func newHTTP3MeasurementClientFactory(dialer N.Dialer, tlsConfig *metaTLS.Config
 	}, nil
 }
 
-// mihomo's pinned quic-go intentionally uses metacubex/http and
-// metacubex/tls. This adapter keeps the copied libbox measurement algorithm on
-// net/http while reusing mihomo's one QUIC stack instead of adding a second.
 type standardHTTP3RoundTripper struct {
 	transport *http3.Transport
 }

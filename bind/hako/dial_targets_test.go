@@ -7,10 +7,6 @@ import (
 	"testing"
 )
 
-// The provider's own payload. Its node is NOT in `proxies:`, which is the whole point:
-// tunnel.Proxies() is built from the `proxies:` section and the groups, and a provider's
-// members go to providersMap instead (config/config.go). A reader whose nodes all come
-// from a subscription has an empty answer unless the providers are walked too.
 const dialTargetsProviderPayload = `proxies:
   - {name: fromProvider, type: socks5, server: 10.0.0.2, port: 1081}
 `
@@ -32,8 +28,6 @@ rules:
   - MATCH,Top
 `
 
-// startDialTargetsCore stages the provider payload where the running core will read it,
-// then starts a core on the configuration above.
 func startDialTargetsCore(t *testing.T) {
 	t.Helper()
 	options := testOptions(t)
@@ -73,12 +67,6 @@ func decodeDialTargets(t *testing.T, payload string) map[string]map[string]any {
 	return byName
 }
 
-// The case this exists for: a reader's DNS probe wants every host this configuration will
-// dial, and today it re-reads the working config and hand-parses each provider file to get
-// them. Addr() is what the adapter itself dials, so it cannot disagree with the dialer the
-// way a YAML scan for `server:` can -- that scan has to guess a field per dialect (vmess
-// vnext[].address, wireguard peers, the ssr/snell aliases) and silently misses a batch when
-// it guesses wrong.
 func TestDialTargetsNamesEveryNodeIncludingAProvidersOwn(t *testing.T) {
 	startDialTargetsCore(t)
 	targets := decodeDialTargets(t, DialTargetsJSON())
@@ -115,10 +103,6 @@ func TestDialTargetsNamesEveryNodeIncludingAProvidersOwn(t *testing.T) {
 	}
 }
 
-// A node dialled through another node is reachable, but its own host is resolved by that
-// upstream, not by this device -- so a local DNS probe against it reads as a false red. The
-// row has to carry the fact that makes the probe decision, or the caller is forced to parse
-// a second document and join it by name.
 func TestADialerProxyNodeSaysSoOnItsOwnRow(t *testing.T) {
 	startDialTargetsCore(t)
 	targets := decodeDialTargets(t, DialTargetsJSON())
@@ -135,9 +119,6 @@ func TestADialerProxyNodeSaysSoOnItsOwnRow(t *testing.T) {
 	}
 }
 
-// Groups, DIRECT and REJECT are in the same table and have no address of their own. Emitting
-// them would put rows in front of a prober that it can only ever skip, and "no addr" is not
-// a target -- it is the absence of one.
 func TestDialTargetsLeavesOutWhatHasNoAddressToDial(t *testing.T) {
 	startDialTargetsCore(t)
 	targets := decodeDialTargets(t, DialTargetsJSON())
@@ -148,9 +129,6 @@ func TestDialTargetsLeavesOutWhatHasNoAddressToDial(t *testing.T) {
 	}
 }
 
-// Map iteration in Go is randomised. A list that reorders itself between calls reads as
-// change to anything that diffs it, and a reader watching a probe run would see rows move
-// under them for no reason.
 func TestDialTargetsAreInAStableOrder(t *testing.T) {
 	startDialTargetsCore(t)
 	first := DialTargetsJSON()

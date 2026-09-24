@@ -53,10 +53,10 @@ type FWP_BYTE_BLOB struct {
 }
 
 type FWPM_SUBLAYER0 struct {
-	SubLayerKey  windows.GUID // Windows type: GUID
+	SubLayerKey  windows.GUID
 	DisplayData  FWPM_DISPLAY_DATA0
 	Flags        uint32
-	ProviderKey  *windows.GUID // Windows type: *GUID
+	ProviderKey  *windows.GUID
 	ProviderData FWP_BYTE_BLOB
 	Weight       uint16
 }
@@ -69,7 +69,7 @@ type FWP_VALUE0 struct {
 type FWP_CONDITION_VALUE0 FWP_VALUE0
 
 type FWPM_FILTER_CONDITION0 struct {
-	FieldKey       windows.GUID // Windows type: GUID
+	FieldKey       windows.GUID
 	MatchType      uint32
 	ConditionValue FWP_CONDITION_VALUE0
 }

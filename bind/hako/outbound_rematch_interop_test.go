@@ -117,9 +117,6 @@ func TestControlledRematchHelperProcess(t *testing.T) {
 		t.Fatalf("SetDeadline() error = %v", err)
 	}
 	if _, err := fmt.Fprintf(client, "GET / HTTP/1.1\r\nHost: controlled-rematch\r\nConnection: close\r\n\r\n"); err != nil {
-		// Cycle detection only needs the connection metadata, so the Core may
-		// fail closed before net.Pipe delivers the synthetic HTTP request.
-		// That early close is the desired outcome for the cycle case.
 		if mode != "cycle" || (!errors.Is(err, io.ErrClosedPipe) && !errors.Is(err, net.ErrClosed)) {
 			t.Fatalf("write request: %v", err)
 		}

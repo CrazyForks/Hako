@@ -12,11 +12,6 @@ import (
 	"github.com/TokenPLS/Hako/config"
 )
 
-// systemDNSSubstitutes is SetupOptions.SystemDNSServerLines, parsed: the resolvers that take
-// the place of every `system` / `dhcp://` nameserver entry inside a packet tunnel (issue #21).
-// Nil or empty means no substitution -- those entries are stripped, as they were before the
-// option existed. Set by Setup, read by the configuration pipeline and by the plan, so the
-// two report the same thing for the same process.
 var systemDNSSubstitutes atomic.Pointer[[]string]
 
 func systemDNSServerSubstitutes() []string {
@@ -26,9 +21,6 @@ func systemDNSServerSubstitutes() []string {
 	return nil
 }
 
-// parseSystemDNSServerLines accepts one resolver per line -- `ip`, `ip:port` or `[v6]:port` --
-// ignores blank lines, and refuses anything else with the line number, so a bad line fails
-// Setup instead of reaching mihomo as a nameserver it would parse as udp://hostname.
 func parseSystemDNSServerLines(lines string) ([]string, error) {
 	var out []string
 	for i, line := range strings.Split(lines, "\n") {
@@ -58,8 +50,6 @@ func parseSystemDNSServerLines(lines string) ([]string, error) {
 	return out, nil
 }
 
-// substituteAddr is the address inside a parsed line, or the zero Addr for a shape the
-// parser never emits.
 func substituteAddr(line string) netip.Addr {
 	if ap, err := netip.ParseAddrPort(line); err == nil {
 		return ap.Addr()
@@ -68,9 +58,6 @@ func substituteAddr(line string) netip.Addr {
 	return addr
 }
 
-// tunnelPrefixesFromRaw is what this configuration makes the tunnel's own: the fake-ip
-// ranges (parseTun derives the tun address, and so the NEDNSSettings address, from
-// fake-ip-range) and the tun IPv6 addresses. tun.inet4-address is not a raw field upstream.
 func tunnelPrefixesFromRaw(raw *config.RawConfig) []netip.Prefix {
 	prefixes := append([]netip.Prefix(nil), raw.Tun.Inet6Address...)
 	for _, s := range []string{raw.DNS.FakeIPRange, raw.DNS.FakeIPRange6} {
@@ -81,8 +68,6 @@ func tunnelPrefixesFromRaw(raw *config.RawConfig) []netip.Prefix {
 	return prefixes
 }
 
-// tunnelPrefixesFromRoot is tunnelPrefixesFromRaw over the plan's document tree, so the
-// plan drops exactly the substitutes the runtime drops.
 func tunnelPrefixesFromRoot(root map[string]any) []netip.Prefix {
 	var prefixes []netip.Prefix
 	add := func(v any) {
@@ -102,10 +87,6 @@ func tunnelPrefixesFromRoot(root map[string]any) []netip.Prefix {
 	return prefixes
 }
 
-// usableSystemResolverSubstitutes drops every supplied resolver that is the tunnel itself --
-// by the product's default ranges or by this configuration's own. A list that names the
-// tunnel was read after the tunnel's DNS settings applied; substituting it would reproduce
-// issue #21 in a new shape, so those entries are reported and ignored.
 func usableSystemResolverSubstitutes(supplied []string, prefixes []netip.Prefix) (usable, dropped []string) {
 	for _, line := range supplied {
 		addr := substituteAddr(line)
@@ -128,11 +109,10 @@ func usableSubstitutesForRoot(root map[string]any) []string {
 	return usable
 }
 
-// systemResolverSubstitution records one system/dhcp entry the substitution replaced.
 type systemResolverSubstitution struct {
-	field string // the dns.* key
-	key   string // the policy key, for the two policy maps
-	entry string // the entry that was replaced, as written
+	field string
+	key   string
+	entry string
 }
 
 func (s systemResolverSubstitution) where() string {
@@ -142,12 +122,6 @@ func (s systemResolverSubstitution) where() string {
 	return s.field
 }
 
-// substituteSystemResolvers replaces, in place, every `system` / `dhcp://` entry in the seven
-// resolver slots the strip reaches (stripNEIncompatibleNameservers) with the usable supplied
-// resolvers. One expansion per list, at the first such entry: a second system-class entry in
-// the same list names the same resolvers and is dropped rather than expanded twice. A policy
-// whose entries were all system therefore keeps its domains on the system resolvers, where
-// the strip alone would have failed them closed with rcode://name_error.
 func substituteSystemResolvers(raw *config.RawConfig, usable []string) []systemResolverSubstitution {
 	if len(usable) == 0 {
 		return nil

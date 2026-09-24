@@ -358,21 +358,9 @@ type RawExperimental struct {
 type RawProfile struct {
 	StoreSelected bool `yaml:"store-selected" json:"store-selected"`
 	StoreFakeIP   bool `yaml:"store-fake-ip" json:"store-fake-ip"`
-	// StoreFakeIPSet reports whether the document named store-fake-ip, which
-	// a bool cannot carry: once decoded, an absent key and an explicit false
-	// are the same value. A platform that wants to default the field on --
-	// Hako does, so fake-ip mappings survive a Network Extension restart --
-	// has to distinguish them or it silently overrides a privacy choice, and
-	// the only way to ask afterwards was to parse the whole document a second
-	// time. On a 578KB profile that was 18ms of every tunnel start.
 	StoreFakeIPSet bool `yaml:"-" json:"-"`
 }
 
-// UnmarshalYAML fills RawProfile as the plain decode would -- defaults already
-// in place survive keys the document omits -- and records whether this block
-// named store-fake-ip. A merge key counts as naming it: resolving the anchor
-// would mean walking the document again, and assuming presence keeps
-// mihomo's own default rather than overriding what an anchor may have set.
 func (p *RawProfile) UnmarshalYAML(node *yaml.Node) error {
 	type plain RawProfile
 	if err := node.Decode((*plain)(p)); err != nil {
@@ -644,11 +632,6 @@ func UnmarshalRawConfig(buf []byte) (*RawConfig, error) {
 	return rawCfg, nil
 }
 
-// StartupProbe, when set, is told the name of each section of ParseRawConfig
-// as it completes. It exists for one consumer -- the iOS Network Extension,
-// which has to explain a startup budget measured in milliseconds -- and is nil
-// everywhere else, so the parse path pays one pointer test per section. A
-// probe must be cheap and must not touch the configuration.
 var StartupProbe func(section string)
 
 func probe(section string) {

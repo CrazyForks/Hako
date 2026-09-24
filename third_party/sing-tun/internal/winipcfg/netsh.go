@@ -37,7 +37,6 @@ func runNetsh(cmds []string) error {
 		io.WriteString(stdin, strings.Join(append(cmds, "exit\r\n"), "\r\n"))
 	}()
 	output, err := cmd.CombinedOutput()
-	// Horrible kludges, sorry.
 	cleaned := bytes.ReplaceAll(output, []byte{'\r', '\n'}, []byte{'\n'})
 	cleaned = bytes.ReplaceAll(cleaned, []byte("netsh>"), []byte{})
 	cleaned = bytes.ReplaceAll(cleaned, []byte("There are no Domain Name Servers (DNS) configured on this computer."), []byte{})
@@ -109,7 +108,6 @@ func (luid LUID) fallbackSetDNSDomain(domain string) error {
 }
 
 func (luid LUID) fallbackDisableDNSRegistration() error {
-	// the DNS registration setting is shared for both IPv4 and IPv6
 	ipif, err := luid.IPInterface(windows.AF_INET)
 	if err != nil {
 		return err

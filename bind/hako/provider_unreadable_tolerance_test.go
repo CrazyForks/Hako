@@ -10,13 +10,6 @@ import (
 	C "github.com/TokenPLS/Hako/constant"
 )
 
-// substoreShapedPayload is the shape the reader's Sub-Store link served: a
-// proxy list in some other client's dialect. No `proxies:` mapping and no
-// `://` anywhere, so neither YAML nor the share-link reader can make anything
-// of it -- and neither can upstream's convert.ConvertsV2Ray, which is the
-// point: what this core refuses here, mihomo refuses at Initial() too, so a
-// verbatim staged copy can never hand the core a node that skipped the
-// egress strip.
 const substoreShapedPayload = "KyCloud-HK01 = ss, 198.51.100.20, 8388, " +
 	"encrypt-method=aes-256-gcm, password=secret\n" +
 	"KyCloud-SG02 = ss, 198.51.100.21, 8388, " +

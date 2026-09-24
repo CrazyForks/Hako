@@ -8,11 +8,6 @@ import (
 	"testing"
 )
 
-// Issue #21: a `system` nameserver inside a packet tunnel answers NXDOMAIN because the
-// only file the resolver may read lists the tunnel's own address. The App now reads the
-// physical resolvers BEFORE the tunnel's DNS settings apply and hands them to Setup; it
-// reads them through the core so that no client target needs libresolv or a modulemap,
-// and so the file is the one mihomo's own system nameserver reads (dns/system_posix.go).
 
 func TestReadResolvConfKeepsUsableNameserversInFileOrder(t *testing.T) {
 	const text = `#
@@ -40,7 +35,7 @@ options ndots:1
 }
 
 func TestSystemResolverLinesReadsTheFileMihomoReadsAndIsEmptyWithoutIt(t *testing.T) {
-	stubPlatformResolvers(t, nil, nil) // the library has nothing: the file answers
+	stubPlatformResolvers(t, nil, nil)
 	stubRoutes(t, 11, nil, map[string]int{"119.29.29.29": 11, "223.5.5.5": 11}, nil)
 	withResolvConf(t, "nameserver 119.29.29.29\nnameserver 223.5.5.5\n")
 	if got, want := SystemResolverLines(), "119.29.29.29\n223.5.5.5"; got != want {
@@ -53,14 +48,11 @@ func TestSystemResolverLinesReadsTheFileMihomoReadsAndIsEmptyWithoutIt(t *testin
 }
 
 func TestSystemResolverLinesReadsUpstreamsFile(t *testing.T) {
-	// dns/system_posix.go:13 -- the same file, so the export sees exactly what a
-	// `system` nameserver would have seen, not a second opinion.
 	if resolvConfPath != "/etc/resolv.conf" {
 		t.Fatalf("resolvConfPath = %q, want /etc/resolv.conf", resolvConfPath)
 	}
 }
 
-// withResolvConf points the export at a fixture file for one test.
 func withResolvConf(t *testing.T, text string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "resolv.conf")

@@ -8,15 +8,11 @@ import (
 	"golang.org/x/crypto/cryptobyte"
 )
 
-// Only implemented client-side, for server certificates.
-// Alternate certificate message formats (https://datatracker.ietf.org/doc/html/rfc7250) are not
-// supported.
-// https://datatracker.ietf.org/doc/html/rfc8879
 type utlsCompressedCertificateMsg struct {
 	raw []byte
 
 	algorithm                    uint16
-	uncompressedLength           uint32 // uint24
+	uncompressedLength           uint32
 	compressedCertificateMessage []byte
 }
 
@@ -44,7 +40,7 @@ func (m *utlsCompressedCertificateMsg) unmarshal(data []byte) bool {
 	*m = utlsCompressedCertificateMsg{raw: data}
 	s := cryptobyte.String(data)
 
-	if !s.Skip(4) || // message type and uint24 length field
+	if !s.Skip(4) ||
 		!s.ReadUint16(&m.algorithm) ||
 		!s.ReadUint24(&m.uncompressedLength) ||
 		!readUint24LengthPrefixed(&s, &m.compressedCertificateMessage) {
@@ -65,7 +61,7 @@ func (m *encryptedExtensionsMsg) utlsUnmarshal(extension uint16, extData cryptob
 		m.utls.hasApplicationSettings = true
 		m.utls.applicationSettings = []byte(extData)
 	}
-	return true // success/unknown extension
+	return true
 }
 
 type utlsClientEncryptedExtensionsMsg struct {
@@ -108,7 +104,7 @@ func (m *utlsClientEncryptedExtensionsMsg) unmarshal(data []byte) bool {
 	s := cryptobyte.String(data)
 
 	var extensions cryptobyte.String
-	if !s.Skip(4) || // message type and uint24 length field
+	if !s.Skip(4) ||
 		!s.ReadUint16LengthPrefixed(&extensions) || !s.Empty() {
 		return false
 	}
@@ -126,7 +122,6 @@ func (m *utlsClientEncryptedExtensionsMsg) unmarshal(data []byte) bool {
 			m.hasApplicationSettings = true
 			m.applicationSettings = []byte(extData)
 		default:
-			// Unknown extensions are illegal in EncryptedExtensions.
 			return false
 		}
 	}

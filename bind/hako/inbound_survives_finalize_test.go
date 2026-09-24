@@ -7,18 +7,6 @@ import (
 	"github.com/TokenPLS/Hako/config"
 )
 
-// The parity test written when the local-proxy surface was opened stopped at parseBoth. Its
-// failure message said "the listener the user asked for is not opened" -- a claim about the
-// listener layer, from a measurement at the parse layer. Between those two layers,
-// override.go:70 replaced the entire Inbound struct, so every one of those ten fields was
-// zeroed again and no listener was ever opened. The gate was green and the port was closed.
-//
-// That is the same defect this batch diagnosed in the old override_test.go, which fed a bare
-// LC.Tun{} and passed while real configurations diverged. Writing the tun tests against
-// finalizeConfigForIOS and then not doing it here is what let it back in.
-//
-// So these run where the runtime runs: after finalize. A test that claims something about
-// listeners has to measure the value updateListeners will actually read.
 func TestLocalProxySurfaceSurvivesFinalizeNotJustParse(t *testing.T) {
 	const document = `
 port: 7890
@@ -55,10 +43,6 @@ rules:
 	if !ours.General.AllowLan {
 		t.Error("allow-lan = false after finalize, with the permission granted")
 	}
-	// authentication lands in cfg.Users, not General.Authentication -- upstream's
-	// config.go:785 does `config.Users = parseAuthentication(rawCfg.Authentication)`. Asserting
-	// on General.Authentication read as "the credentials were dropped" when they had never been
-	// there on either side; checking against mihomo is what catches that.
 	if len(ours.Users) != len(mihomoUsers(t, document)) || len(ours.Users) == 0 {
 		t.Errorf("authentication users after finalize = %d, mihomo has %d; a LAN listener would "+
 			"come up with no credentials", len(ours.Users), len(mihomoUsers(t, document)))
@@ -75,10 +59,6 @@ rules:
 	}
 }
 
-// genAddr (listener/listener.go:709-718) only produces ":port" -- every interface -- when the
-// bind address is "*" or empty. Forcing it to 127.0.0.1 makes allow-lan a no-op even when the
-// port survives and the permission is granted: the listener comes up on loopback and the user
-// is told, by their own configuration and by the app's switch, that it is shared.
 func TestFinalizeDoesNotPinBindAddressToLoopback(t *testing.T) {
 	const document = `
 mixed-port: 7890
@@ -100,8 +80,6 @@ rules:
 	}
 }
 
-// What still goes at finalize: the surfaces the raw layer already cleared, kept here as
-// defence in depth rather than as a second policy.
 func TestFinalizeStillClosesTheServerSurfaces(t *testing.T) {
 	const document = `
 mixed-port: 7890

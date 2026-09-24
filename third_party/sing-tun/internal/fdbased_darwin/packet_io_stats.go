@@ -6,9 +6,6 @@ import (
 	"github.com/metacubex/sing-tun/internal/rawfile_darwin"
 )
 
-// PacketIOStats is a cumulative, payload-free snapshot for one active fd-based
-// endpoint. Hako permits only one active Core, so resetting it when a new
-// endpoint is constructed gives each service generation a clean baseline.
 type PacketIOStats struct {
 	IngressReadCalls       uint64
 	IngressReadWouldBlock  uint64
@@ -38,7 +35,6 @@ var packetIOCounters struct {
 	egressWriteErrors      atomic.Uint64
 }
 
-// ResetPacketIOStats starts a new service-generation measurement window.
 func ResetPacketIOStats() {
 	rawfile.ResetPacketReadStats()
 	packetIOCounters.ingressReadPackets.Store(0)
@@ -53,9 +49,6 @@ func ResetPacketIOStats() {
 	packetIOCounters.egressWriteErrors.Store(0)
 }
 
-// PacketIOStatsSnapshot returns a lock-free cumulative snapshot. Individual
-// fields may advance between loads; consumers compare low-frequency deltas and
-// do not require a transactionally consistent packet boundary.
 func PacketIOStatsSnapshot() PacketIOStats {
 	read := rawfile.PacketReadStatsSnapshot()
 	return PacketIOStats{

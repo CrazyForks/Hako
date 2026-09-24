@@ -38,11 +38,6 @@ import (
 )
 
 func TestControlledMASQUEH3Interop(t *testing.T) {
-	// This fixture counts HEADs, so it measures with unified-delay OFF semantics and has
-	// to say so: adapter.UnifiedDelay is a package global that any test booting a real
-	// core flips to the factory default true, and an unpinned count assertion is then
-	// order-dependent -- it doubled here the day a core-starting test was added earlier
-	// in the file order.
 	pinUnifiedDelayOff(t)
 	serverCertificate, _, serverPublicKey := newControlledMASQUEIdentity(t, "localhost")
 	_, clientPrivateKey, _ := newControlledMASQUEIdentity(t, "client.controlled.test")

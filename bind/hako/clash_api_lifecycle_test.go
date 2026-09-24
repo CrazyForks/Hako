@@ -84,8 +84,6 @@ func TestClashLifecycleCloseOwnsPendingConnect(t *testing.T) {
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	releaseDial := func() { releaseOnce.Do(func() { close(release) }) }
-	// A transport that delays returning even after cancellation proves Close
-	// owns the establishing worker, not just the cancellation signal.
 	c.httpClient.Transport = lifecycleRoundTripper(func(r *http.Request) (*http.Response, error) {
 		entered <- r
 		<-release
@@ -109,7 +107,6 @@ func TestClashLifecycleCloseOwnsPendingConnect(t *testing.T) {
 	releaseDial()
 	err := lifecycleWait(t, connecting)
 	lifecycleWait(t, closing)
-	// Clean up a late session on the unfixed source as well.
 	c.Close()
 	if err == nil {
 		t.Error("canceled Connect reported success")
@@ -139,8 +136,6 @@ func TestClashLifecycleCloseWaitsForConnectedCallback(t *testing.T) {
 		t.Error("Close returned while Connected callback was still running")
 	default:
 	}
-	// The session must remain owned while its callback/worker is draining,
-	// including for a concurrent second Close.
 	c.mu.Lock()
 	owned := c.session == session
 	c.mu.Unlock()
@@ -153,7 +148,6 @@ func TestClashLifecycleCloseWaitsForConnectedCallback(t *testing.T) {
 	if h.disconnected.Load() != 1 {
 		t.Errorf("Disconnected = %d, want 1", h.disconnected.Load())
 	}
-	// An explicit later Connect must still be supported.
 	h.onConnected = nil
 	if err := c.Connect(); err != nil {
 		t.Fatalf("reuse after Close: %v", err)
@@ -476,8 +470,6 @@ func TestClashLifecycleCloseWaitsForPartialSocketClose(t *testing.T) {
 	case <-secondClose:
 		t.Error("second Close escaped while an adopted socket was still closing")
 	case <-time.After(100 * time.Millisecond):
-		// A controlled blocking Close, not a performance threshold: no close
-		// operation can finish until the test releases its owned socket.
 	}
 	releaseClose()
 	lifecycleWait(t, firstClose)

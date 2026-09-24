@@ -209,8 +209,6 @@ type Metadata struct {
 	UidKnown    bool       `json:"uidKnown"`
 	Process     string     `json:"process"`
 	ProcessPath string     `json:"processPath"`
-	// SourceIdentityKnown distinguishes an absent Apple audit token from a
-	// valid identity whose signed code legitimately has no Team ID.
 	SourceIdentityKnown        bool   `json:"sourceIdentityKnown"`
 	SourceAppSigningIdentifier string `json:"sourceAppSigningIdentifier"`
 	SourceAppTeamIdentifier    string `json:"sourceAppTeamIdentifier"`
@@ -254,8 +252,6 @@ func (m *Metadata) SourceDetail() string {
 	}
 }
 
-// HasUID preserves compatibility with existing non-zero metadata producers
-// while allowing an explicit presence bit to represent the valid root UID 0.
 func (m *Metadata) HasUID() bool {
 	return m.UidKnown || m.Uid != 0
 }

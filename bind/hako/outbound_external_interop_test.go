@@ -255,8 +255,6 @@ func externalProxyMapping(t *testing.T, fixture *externalOutboundFixture) map[st
 		proxyMapping[key] = value
 	}
 	if fixture.Type == "tailscale" {
-		// A lab credential must never cause durable Tailscale state to escape the
-		// test lifetime, even if the private fixture accidentally requests it.
 		proxyMapping["state-dir"] = t.TempDir()
 		proxyMapping["ephemeral"] = true
 	}

@@ -8,28 +8,7 @@ import (
 	"testing"
 )
 
-// A phase marker must mean what a reader will take it to mean.
-//
-// On 2026-08-28 the macOS lane read a device record ending in
-//
-//	pre-config-parse → config-parsed
-//	[mem] after parsing the configuration: 12.0 MiB
-//
-// and concluded the configuration had parsed. So did I. Both lines sit
-// BEFORE the error branch and are emitted unconditionally, so their presence
-// says only that the call returned -- not how. A whole round of device testing
-// was attributed on that reading, and the attribution was wrong.
-//
-// The fix is not a comment. A phase whose name states an OUTCOME
-// ("config-parsed") has to be emitted where that outcome is known, which means
-// the failing side of the same decision needs its own marker -- otherwise the
-// record has one word for two endings and a reader cannot tell which happened.
-//
-// This checks the pairing exists. It cannot check that a name is honest, which
-// is why the list is written out: adding an outcome-shaped phase is a decision
-// someone makes on purpose, and they have to name its counterpart here.
 var outcomePhases = map[string]string{
-	// outcome marker -> the marker its failing counterpart must carry
 	"config-parsed": "config-refused",
 }
 
@@ -61,20 +40,12 @@ func TestEveryOutcomePhaseHasAFailingCounterpart(t *testing.T) {
 		}
 	}
 
-	// The counterpart has to sit inside the failing branch, not merely exist.
-	// A marker emitted beside its partner would restore the ambiguity while
-	// looking like the fix.
 	for outcome, counterpart := range outcomePhases {
 		lines := strings.Split(body, "\n")
 		for index, line := range lines {
 			if !strings.Contains(line, `startupPhase("`+counterpart+`")`) {
 				continue
 			}
-			// Skip back over comments and blank lines to the statement that
-			// actually encloses this one. A fixed lookback of a few lines said
-			// the marker was unguarded while it sat under fourteen lines of
-			// comment inside the branch -- the gate crying wolf about correct
-			// code, which is how gates get weakened until they stop working.
 			guarded := false
 			for back := index - 1; back >= 0; back-- {
 				text := strings.TrimSpace(lines[back])
@@ -92,17 +63,6 @@ func TestEveryOutcomePhaseHasAFailingCounterpart(t *testing.T) {
 	}
 }
 
-// The phase actually reaches the file a reader opens.
-//
-// The gate above pins that config-refused EXISTS beside config-parsed and sits
-// inside the failure branch. That is a statement about the source. Whether the
-// marker then arrives in hako-core-phases.log is a different question, and it
-// took three wrong sinks to find the right one: ExplainLastStartup reads the
-// breadcrumb, recordStartupStage writes the breadcrumb, and startupPhase writes
-// setupStartupPhaseLogPath -- a third file. Asserting through the wrong one
-// returned "not present" twice for a marker that was working.
-//
-// So this drives a real refusal and reads the file the device lane reads.
 func TestARefusalReachesThePhaseLog(t *testing.T) {
 	setupConfigPipelineTest(t)
 	phaseLog := filepath.Join(t.TempDir(), "phases.log")
@@ -125,8 +85,6 @@ func TestARefusalReachesThePhaseLog(t *testing.T) {
 		t.Fatalf("the phase log was never written: %v", err)
 	}
 	record := string(body)
-	// The positive control first: if config-parsed is missing too, the phase
-	// log is not being written at all and the absence below means nothing.
 	if !strings.Contains(record, "config-parsed") {
 		t.Fatalf("no phase reached the log, so this test measures nothing:\n%s", record)
 	}

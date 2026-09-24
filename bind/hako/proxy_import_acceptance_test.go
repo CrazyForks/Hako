@@ -20,20 +20,6 @@ func inspectProxyPayloadReport(t *testing.T, payload, context string) proxyImpor
 	return report
 }
 
-// An unmapped query key is refused whether or not it carries a value. An empty
-// value is still a key this build does not map, and the ledger is the sentence
-// the client copy repeats: every key it does not know is refused.
-// A key this build does not map is named, and the node still arrives -- with or
-// without a value on it.
-//
-// This asserted the opposite until 2026-08-28. The whitelist was treated as the
-// judgement rather than as a lookup, so any spelling an exporter invents cost
-// the node; the reader lost two links from their own subscription to it within
-// an hour. Upstream reads the keys it knows and ignores the rest.
-//
-// The empty-value row is here because it was here before: `?key=` and `?key=1`
-// took different paths through the ledger once, and a rule about unknown keys
-// that only holds when they carry a value is not a rule about unknown keys.
 func TestAnUnmappedQueryKeyIsNamedAndTheNodeStillArrives(t *testing.T) {
 	for name, link := range map[string]string{
 		"with value":  "trojan://secret@example.invalid:443?peer=sni.example.invalid&hakoUnmappedField=1#node",
@@ -55,12 +41,6 @@ func TestAnUnmappedQueryKeyIsNamedAndTheNodeStillArrives(t *testing.T) {
 	}
 }
 
-// The ledger check still refuses an unmapped key when it is asked to.
-//
-// Nothing calls it that way any more -- both entry points pass tolerate=true --
-// but the parameter is the seam the change was made at, and a test that the
-// strict branch still works is what makes it safe to keep. Deleting it would
-// leave the branch unexercised and looking dead.
 func TestValidateProxyShareLinkQueryFieldsIsFailClosedWhenAsked(t *testing.T) {
 	capability := proxyImportCapability{Scheme: "trojan", CanonicalType: "trojan", Status: proxyImportSupported}
 	if _, err := validateProxyShareLinkQueryFields("trojan://secret@example.invalid:443?peer=sni.example.invalid", capability, false); err != nil {
@@ -76,9 +56,6 @@ func TestValidateProxyShareLinkQueryFieldsIsFailClosedWhenAsked(t *testing.T) {
 	}
 }
 
-// singleNode reports what happened. The importer already knows which record
-// failed and why; collapsing that into one sentence at the exit throws away the
-// only part the reader can act on.
 func TestSingleNodeFailureCarriesTheReason(t *testing.T) {
 	for name, testCase := range map[string]struct{ payload, wantCode string }{
 		"unknown scheme": {"hakonotascheme://x@example.invalid:443#n", "unknownScheme"},
@@ -117,16 +94,8 @@ func TestProxyPayloadSizeRefusalsNameWhatIsWrong(t *testing.T) {
 	}
 }
 
-// mieru has two schemes upstream (pkg/appctl/client.go: "URL must begin with
-// mieru:// or mierus://"). Only the simple one is constructible here, so the
-// standard one is recognized and refused by name, not reported as gibberish.
 func TestMieruStandardURLIsRecognizedNotUnknown(t *testing.T) {
 	report := inspectProxyPayloadReport(t, "mieru://x@198.51.100.30:443#M", "nodeBundle")
-	// One outcome, distinguished by its code rather than by which array it
-	// landed in. `mieru://` is a scheme this importer knows and cannot build,
-	// which is not the same as a scheme it has never heard of, and the reason
-	// the person is shown differs accordingly -- but both mean the link did not
-	// become a node, and the report says that once.
 	if len(report.Skipped) != 1 {
 		t.Fatalf("mieru:// is not reported as skipped: %+v", report)
 	}
@@ -136,9 +105,6 @@ func TestMieruStandardURLIsRecognizedNotUnknown(t *testing.T) {
 	}
 }
 
-// The repeat suffix is upstream's own: common/convert/converter.go uniqueName
-// formats a repeat as "%s-%02d". Renaming differently would leave hand-written
-// proxy-group members pointing at a name this importer never emits.
 func TestDuplicateNamesFollowUpstreamUniqueNameFormat(t *testing.T) {
 	payload := strings.Join([]string{
 		"trojan://a@example.invalid:443#Site",
@@ -157,9 +123,6 @@ func TestDuplicateNamesFollowUpstreamUniqueNameFormat(t *testing.T) {
 	}
 }
 
-// The registry owns the routing decision too. A client that re-derives "which
-// scheme is a node" keeps a second scheme set, which is exactly what the
-// capability export exists to remove.
 func TestCapabilityDocumentCarriesThePasteRole(t *testing.T) {
 	var document proxyImportCapabilitiesDocument
 	if err := json.Unmarshal([]byte(ProxyImportCapabilitiesForIOS().Value), &document); err != nil {
@@ -186,9 +149,6 @@ func TestCapabilityDocumentCarriesThePasteRole(t *testing.T) {
 	}
 }
 
-// A reader looking at twenty pasted lines cannot count records. Share-link
-// records carry the line and byte offset they were read from; container
-// formats keep the array index, which is what locates an entry there.
 func TestShareLinkIssuesAreLocatableInTheOriginalText(t *testing.T) {
 	payload := strings.Join([]string{
 		"trojan://a@example.invalid:443#First",
@@ -208,12 +168,6 @@ func TestShareLinkIssuesAreLocatableInTheOriginalText(t *testing.T) {
 	}
 }
 
-// Hysteria 2 accepts a hopping list in the authority ("443,5000-6000") and the
-// ecosystem also sends it as a query field -- Shadowrocket spells it mport,
-// mihomo spells it ports. All three reach the kernel's own `ports`, which stays
-// the validator for the exact grammar. The deleted Swift parser handled the
-// authority form on purpose; dropping it made links that used to
-// import report a malformed URI.
 func TestHysteria2PortHoppingSurvivesEverySpelling(t *testing.T) {
 	for name, testCase := range map[string]struct{ link, wantPorts string }{
 		"authority list":  {"hysteria2://pw@example.invalid:443,5000-6000#N", "443,5000-6000"},
@@ -232,7 +186,6 @@ func TestHysteria2PortHoppingSurvivesEverySpelling(t *testing.T) {
 		})
 	}
 
-	// A single port is untouched: no ports key, and the port itself survives.
 	report := inspectProxyPayloadReport(t, "hysteria2://pw@example.invalid:443#N", "singleNode")
 	if len(report.Proxies) != 1 {
 		t.Fatalf("the single-port control stopped working: %+v", report)
@@ -242,10 +195,6 @@ func TestHysteria2PortHoppingSurvivesEverySpelling(t *testing.T) {
 	}
 }
 
-// The importer and the core it feeds must answer the same thing. This case is
-// upstream's own (TestConvertsV2Ray_hysteria2PortHopping in common/convert),
-// input and expectations copied rather than invented -- a hand-made fixture is
-// how a false red gets manufactured, which happened twice in this batch.
 func TestHysteria2PortHoppingMatchesUpstreamFieldForField(t *testing.T) {
 	report := inspectProxyPayloadReport(t,
 		"hysteria2://letmein@example.invalid:443,5000-6000/?sni=example.invalid#hop", "singleNode")

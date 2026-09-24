@@ -2,9 +2,6 @@ package statistic
 
 import "github.com/TokenPLS/Hako/common/atomic"
 
-// NewManagerForTest builds a Manager with its counters wired, without the sampler
-// goroutine the package-level DefaultManager starts. Tests in other packages use it to
-// count into a manager of their own instead of the process-wide one.
 func NewManagerForTest() *Manager {
 	return &Manager{
 		uploadTemp:         atomic.NewInt64(0),

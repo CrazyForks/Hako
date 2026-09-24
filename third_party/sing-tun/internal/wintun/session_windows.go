@@ -17,16 +17,15 @@ type Session struct {
 }
 
 const (
-	PacketSizeMax   = 0xffff    // Maximum packet size
-	RingCapacityMin = 0x20000   // Minimum ring capacity (128 kiB)
-	RingCapacityMax = 0x4000000 // Maximum ring capacity (64 MiB)
+	PacketSizeMax   = 0xffff
+	RingCapacityMin = 0x20000
+	RingCapacityMax = 0x4000000
 )
 
-// Packet with data
 type Packet struct {
-	Next *Packet              // Pointer to next packet in queue
-	Size uint32               // Size of packet (max WINTUN_MAX_IP_PACKET_SIZE)
-	Data *[PacketSizeMax]byte // Pointer to layer 3 IPv4 or IPv6 packet
+	Next *Packet
+	Size uint32
+	Data *[PacketSizeMax]byte
 }
 
 var (

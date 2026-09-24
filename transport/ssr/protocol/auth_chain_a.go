@@ -108,7 +108,6 @@ func (a *authChainA) Decode(dst, src *bytes.Buffer) error {
 		dataLength := int(binary.LittleEndian.Uint16(src.Bytes()[:2]) ^ binary.LittleEndian.Uint16(a.lastServerHash[14:16]))
 		randDataLength := a.randDataLength(dataLength, a.lastServerHash, &a.randomServer)
 		length := dataLength + randDataLength
-		// Temporary workaround for https://github.com/TokenPLS/Hako/issues/1352
 		if dataLength < 0 || randDataLength < 0 || length < 0 {
 			return errors.New("ssr crashing blocked")
 		}
@@ -135,7 +134,6 @@ func (a *authChainA) Decode(dst, src *bytes.Buffer) error {
 		if dataLength > 0 && randDataLength > 0 {
 			pos += getRandStartPos(randDataLength, &a.randomServer)
 		}
-		// Temporary workaround for https://github.com/TokenPLS/Hako/issues/1352
 		if pos < 0 || pos+dataLength < 0 || dataLength < 0 {
 			return errors.New("ssr crashing blocked")
 		}

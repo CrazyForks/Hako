@@ -15,8 +15,8 @@ type ClientHelloSpecJSONUnmarshaler struct {
 	CipherSuites       *CipherSuitesJSONUnmarshaler       `json:"cipher_suites"`
 	CompressionMethods *CompressionMethodsJSONUnmarshaler `json:"compression_methods"`
 	Extensions         *TLSExtensionsJSONUnmarshaler      `json:"extensions"`
-	TLSVersMin         uint16                             `json:"min_vers,omitempty"` // optional
-	TLSVersMax         uint16                             `json:"max_vers,omitempty"` // optional
+	TLSVersMin         uint16                             `json:"min_vers,omitempty"`
+	TLSVersMax         uint16                             `json:"max_vers,omitempty"`
 }
 
 func (chsju *ClientHelloSpecJSONUnmarshaler) ClientHelloSpec() ClientHelloSpec {
@@ -104,10 +104,8 @@ func (e *TLSExtensionsJSONUnmarshaler) UnmarshalJSON(jsonStr []byte) error {
 		if extID, ok := godicttls.DictExtTypeNameIndexed[accepter.extNameOnly.Name]; !ok {
 			return fmt.Errorf("%w: %s", ErrUnknownExtension, accepter.extNameOnly.Name)
 		} else {
-			// get extension type from ID
 			var ext TLSExtension = ExtensionFromID(extID)
 			if ext == nil {
-				// fallback to generic extension
 				ext = genericExtension(extID, accepter.extNameOnly.Name)
 			}
 
@@ -119,9 +117,7 @@ func (e *TLSExtensionsJSONUnmarshaler) UnmarshalJSON(jsonStr []byte) error {
 		}
 	}
 
-	// unmashal extensions
 	for idx, ext := range exts {
-		// json.Unmarshal will call the UnmarshalJSON method of the extension
 		if err := json.Unmarshal(accepters[idx].origJsonInput, ext); err != nil {
 			return err
 		}
@@ -150,7 +146,6 @@ func genericExtension(id uint16, name string) TLSExtension {
 
 	fmt.Fprint(os.Stderr, warningMsg)
 
-	// fallback to generic extension
 	return &GenericExtension{Id: id}
 }
 

@@ -147,9 +147,6 @@ func TestProviderEntryCountForIOS(t *testing.T) {
 	}
 }
 
-// The count round-trips from an MRS the kernel itself wrote. Renamed from
-// ...ReadsValidatedMRSCount: nothing validates the header count any more, so the
-// old name promised a guarantee that no longer exists.
 func TestProviderEntryCountForIOSRoundTripsAKernelWrittenMRS(t *testing.T) {
 	var encoded bytes.Buffer
 	if err := ruleprovider.ConvertToMrs(
@@ -169,12 +166,6 @@ func TestProviderEntryCountForIOSRoundTripsAKernelWrittenMRS(t *testing.T) {
 	}
 }
 
-// Was TestProviderEntryCountForIOSRejectsInvalidPayload, asserting that
-// `payload: []` for a domain provider is refused. That is not an invalid payload,
-// it is an empty one, and upstream loads it as zero rules -- the assertion pinned
-// our own overreach, which is how the overreach survived the previous audit. It
-// now asserts the shape that IS invalid: a body upstream's parser cannot find a
-// list in at all.
 func TestProviderEntryCountForIOSRejectsUnparseablePayload(t *testing.T) {
 	if _, err := ProviderEntryCountForIOS(
 		"rule", "domain", "yaml", []byte("payload:"),
@@ -284,16 +275,11 @@ func TestValidateProviderForIOS(t *testing.T) {
 		{name: "proxy yaml", kind: "proxy", format: "yaml", payload: []byte("proxies:\n  - name: one\n    type: socks5\n    server: 127.0.0.1\n    port: 1080\n")},
 		{name: "proxy share links", kind: "proxy", format: "yaml", payload: []byte("hysteria2://password@example.com:443/?sni=example.com#one\n")},
 		{name: "proxy wrong root field", kind: "proxy", format: "yaml", payload: []byte("payload:\n  - name: one\n    type: socks5\n    server: 127.0.0.1\n    port: 1080\n"), wantError: true},
-		// interface-name/routing-mark egress overrides are stripped (tolerate +
-		// strip), so a provider proxy carrying one loads instead of erroring.
 		{name: "proxy interface override tolerated", kind: "proxy", format: "yaml", payload: []byte("proxies:\n  - name: one\n    type: socks5\n    server: 127.0.0.1\n    port: 1080\n    interface-name: en0\n")},
 		{name: "proxy routing mark tolerated", kind: "proxy", format: "yaml", payload: []byte("proxies:\n  - name: one\n    type: socks5\n    server: 127.0.0.1\n    port: 1080\n    routing-mark: 233\n")},
 		{name: "paired proxy egress overrides tolerated", kind: "proxy", format: "yaml", payload: []byte("proxies:\n  - name: one\n    type: socks5\n    server: 127.0.0.1\n    port: 1080\n    interface-name: en0\n    routing-mark: 233\n")},
 		{name: "domain payload named like metadata", kind: "rule", behavior: "classical", format: "yaml", payload: []byte("payload:\n  - DOMAIN,process-name\n")},
 		{name: "empty", kind: "rule", behavior: "classical", format: "yaml", payload: nil, wantError: true},
-		// A malformed payload CONTAINER (mapping where a rule list is required) is a
-		// structural parse failure and is still rejected. A single malformed rule
-		// ENTRY is now tolerated (skipped) — see TestClassicalProviderSkips... .
 		{name: "malformed payload container", kind: "rule", behavior: "classical", format: "yaml", payload: []byte("payload:\n  key: value\n"), wantError: true},
 		{name: "process wildcard rule", kind: "rule", behavior: "classical", format: "yaml", payload: []byte("payload:\n  - PROCESS-NAME-WILDCARD,curl*\n")},
 		{name: "uid rule", kind: "rule", behavior: "classical", format: "text", payload: []byte("UID,501\n")},
@@ -330,10 +316,6 @@ payload:
 }
 
 func TestClassicalProviderSkipsUnsupportedEntryInsteadOfFailingWholeSet(t *testing.T) {
-	// Upstream classicalStrategy.Insert warn-skips an unparseable or unsupported
-	// classical entry and keeps the rest. A pinned core that lags a subscription's
-	// newest rule keyword must not fail the whole provider (which would also refuse
-	// to start the config); it drops the single entry and keeps the executable ones.
 	payload := []byte(`
 payload:
   - DOMAIN,keep.example
@@ -353,10 +335,6 @@ payload:
 }
 
 func TestClassicalProviderLoadsEmptyWhenEveryEntryIsSkipped(t *testing.T) {
-	// Upstream parity: when every entry is unsupported the provider loads with
-	// zero rules (matching nothing), exactly like an all-metadata provider — it is
-	// never failed wholesale. (classicalProviderEntries still rejects a payload
-	// with no entries at all; that empty-file case is separate and unchanged.)
 	payload := []byte(`
 payload:
   - RULE-SET,one
@@ -390,16 +368,6 @@ func TestEmptyClassicalProviderIsZeroRulesNotAnError(t *testing.T) {
 	}
 }
 
-// Upstream accepts two spellings for a classical rule list -- `payload:` and
-// `rules:` (rules/provider/provider.go:26-33, RulePayload). Hako read only the
-// first, and while the empty-payload rejection existed that mismatch surfaced as
-// a loud (if misworded) refusal. Removing the rejection turned it into silence:
-// a `rules:`-keyed provider now yields zero entries, so the Apple-unavailable
-// metadata strip runs over nothing and the original bytes are handed back
-// untouched, while the App is told the provider has 0 rules.
-//
-// That is worse than either the old behaviour or the correct one. The fix is to
-// read both keys, the way upstream's own struct does.
 func TestClassicalProviderReadsBothPayloadAndRulesKeys(t *testing.T) {
 	body := []byte("rules:\n  - PROCESS-NAME,evil,DIRECT\n  - DOMAIN-SUFFIX,example.com,DIRECT\n")
 
@@ -418,19 +386,6 @@ func TestClassicalProviderReadsBothPayloadAndRulesKeys(t *testing.T) {
 	}
 }
 
-// One shape upstream genuinely refuses, and preflight must refuse it too.
-//
-// `rulesParse` scans for a `payload:`/`rules:` head line by line; if it reaches
-// the end of the buffer without having found one it returns ErrNoPayload
-// (rules/provider/provider.go:186-199). The head is only recognised on a line,
-// so `payload:` with NO trailing newline never registers -- upstream reports
-// "file must have a `payload` field" while `payload:\n` parses to zero rules.
-//
-// Deleting the blanket empty-payload rejection let this shape through as well,
-// which is the one case where relaxing went too far:'s whole purpose is
-// that a provider error surfaces during preflight rather than after the active
-// revision pointer has flipped. Zero rules is fine; a payload upstream cannot
-// parse at all is not.
 func TestClassicalProviderWithoutPayloadHeadIsStillRejected(t *testing.T) {
 	if err := validateClassicalProvider([]byte("payload:"), P.YamlRule); err == nil {
 		t.Error("accepted a YAML payload with no head line; upstream returns ErrNoPayload")
@@ -438,8 +393,6 @@ func TestClassicalProviderWithoutPayloadHeadIsStillRejected(t *testing.T) {
 	if err := validateClassicalProvider([]byte("# nothing"), P.YamlRule); err == nil {
 		t.Error("accepted a comment-only YAML body with no head line; upstream returns ErrNoPayload")
 	}
-	// The newline-terminated forms stay accepted: those are zero rules, not a
-	// missing payload field.
 	for _, ok := range [][]byte{[]byte("payload:\n"), []byte("rules:\n")} {
 		if err := validateClassicalProvider(ok, P.YamlRule); err != nil {
 			t.Errorf("rejected %q, which upstream parses to zero rules: %v", string(ok), err)
@@ -447,16 +400,6 @@ func TestClassicalProviderWithoutPayloadHeadIsStillRejected(t *testing.T) {
 	}
 }
 
-// The empty-provider fix has to cover domain and ipcidr, not just classical.
-//
-// Those behaviours are validated by handing the payload to
-// `ruleprovider.ConvertToMrs`, which refuses `strategy.Count() == 0` with
-// "empty rule" (rules/provider/mrs_converter.go:21-23). That is a WRITER
-// precondition -- do not serialise an empty .mrs -- and it has no counterpart on
-// the load path a running config takes, where `rulesParse` returns a zero-rule
-// strategy and mihomo carries on. Borrowing it as a read-time gate made
-// `behavior: domain` the stricter case, and downloaded rule lists are far more
-// often domain than classical, so the half left unfixed was the likelier one.
 func TestEmptyDomainAndIPCIDRProvidersAreZeroRulesToo(t *testing.T) {
 	for _, c := range []struct{ behavior, format, body string }{
 		{"domain", "yaml", "payload:\n"},
@@ -477,14 +420,6 @@ func TestEmptyDomainAndIPCIDRProvidersAreZeroRulesToo(t *testing.T) {
 	}
 }
 
-// Pins the coupling the fix above depends on. It recognises upstream's empty
-// case by matching the error text of `ConvertToMrs`, because that error is an
-// inline `errors.New` with no sentinel to compare against and reimplementing
-// upstream's line parser is the wrong trade -- the last audit round established
-// that a second decode path costs a real bug per review cycle.
-//
-// If an upstream bump rewords this, the failure lands here as a red test rather
-// than silently restoring the rejection this file exists to remove.
 func TestUpstreamEmptyRuleErrorTextIsUnchanged(t *testing.T) {
 	err := ruleprovider.ConvertToMrs([]byte("payload:\n"), P.Domain, P.YamlRule, io.Discard)
 	if err == nil {
@@ -497,12 +432,6 @@ func TestUpstreamEmptyRuleErrorTextIsUnchanged(t *testing.T) {
 	}
 }
 
-// One parse, both answers, and the same sentence a reader used to be shown.
-//
-// The App called validate and then count, which parsed every payload twice —
-// 53 rule sets in one reader's profile, each parsed twice on every profile
-// switch, and for a text list one parse is a full conversion. This pins that
-// collapsing them keeps every verdict identical.
 func TestInspectProviderMatchesValidateThenCount(t *testing.T) {
 	classical := []byte("payload:\n  - DOMAIN-SUFFIX,example.com\n  - DOMAIN,www.example.org\n")
 	unreadable := []byte("payload: not-a-list\n")

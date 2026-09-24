@@ -24,9 +24,6 @@ func groupOfDirect(t *testing.T) *GroupBase {
 	return NewGroupBase(GroupBaseOption{Name: "g", Type: C.URLTest, Providers: []P.ProxyProvider{compatible}})
 }
 
-// The group endpoint reads the outcome the same way the single-proxy one
-// does: with `expected`, a member whose answer falls outside it is not a
-// success; without `expected`, any answer is.
 func TestAGroupDelayTreatsAnUnexpectedStatusAsAFailureWhenExpectedIsGiven(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)

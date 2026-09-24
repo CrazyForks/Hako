@@ -10,8 +10,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// blockingPlatform's WriteLog blocks until released, simulating a stalled
-// Swift consumer.
 type blockingPlatform struct {
 	recordingPlatform
 	release  chan struct{}
@@ -20,11 +18,9 @@ type blockingPlatform struct {
 
 func (p *blockingPlatform) WriteLog(string) {
 	p.received.Add(1)
-	<-p.release // block until the test releases us
+	<-p.release
 }
 
-// DoD: a slow/stalled log consumer must not block the core's
-// logging goroutine — Write returns immediately, overflow is dropped.
 func TestLogBackpressureDoesNotBlockCore(t *testing.T) {
 	t.Cleanup(func() { logrus.SetOutput(os.Stdout) })
 
@@ -32,8 +28,6 @@ func TestLogBackpressureDoesNotBlockCore(t *testing.T) {
 	writer := redirectLogs(platform)
 	t.Cleanup(func() { stopLogRedirect(writer) })
 
-	// Emit far more than the buffer; each call must return promptly even
-	// though the consumer is blocked on the first line.
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < logChannelSize*4; i++ {
@@ -44,13 +38,12 @@ func TestLogBackpressureDoesNotBlockCore(t *testing.T) {
 
 	select {
 	case <-done:
-		// Good: logging never blocked despite the stalled consumer.
 	case <-time.After(5 * time.Second):
 		t.Fatal("core logging blocked on a stalled WriteLog consumer")
 	}
 
 	writer.Close()
-	close(platform.release) // let an in-flight WriteLog return
+	close(platform.release)
 	select {
 	case <-writer.stopped:
 	case <-time.After(2 * time.Second):
@@ -58,11 +51,6 @@ func TestLogBackpressureDoesNotBlockCore(t *testing.T) {
 	}
 }
 
-// Startup lines are the ones that explain a kill: an iOS packet tunnel that
-// crosses its memory budget is SIGKILLed, and whatever is still queued in this
-// process dies with it. So while the tunnel is starting, Write must not return
-// until the platform has taken the line (review P1-4: the guarantee has to be
-// acknowledged delivery, not a bypass of one of the two queues).
 func TestStartupLogsReachThePlatformBeforeWriteReturns(t *testing.T) {
 	t.Cleanup(func() { logrus.SetOutput(os.Stdout) })
 
@@ -82,10 +70,6 @@ func TestStartupLogsReachThePlatformBeforeWriteReturns(t *testing.T) {
 	}
 }
 
-// One stalled platform call must cost one budget, not one budget per line:
-// after the first line times out the writer stops waiting for good, or a dead
-// consumer would turn a few hundred startup lines into minutes of silence
-// while the watchdog counts down.
 func TestStartupDeliveryWaitIsSpentOnlyOnce(t *testing.T) {
 	t.Cleanup(func() { logrus.SetOutput(os.Stdout) })
 
@@ -114,8 +98,6 @@ func TestStartupDeliveryWaitIsSpentOnlyOnce(t *testing.T) {
 	}
 }
 
-// Once the tunnel is established, throughput wins over the delivery guarantee:
-// a stalled platform must not add even the bounded startup wait to Write.
 func TestEstablishedTunnelLoggingDoesNotWaitForThePlatform(t *testing.T) {
 	t.Cleanup(func() { logrus.SetOutput(os.Stdout) })
 

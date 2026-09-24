@@ -25,13 +25,7 @@ func decodeDeviations(t *testing.T, configContent, profile string) []configDevia
 	return payload.Deviations
 }
 
-// The whole point: an answer without a running core.
-//
-// The runtime endpoint describes the configuration that is running, so a field page opened
-// while disconnected -- which is when the reader is deciding what to write -- had nothing to
-// say. This runs the same walk over the same rules and answers from the YAML alone.
 func TestDeviationsAreAnswerableWithoutStartingAnything(t *testing.T) {
-	// tproxy-port has no Apple inbound at all, so it is reported wherever it is written.
 	deviations := decodeDeviations(t, "tproxy-port: 7895\n", RuntimeProfileIOSPacketTunnel)
 	var found *configDeviation
 	for i := range deviations {
@@ -55,8 +49,6 @@ func TestDeviationsAreAnswerableWithoutStartingAnything(t *testing.T) {
 	}
 }
 
-// The same sentences before and after connecting, because it is the same walk. A second
-// static list of these facts was the alternative, and two texts that must agree drift.
 func TestTheOfflineAnswerIsTheSameWalkAsTheRunningOne(t *testing.T) {
 	const content = "tproxy-port: 7895\nredir-port: 7893\n"
 	offline := decodeDeviations(t, content, RuntimeProfileIOSPacketTunnel)
@@ -74,9 +66,6 @@ func TestTheOfflineAnswerIsTheSameWalkAsTheRunningOne(t *testing.T) {
 	}
 }
 
-// The profile decides. find-process-mode deviates where the process lookup cannot run, and
-// after that is no longer the macOS packet tunnel -- a client asking with the wrong
-// profile would tell a Mac reader their rule is ignored when it is honoured.
 func TestTheProfileDecidesWhatDeviates(t *testing.T) {
 	const content = "find-process-mode: always\n"
 	has := func(profile string) bool {
@@ -95,8 +84,6 @@ func TestTheProfileDecidesWhatDeviates(t *testing.T) {
 	}
 }
 
-// Nothing to report is a value, not an error and not null: a caller that cannot tell "no
-// deviations" from "not asked" reports silence as health.
 func TestAConfigurationWithNothingToReportAnswersEmpty(t *testing.T) {
 	deviations := decodeDeviations(t, "mode: rule\n", RuntimeProfileMacOSApplication)
 	if deviations == nil {

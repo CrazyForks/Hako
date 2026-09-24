@@ -11,7 +11,7 @@ func TestTunOptionsGetters(t *testing.T) {
 	tun := &LC.Tun{
 		Inet4Address:      []netip.Prefix{netip.MustParsePrefix("198.18.0.1/30")},
 		Inet6Address:      []netip.Prefix{netip.MustParsePrefix("fdfe:dcba:9876::1/126")},
-		MTU:               0, // exercise the effective setup MTU fallback
+		MTU:               0,
 		AutoRoute:         true,
 		Inet4RouteAddress: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")},
 		RouteAddress: []netip.Prefix{
@@ -41,7 +41,6 @@ func TestTunOptionsGetters(t *testing.T) {
 		t.Fatal("GetInet4Address mismatch")
 	}
 
-	// DNS server = tun gateway + 1 (libbox parity).
 	dns, err := o.GetDNSServerAddress()
 	if err != nil {
 		t.Fatalf("GetDNSServerAddress: %v", err)
@@ -69,14 +68,12 @@ func TestTunOptionsGetters(t *testing.T) {
 }
 
 func TestDNSServerAddressRequiresRoom(t *testing.T) {
-	// A /32 leaves no next address for the DNS server.
 	o := newTunOptions(&LC.Tun{
 		Inet4Address: []netip.Prefix{netip.MustParsePrefix("10.0.0.1/32")},
 	})
 	if _, err := o.GetDNSServerAddress(); err == nil {
 		t.Fatal("expected error for /32 inet4 address")
 	}
-	// No inet4 address at all is also an error, not a panic.
 	if _, err := newTunOptions(&LC.Tun{}).GetDNSServerAddress(); err == nil {
 		t.Fatal("expected error for missing inet4 address")
 	}

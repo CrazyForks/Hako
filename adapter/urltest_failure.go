@@ -7,30 +7,9 @@ import (
 	"syscall"
 )
 
-// URLTestFailure explains a failed URL test in terms a caller can act on
-// WITHOUT reading the sentence. The client used to do this by matching a dozen
-// substrings against the kernel's English, which meant any rewording
-// here silently changed the category over there, with nothing to go red.
-//
-// Message carries the sentence unchanged beside the classification: the
-// category is for behaviour, the sentence is for the reader, and neither
-// replaces the other.
 type URLTestFailure struct {
-	// Kind is the coarse category, read from the error's TYPE:
-	// timeout, canceled, dial, write, read, status, unknown.
-	//
-	// There is deliberately no "dns" kind. That was the client's invention,
-	// matched on the substring "dns", and it merged cases that have to stay
-	// apart: EADDRNOTAVAIL on a loopback resolver (a socket bound to a
-	// physical interface --) and ECONNREFUSED (nothing listening) are
-	// the same "dns" to a substring and completely different problems to a
-	// reader. The errno says which; a category never could.
 	Kind string
-	// Errno is the symbolic name of the underlying syscall error
-	// ("EADDRNOTAVAIL"), empty when the chain carries none or the platform
-	// cannot name it.
 	Errno string
-	// Message is the error verbatim.
 	Message string
 }
 
@@ -41,10 +20,6 @@ const (
 	URLTestFailureUnknown  = "unknown"
 )
 
-// ClassifyURLTestFailure returns nil when the probe succeeded. `satisfied` and
-// `status` come from URLTestOutcome: an answer outside the caller's expected
-// range is an OUTCOME with a nil error, so it is classified from those
-// rather than from an error that does not exist.
 func ClassifyURLTestFailure(err error, satisfied bool, status int) *URLTestFailure {
 	if err == nil && satisfied {
 		return nil
@@ -66,8 +41,6 @@ func ClassifyURLTestFailure(err error, satisfied bool, status int) *URLTestFailu
 	case errors.Is(err, context.Canceled):
 		failure.Kind = URLTestFailureCanceled
 	default:
-		// net.OpError names the operation that failed -- dial, write, read --
-		// which is the part of "where did this break" that survives rewording.
 		var opErr *net.OpError
 		if errors.As(err, &opErr) && opErr.Op != "" {
 			failure.Kind = opErr.Op

@@ -1,6 +1,3 @@
-// Command package_licenses emits the complete license inventory for every Go
-// module linked into the Apple binding. Release packaging uses this inventory
-// instead of a hand-maintained representative dependency list.
 package main
 
 import (
@@ -74,23 +71,6 @@ func main() {
 	reportWhatWasAndWasNotWritten(os.Stderr, output, clientResource)
 }
 
-// reportWhatWasAndWasNotWritten prints where the inventory went, and -- when the caller names
-// one -- the separately maintained list people reach for this command hoping to regenerate.
-//
-// The second half is a property of a particular repository layout, not of this command, so it
-// arrives through -client-resource rather than being compiled in. A build with no such list must
-// not invent a sentence about one: a plausible sentence naming a path that does not exist fails
-// the same way silence does, one level up.
-//
-// Until now this command succeeded in silence. Someone bumping the SDK ran it expecting the
-// client's acknowledgements to be regenerated, got exit 0 and no output, and nearly moved on --
-// while the file they actually needed sat untouched, because it is a manual double-pin
-// (AGENTS.md: HakoSDK.lock.json's coreRevision must start with the version credited here, which
-// AcknowledgementsTests asserts).
-//
-// A silent success is worse than an error for exactly this reason: nothing distinguishes "did
-// the thing you meant" from "did a different thing correctly". The tool knows which one it did,
-// so it says.
 func reportWhatWasAndWasNotWritten(out io.Writer, output, clientResource string) {
 	fmt.Fprintf(out, "package_licenses: wrote the linked-module inventory to %s\n", output)
 	if clientResource == "" {
@@ -134,7 +114,7 @@ func packageLicenses(root, output string) error {
 			}
 		}
 		if module.Main || isSelf {
-			continue // The repository root LICENSE covers Hako and its mihomo fork.
+			continue
 		}
 		source := module.Dir
 		replacement := ""
@@ -245,8 +225,6 @@ func discoverLicenseFiles(directory string) ([]string, error) {
 	if len(files) != 0 {
 		return files, nil
 	}
-	// Some cryptography modules carry separate license texts beside each
-	// linked package instead of at module root. Preserve those relative paths.
 	err = filepath.WalkDir(directory, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr

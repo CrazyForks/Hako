@@ -10,17 +10,6 @@ import (
 	C "github.com/TokenPLS/Hako/constant"
 )
 
-// A provider definition's keys reach this fork as the reader's literal YAML
-// (RawConfig.ProxyProvider is map[string]map[string]any, config/config.go:475),
-// while upstream's decoder matches field names case-INSENSITIVELY
-// (common/structure/structure.go:522, strings.EqualFold). Every guard in this
-// fork that reads definition["type"] or definition["path"] by literal lowercase
-// therefore has a bypass spelled `Type:` — and upstream still builds the
-// provider from it. That splits the config this fork inspects from the config
-// the core runs, which is the shape every provider guard here depends on.
-//
-// Threat model: the subscription author. They write the YAML; the reader only
-// presses import.
 
 func canonicalizedRawConfig(t *testing.T, content string) *config.RawConfig {
 	t.Helper()
@@ -70,10 +59,6 @@ rule-providers:
 	}
 }
 
-// A remote provider is accepted whatever the spelling of its type key. The refusal
-// this test used to pin is gone (: the core fetches remote providers in the
-// background); what stays is that canonicalization must still see the definition,
-// because the staging and finalize layers read definition["type"] too.
 func TestRemoteProviderIsAcceptedWhateverTheKeyCase(t *testing.T) {
 	for _, spelling := range []string{"type", "Type", "TYPE", "tYpE"} {
 		content := "proxy-providers:\n  air:\n    " + spelling + ": http\n    url: http://example.com/n.yaml\n    path: ./n.yaml\n"
@@ -91,11 +76,6 @@ func TestRemoteProviderIsAcceptedWhateverTheKeyCase(t *testing.T) {
 	}
 }
 
-// Staging is where a file-backed provider's payload is sanitized: egress
-// overrides stripped from proxy providers, unexecutable owner-metadata rules
-// stripped from rule providers, compile verdicts applied. A definition whose
-// `type` key this fork does not recognize is skipped entirely (`continue`), so
-// a mixed-case spelling used to hand the core an unsanitized file.
 func TestStagingSeesAFileProviderWhateverTheKeyCase(t *testing.T) {
 	home := compileStagingHome(t)
 	source := filepath.Join(C.Path.HomeDir(), "nodes.yaml")
@@ -133,11 +113,6 @@ func TestStagingSeesAFileProviderWhateverTheKeyCase(t *testing.T) {
 	}
 }
 
-// FinalizeForIOS is the App-side entry that rewrites every provider to the
-// materialized path the extension will read (config_finalize.go:208-218). It
-// walks free-form YAML rather than RawConfig, so it needs the same
-// canonicalization: a `Type: http` provider that walks past the rewrite keeps
-// its remote definition into the published revision.
 func TestFinalizeRewritesARemoteProviderWhateverTheKeyCase(t *testing.T) {
 	merged := "proxy-providers:\n  air:\n    Type: http\n    URL: http://example.com/nodes.yaml\n" +
 		"rules:\n  - MATCH,DIRECT\n"
@@ -156,9 +131,6 @@ func TestFinalizeRewritesARemoteProviderWhateverTheKeyCase(t *testing.T) {
 	}
 }
 
-// Canonicalization must not invent or merge: a definition that already spells a
-// key in lowercase, and one that spells the SAME key twice in different cases,
-// must not lose the reader's own value silently.
 func TestCanonicalizationKeepsAnExistingLowercaseKey(t *testing.T) {
 	raw := canonicalizedRawConfig(t, `
 proxy-providers:
@@ -167,8 +139,6 @@ proxy-providers:
     Type: http
     path: ./real.yaml
 `)
-	// The lowercase key the reader wrote is authoritative; a variant must never
-	// overwrite it (that would let `Type: http` win over `type: file`).
 	if got := raw.ProxyProvider["air"]["type"]; got != "file" {
 		t.Fatalf("a mixed-case duplicate overwrote the canonical key: type=%v", got)
 	}

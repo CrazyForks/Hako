@@ -2,12 +2,9 @@ package quicvarint
 
 import "fmt"
 
-// taken from the QUIC draft
 const (
-	// Min is the minimum value allowed for a QUIC varint.
 	Min = 0
 
-	// Max is the maximum allowed value for a QUIC varint (2^62-1).
 	Max = maxVarInt8
 
 	maxVarInt1 = 63

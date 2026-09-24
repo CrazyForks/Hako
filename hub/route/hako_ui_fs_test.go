@@ -12,10 +12,6 @@ import (
 	http "github.com/metacubex/http"
 )
 
-// serveUI runs the exact handler shape server.go mounts on a real TCP
-// listener — a real *net.TCPConn on the response side, so the sendfile
-// upgrade path this fix defeats is genuinely in play — and returns its base
-// URL. The client side is stdlib: the wire does not care which fork spoke.
 func serveUI(t *testing.T, dir string) string {
 	t.Helper()
 	fs := http.StripPrefix("/ui", http.FileServer(hakoUserspaceFileSystem{http.Dir(dir)}))
@@ -29,19 +25,11 @@ func serveUI(t *testing.T, dir string) string {
 	return "http://" + listener.Addr().String()
 }
 
-// The property that defeats the sendfile upgrade is the concrete type: net's
-// fast path unwraps the io.LimitedReader ServeContent hands it and asserts
-// *os.File. A file that is not one moves through the userspace copy — the same
-// path every API response already uses, and the one the NE sandbox permits.
-// Measured on a macOS packet tunnel: sendfile answered EPERM in ~15μs, eight
-// out of eight, and every static response of 512 bytes or more died at exactly
-// the sniff boundary while a 15,245-byte API response was fine.
 
 func writeUIFixture(t *testing.T, size int) (string, []byte) {
 	t.Helper()
 	dir := t.TempDir()
 	content := bytes.Repeat([]byte("x"), size)
-	// Distinct head and tail, so a truncated or restarted copy cannot pass.
 	copy(content, "HEAD")
 	copy(content[size-4:], "TAIL")
 	if err := os.WriteFile(filepath.Join(dir, "entry.css"), content, 0o644); err != nil {
@@ -67,9 +55,6 @@ func TestUIFilesAreNeverBareOSFiles(t *testing.T) {
 	}
 }
 
-// Everything ServeContent needs — read, seek both ways, a second read after a
-// rewind — must pass through untouched: the wrapper changes which syscall
-// moves the bytes, never what they are.
 func TestUserspaceFilePassesReadSeekThrough(t *testing.T) {
 	dir, content := writeUIFixture(t, 600)
 
@@ -95,8 +80,6 @@ func TestUserspaceFilePassesReadSeekThrough(t *testing.T) {
 	}
 }
 
-// End to end through the exact handler shape server.go mounts, with a file
-// past the 512-byte sniff boundary — the size class that died on device.
 func TestUIHandlerServesAWholeFilePastTheSniffBoundary(t *testing.T) {
 	dir, content := writeUIFixture(t, 5106)
 
@@ -116,7 +99,6 @@ func TestUIHandlerServesAWholeFilePastTheSniffBoundary(t *testing.T) {
 	}
 }
 
-// Directory listings ride Readdir; the wrapper must not lose it.
 func TestUserspaceFileListsDirectories(t *testing.T) {
 	dir, _ := writeUIFixture(t, 600)
 

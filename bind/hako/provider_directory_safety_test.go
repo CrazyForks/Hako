@@ -7,19 +7,9 @@ import (
 	"testing"
 )
 
-// Staging creates its own directory with MkdirAll and then sweeps everything in
-// it that the current configuration does not reference. Both follow symlinks,
-// so a link planted at the staging root redirects every staged write into
-// whatever it points at -- and turns the sweep into an indiscriminate
-// RemoveAll of a directory that was never ours.
-//
-// Threat model: a local process that can write the container (macOS, where the
-// sandbox is weak enough for this to be a live concern -- see the manifest
-// integrity tests for why iOS is a different case).
 
 func TestStagingRefusesASymlinkedRuntimeDirectory(t *testing.T) {
 	home := compileStagingHome(t)
-	// Somewhere the attacker would like written to and swept.
 	elsewhere := t.TempDir()
 	bystander := filepath.Join(elsewhere, "important.txt")
 	if err := os.WriteFile(bystander, []byte("not ours"), 0o600); err != nil {
@@ -43,10 +33,6 @@ func TestStagingRefusesASymlinkedRuntimeDirectory(t *testing.T) {
 	}
 }
 
-// CompileRuleProvider is an exported gomobile entry. Today its only caller is a
-// debug probe, but an export with no path check is one caller away from being
-// an arbitrary-write primitive, and it writes with os.WriteFile -- which
-// follows a symlink planted at the destination.
 func TestCompileRuleProviderRefusesPathsOutsideTheContainer(t *testing.T) {
 	home := compileStagingHome(t)
 	inside := filepath.Join(home, "rules.txt")
@@ -63,7 +49,6 @@ func TestCompileRuleProviderRefusesPathsOutsideTheContainer(t *testing.T) {
 		t.Fatal("a source path outside the container was accepted")
 	}
 
-	// The legitimate in-container use still works.
 	result, err := CompileRuleProvider(inside, "domain", "text", filepath.Join(home, "artifact.mrs"))
 	if err != nil {
 		t.Fatalf("an in-container compile must work: %v", err)
@@ -98,16 +83,12 @@ func TestCompileRuleProviderDoesNotFollowASymlinkedOutput(t *testing.T) {
 	}
 }
 
-// A source larger than the provider ceiling must be refused rather than read
-// whole into a 50 MiB process.
 func TestCompileRuleProviderBoundsTheSourceRead(t *testing.T) {
 	home := compileStagingHome(t)
 	huge := filepath.Join(home, "huge.txt")
 	if err := os.WriteFile(huge, []byte(strings.Repeat("example.com\n", 1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// A zero-byte source is refused by the bounded reader, which is the same
-	// guard that bounds the large case; asserting on it keeps the test fast.
 	empty := filepath.Join(home, "empty.txt")
 	if err := os.WriteFile(empty, nil, 0o600); err != nil {
 		t.Fatal(err)

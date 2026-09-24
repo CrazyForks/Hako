@@ -339,8 +339,6 @@ func TestClientPropagatesDataPacketIDExhaustion(t *testing.T) {
 	}
 }
 
-// TestRenegotiateFailsWithoutTLS verifies that renegotiate() returns an error
-// (instead of panicking) when no TLS connection has been established.
 func TestRenegotiateFailsWithoutTLS(t *testing.T) {
 	config := ClientConfig{}
 	clientIO, _ := newMemoryPacketPair()

@@ -14,11 +14,6 @@ import (
 func ruleRouter() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", getRules)
-	// Not gated. The comment here used to say "disallow update/patch rules in embed mode",
-	// borrowed from the configs block next door, but disableRules only calls SetDisabled on
-	// rules already parsed and living in memory (rules.go:93). The configuration on disk is not
-	// touched, so the revision pipeline is not bypassed, and nothing is downloaded. It is the
-	// same shape as PATCH /configs: a route closed by a reason written about its neighbours.
 	r.Patch("/disable", disableRules)
 	return r
 }

@@ -11,24 +11,6 @@ import (
 	"github.com/TokenPLS/Hako/config"
 )
 
-// UpstreamScalarDefaultsJSON answers what this core does for a key when neither the profile
-// nor an override says anything -- mihomo's own DefaultRawConfig(), read by reflection over
-// the yaml tags.
-//
-// It is an export rather than a file the clients carry because all three platforms need the
-// same answer and none of the offline routes worked: the deviation decoder is not compiled
-// into the tvOS target, the generated JSON lives in the private adaptation docs (never shipped,
-// and never open-sourced), and the Clash API is not there when the tunnel is down -- which is
-// exactly when a settings page is open. The tvOS lane found the alternative already growing
-// in the tree: HakoTVConfigFacts hard-codes `?? "rule"` for mode. That one is right today,
-// and it is the shape that was wrong for sniffer.parse-pure-ip an hour earlier.
-//
-// Scalars and string lists, three levels deep; enums by name, not by integer. An empty list
-// is [], because "the default is nothing" is an answer and an absent key is not.
-//
-// The committed is generated from this same
-// function and reconciled against it by TestUpstreamScalarDefaults, so the file a gate reads
-// and the bytes a client receives cannot disagree.
 func UpstreamScalarDefaultsJSON() (*StringBox, error) {
 	rendered, err := renderUpstreamDefaults()
 	if err != nil {
@@ -56,8 +38,6 @@ func collectScalarDefaults(value reflect.Value, prefix string, depth int, into m
 			key = prefix + "." + tag
 		}
 		item := value.Field(i)
-		// An enum rendered as its integer is a value no client can use: mode 1 means nothing
-		// on a settings row, "rule" does. Every enum upstream uses here implements Stringer.
 		if item.Kind() != reflect.Struct && item.CanInterface() {
 			if stringer, ok := item.Interface().(fmt.Stringer); ok {
 				into[key] = stringer.String()
@@ -74,13 +54,6 @@ func collectScalarDefaults(value reflect.Value, prefix string, depth int, into m
 		case reflect.String:
 			into[key] = item.String()
 		case reflect.Slice:
-			// Lists of strings, or of anything that prints itself (netip.Prefix), render as
-			// a JSON array of strings. The macOS lane's list rows need the same "what does
-			// the core do when nobody speaks" answer the boolean rows do -- tun.inet6-address
-			// defaults to one prefix, the other route lists to nothing -- and the alternative
-			// was a second hand-copied table, which is the shape that just failed for
-			// sniffer.parse-pure-ip. An empty default is recorded as an empty array, because
-			// "the default is nothing" is an answer and absence from this file is not.
 			elements := []string{}
 			renderable := true
 			for j := 0; j < item.Len(); j++ {
@@ -112,11 +85,6 @@ func collectScalarDefaults(value reflect.Value, prefix string, depth int, into m
 }
 
 func renderUpstreamDefaults() (string, error) {
-	// DefaultRawConfig reads one package-level knob: geodata-mode comes from
-	// geodata.GeodataMode(), which geodata_maximal_stack_test sets true and does not restore.
-	// Alone this test saw false; after that one it saw true and reported the golden stale --
-	// an order-dependent answer dressed as an upstream change. Pin the knob to a fresh
-	// process's value for the read and put it back.
 	previousGeodataMode := geodata.GeodataMode()
 	geodata.SetGeodataMode(false)
 	defer geodata.SetGeodataMode(previousGeodataMode)

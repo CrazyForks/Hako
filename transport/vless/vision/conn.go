@@ -27,10 +27,6 @@ type Conn struct {
 	N.ExtendedWriter
 	userUUID uuid.UUID
 
-	// net.Conn permits concurrent method calls. Vision has direction-local
-	// parsers plus a small amount of state shared by Read, Write, Close and the
-	// headroom/unwrap helpers, so serialize each direction and guard the shared
-	// transitions separately. Never hold stateMu across network I/O.
 	readMu  sync.Mutex
 	writeMu sync.Mutex
 	stateMu sync.RWMutex
@@ -216,8 +212,6 @@ func (vc *Conn) Write(p []byte) (int, error) {
 	defer vc.writeMu.Unlock()
 
 	if vc.writeFiltering() {
-		// N.WriteBuffer needs the Vision headroom/unwrap methods. The wrapper
-		// preserves those methods while bypassing the public locking entry point.
 		return N.WriteBuffer(serializedWriter{Conn: vc}, buf.As(p))
 	}
 	return vc.ExtendedWriter.Write(p)

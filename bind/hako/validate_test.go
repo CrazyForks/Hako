@@ -13,13 +13,6 @@ import (
 
 func TestValidateForIOS(t *testing.T) {
 	t.Run("carries dhcp and system rather than refusing them", func(t *testing.T) {
-		// These used to be refused in every slot. Upstream refuses neither: it
-		// carries both as transports and reports failure per query
-		// (component/dhcp/dhcp.go:15 returns ErrNotResponding from the resolver),
-		// and sing-box ships DHCP in its Apple build and still only logs
-		// (dns/transport/dhcp/dhcp.go:95-113). The packet-tunnel path strips them
-		// with a warning before validation runs (the call at config_pipeline.go:159); the
-		// validator's job is not to make the leftovers fatal.
 		cfg := &config.Config{DNS: &config.DNS{
 			Enable:     true,
 			NameServer: []dns.NameServer{{Addr: "1.1.1.1:53"}, {Net: "dhcp", Addr: "en0"}, {Net: "system"}},
@@ -48,8 +41,6 @@ func TestValidateForIOS(t *testing.T) {
 	})
 
 	t.Run("tolerates DNS fragment naming an unroutable proxy (fails closed at runtime)", func(t *testing.T) {
-		// Rewriting/rejecting could silently reroute or block a startable
-		// config; the resolver simply fails closed unless the name appears.
 		cfg := &config.Config{DNS: &config.DNS{
 			Enable:     true,
 			NameServer: []dns.NameServer{{Addr: "1.1.1.1:53", ProxyName: "en0"}},
@@ -85,8 +76,6 @@ func TestValidateForIOS(t *testing.T) {
 	})
 
 	t.Run("no resolver slot makes dhcp or system fatal", func(t *testing.T) {
-		// The mirror of the subtest above, held across every slot the walk used
-		// to cover, so the overreach cannot come back one field at a time.
 		for _, scheme := range []dns.NameServer{{Net: "dhcp", Addr: "en0"}, {Net: "system"}} {
 			setters := map[string]func(*config.DNS){
 				"nameserver":              func(c *config.DNS) { c.NameServer = append(c.NameServer, scheme) },
@@ -130,8 +119,6 @@ func TestValidateForIOS(t *testing.T) {
 		}
 	})
 
-	// An nftables bypass set that upstream ignores off Linux is not grounds to refuse a
-	// whole profile. See TestRouteAddressSetLoadsExactlyAsUpstreamDoes for the evidence.
 	t.Run("route address sets load, because upstream ignores them off Linux", func(t *testing.T) {
 		cfg := &config.Config{
 			General: &config.General{Inbound: config.Inbound{Tun: LC.Tun{
@@ -146,12 +133,6 @@ func TestValidateForIOS(t *testing.T) {
 }
 
 func TestValidateRawNetworkExtensionIntentToleratesUnexecutableMetadataRules(t *testing.T) {
-	// iOS NE cannot execute PROCESS/UID/IN-USER rules (the sandbox exposes no
-	// process metadata), but overrideForIOS forces FindProcessMode Off so they
-	// safely no-op — they match nothing and the connection falls through to the
-	// next rule. Preflight must therefore TOLERATE them rather than reject the
-	// whole config, so any real mihomo subscription (which routinely carries a
-	// PROCESS-NAME rule for the client's own binary) starts on iOS unchanged.
 	tests := map[string]string{
 		"process name":     "rules:\n  - PROCESS-NAME,curl,DIRECT\n",
 		"process wildcard": "rules:\n  - PROCESS-PATH-WILDCARD,/private/*,DIRECT\n",
@@ -176,15 +157,6 @@ func TestValidateRawNetworkExtensionIntentToleratesUnexecutableMetadataRules(t *
 }
 
 func TestValidateRawNetworkExtensionIntentToleratesHostRouteKnobs(t *testing.T) {
-	// interface-name, routing-mark, find-process-mode and every tun host-route
-	// filter (include/exclude interface, uid, package, android-user, mac,
-	// src/dst port, auto-redirect, iproute2 marks) are desktop/Android routing
-	// primitives with no iOS equivalent: the NE selects its egress via
-	// NWPathMonitor and the sandbox exposes no UID/package/MAC/port host filter.
-	// They can never take effect AND they never change which proxy handles a
-	// flow, so normalizeRawNetworkExtensionSurfaces strips them (tolerate +
-	// strip) and the config starts unchanged rather than being hard-rejected.
-	// This is the "every upstream config must start; unsupported settings are tolerated and stripped" contract.
 	tolerated := map[string]string{
 		"interface-name":     "interface-name: en0\n",
 		"routing-mark":       "routing-mark: 233\n",
@@ -227,10 +199,6 @@ func TestValidateRawNetworkExtensionIntentDoesNotMatchOrdinaryPayload(t *testing
 }
 
 func TestValidateRawNetworkExtensionIntentToleratesOutboundEgressOverrides(t *testing.T) {
-	// A per-proxy interface-name/routing-mark egress override selects a physical
-	// interface/mark the NE does not expose, but it never changes which proxy
-	// handles a flow — stripOutboundEgressOverrides removes it (tolerate + strip).
-	// The preflight must therefore accept a config carrying one, not reject it.
 	for name, content := range map[string]string{
 		"proxy interface": `
 proxies:
@@ -271,13 +239,6 @@ proxy-providers:
 	}
 }
 
-// Renamed from ...RejectsOutboundDNSInterfaceFragments on 2026-08-27. The
-// refusal it pinned was one this tree invented: upstream parses the nested
-// servers and assigns nss[i].ProxyAdapter = outbound
-// (adapter/outbound/wireguard.go:496-508), so the fragment selects nothing and
-// the outbound is built anyway. The plan already reports that as a notice; this
-// now pins that the intent check lets the same input through, so re-adding the
-// refusal turns it red instead of leaving it unmeasured.
 func TestValidateRawNetworkExtensionIntentToleratesOutboundDNSInterfaceFragments(t *testing.T) {
 	for name, content := range map[string]string{
 		"top-level wireguard": `
@@ -311,8 +272,6 @@ proxy-providers:
 	}
 }
 
-// Same renaming, same reason: a '#proxy-name' fragment is overwritten by
-// ProxyAdapter upstream just as an interface fragment is.
 func TestValidateRawNetworkExtensionIntentToleratesIgnoredOutboundDNSProxyFragment(t *testing.T) {
 	content := `
 proxy-groups:
@@ -361,12 +320,6 @@ proxies:
 	}
 }
 
-// TestValidateDNSUsesStableFieldPriority is gone with its subject. It pinned
-// which slot's error surfaced first when several carried a dhcp:// or system://
-// resolver -- a determinism property of the per-slot rejection walk. No slot
-// rejects those schemes any more, so there is no ordering left to be stable
-// about; "no resolver slot makes dhcp or system fatal" above covers every slot
-// the walk used to visit.
 
 func TestDNSFragmentProxyNameMatchesMihomoURIParsing(t *testing.T) {
 	for input, want := range map[string]string{

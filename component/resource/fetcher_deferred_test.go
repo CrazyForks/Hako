@@ -14,13 +14,6 @@ import (
 	P "github.com/TokenPLS/Hako/constant/provider"
 )
 
-// A remote provider with nothing on disk used to be downloaded inside Initial, on
-// the Start path, twenty seconds per attempt. On a phone that is the tunnel not
-// coming up because a rule set's host is unreachable. With DeferRemoteInitialFetch
-// the provider starts empty -- the same shape upstream leaves it in when the
-// download fails -- and a background loop fetches it with backoff until it lands,
-// whatever the interval says; the pull loop, if the interval asks for one, takes
-// over from there.
 
 type scriptedVehicle struct {
 	path     string
@@ -113,7 +106,6 @@ func TestDeferredInitialReturnsAtOnceAndLoadsInTheBackground(t *testing.T) {
 	if vehicle.written.Load() != 1 {
 		t.Fatalf("the loaded payload must be written to the vehicle path for the next start")
 	}
-	// interval 0: the first load is the only load.
 	time.Sleep(300 * time.Millisecond)
 	if reads := vehicle.reads.Load(); reads != 3 {
 		t.Fatalf("interval 0 kept fetching after the first success: reads = %d", reads)

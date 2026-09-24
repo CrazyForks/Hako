@@ -112,12 +112,6 @@ func (f *TCPForwarder) Forward(r *tcp.ForwarderRequest) {
 	}()
 }
 
-// configureForwardedTCPEndpoint sets up the gVisor endpoint that stands in for the
-// application's side of a forwarded TCP connection. Keepalive stays on so a peer that
-// vanished without a FIN is still noticed, at gVisor's own pace (idle 2 h, interval
-// 75 s). The forced idle 15 s / interval 15 s that used to be set here made every idle
-// connection on the device wake the extension four times a minute for a probe and its
-// answer that never left the device; sing-tun v0.8.12 dropped it for the same reason.
 func configureForwardedTCPEndpoint(endpoint tcpip.Endpoint) {
 	endpoint.SocketOptions().SetKeepAlive(true)
 }

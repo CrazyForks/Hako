@@ -34,11 +34,6 @@ type Hysteria2 struct {
 	*Base
 
 	option *Hysteria2Option
-	// The client is built on the first dial, not at load. NewHysteria2 still
-	// constructs one to keep every load-time rejection exactly where it was
-	// -- construction is the validation -- and then discards it: an idle
-	// node keeps its option and base, not a client, a QUIC config and a
-	// fully expanded port-hopping array per node of a subscription.
 	client      *hysteria2.Client
 	clientOnce  sync.Once
 	clientErr   error
@@ -346,11 +341,6 @@ func NewHysteria2(option Hysteria2Option) (*Hysteria2, error) {
 		return hysteria2.NewClient(clientOptions)
 	}
 
-	// Construction is the validation: run the whole build once at load so a
-	// bad option is rejected exactly where it always was, then let go of the
-	// result -- a client that never dialed holds no connection, and
-	// CloseWithError on it is a no-op that keeps that true if the transport
-	// ever grows construction-time resources.
 	probe, err := build()
 	if err != nil {
 		return nil, err

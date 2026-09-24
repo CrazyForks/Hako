@@ -83,20 +83,6 @@ func ListenPacket(ctx context.Context, network, address string, rAddrPort netip.
 	if opt.addrReuse {
 		addrReuseToListenConfig(lc)
 	}
-	// A socket hook owns the socket's scoping (see DialContext), but it is
-	// handed the LOCAL address only and every outbound UDP dial passes "" for
-	// that -- so the hook cannot see the peer, and the exemption below it for
-	// a loopback peer never ran while a hook was installed. Apple installs one
-	// unconditionally, and a proxy whose server sat on 127.0.0.1 got its UDP
-	// bound to a physical interface and "can't assign requested address". A
-	// peer that is not global unicast therefore takes the hook-less branch,
-	// where upstream's own exemption already lives; a routable peer, or no
-	// peer at all, is scoped by the hook as before.
-	//
-	// The exemption is conditioned on SocketHookScopesInterfaceOnly so it
-	// applies to a hook that does nothing but scope. A hook that audits or tags
-	// still sees every socket, which is what it saw before -- skipping it
-	// would have been a silent change to somebody else's contract.
 	peerScopable := !rAddrPort.IsValid() || rAddrPort.Addr().Unmap().IsGlobalUnicast()
 	if !SocketHookScopesInterfaceOnly {
 		peerScopable = true
@@ -114,9 +100,6 @@ func ListenPacket(ctx context.Context, network, address string, rAddrPort netip.
 		}
 		if !peerScopable {
 			// avoid "The requested address is not valid in its context."
-			// Upstream tested IsLoopback here; not-global-unicast is what its
-			// darwin bindControl tests (bind_darwin.go:14-19), and the two
-			// paths should refuse to scope the same peers.
 			opt.interfaceName = ""
 		}
 		if opt.interfaceName != "" {
@@ -150,9 +133,6 @@ func dialContext(ctx context.Context, network string, destination netip.Addr, po
 	if err != nil {
 		return nil, err
 	}
-	// IPv4Only/IPv6Only select the logical DNS answer family. A platform
-	// transform may still need an IPv6 socket to reach that IPv4 target through
-	// NAT64 (or vice versa), so align the concrete socket family afterwards.
 	if originalDestination.Is4() && destination.Is6() {
 		switch network {
 		case "tcp4":
@@ -185,11 +165,6 @@ func dialContext(ctx context.Context, network string, destination netip.Addr, po
 	keepalive.SetNetDialer(dialer)
 	mptcp.SetNetDialer(dialer, opt.mpTcp)
 
-	// A socket hook owns the socket's scoping, so interfaceName, routingMark and tfo are
-	// deliberately ignored while one is installed. The comment here used to say "in CMFA",
-	// which reads as Android-only; the Apple binding installs the same hook
-	// (bind/hako/hook.go), so this branch is the normal path on iOS and macOS too. That
-	// mis-reading is what left the tfo option labelled as effective in the iOS UI.
 	if DefaultSocketHook != nil {
 		socketHookToToDialer(dialer)
 	} else {
@@ -268,12 +243,6 @@ func dualStackDialContext(ctx context.Context, dialFn dialFunc, network string, 
 
 	preferIPVersion := opt.prefer
 
-	// The fallback ticker only ever fires for a fallback that exists, and a fallback
-	// only exists when one leg is non-primary -- which requires prefer to be 4 or 6.
-	// With prefer unset both legs are primary, the first success returns immediately,
-	// and the ticker is allocated and stopped for nothing on every dual-stack dial.
-	// Created only when it can fire; a nil channel blocks forever in select, which is
-	// exactly the wanted behaviour.
 	var fallbackTick <-chan time.Time
 	if preferIPVersion == 4 || preferIPVersion == 6 {
 		fallbackTicker := time.NewTicker(dualStackFallbackTimeout)
@@ -287,20 +256,6 @@ func dualStackDialContext(ctx context.Context, dialFn dialFunc, network string, 
 
 	var wg sync.WaitGroup
 
-	// Each leg gets its own cancellable context so a leg we are no longer waiting for is
-	// released immediately. Previously both legs ran on the caller's context, so a leg
-	// that stalled held its dial -- and its socket, and the radio wake behind it -- until
-	// the caller's own deadline, five seconds by default.
-	//
-	// EVERY leg's cancel runs before returning, the winner's included. An earlier version
-	// spared the winner out of caution about a custom opt.netDialer still using its
-	// context; that was wrong, because Go retains a cancellable child in its parent's
-	// children set until one of the two cancels runs, so one uncancelled winner per
-	// successful dial accumulated for the parent's whole life. Cancelling the winner is
-	// safe by the contract net.Dialer documents -- a connection, once established, is
-	// unaffected by later expiry of its dial context -- and this tree already depends on
-	// exactly that: tunnel.go dials under a WithTimeout it cancels immediately afterwards
-	// and then uses the connection for the rest of its life.
 	cancels := make([]context.CancelFunc, 0, 2)
 	cancelAllLegs := func() {
 		for _, cancel := range cancels {

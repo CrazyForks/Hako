@@ -10,7 +10,6 @@ import (
 )
 
 const (
-	// RFC IDs
 	max_idle_timeout                    uint64 = 0x1
 	max_udp_payload_size                uint64 = 0x3
 	initial_max_data                    uint64 = 0x4
@@ -23,13 +22,12 @@ const (
 	disable_active_migration            uint64 = 0xc
 	active_connection_id_limit          uint64 = 0xe
 	initial_source_connection_id        uint64 = 0xf
-	version_information                 uint64 = 0x11 // RFC 9368
+	version_information                 uint64 = 0x11
 	padding                             uint64 = 0x15
-	max_datagram_frame_size             uint64 = 0x20 // RFC 9221
+	max_datagram_frame_size             uint64 = 0x20
 	grease_quic_bit                     uint64 = 0x2ab2
 
-	// Legacy IDs from draft
-	version_information_legacy uint64 = 0xff73db // draft-ietf-quic-version-negotiation-13 and early
+	version_information_legacy uint64 = 0xff73db
 )
 
 type TransportParameters []TransportParameter
@@ -44,40 +42,25 @@ func (tps TransportParameters) Marshal() []byte {
 	return b
 }
 
-// TransportParameter represents a QUIC transport parameter.
-//
-// Caller will write the following to the wire:
-//
-//	var b []byte
-//	b = quicvarint.Append(b, ID())
-//	b = quicvarint.Append(b, len(Value()))
-//	b = append(b, Value())
-//
-// Therefore Value() should return the exact bytes to be written to the wire AFTER the length field,
-// i.e., the bytes MAY be a Variable Length Integer per RFC depending on the type of the transport
-// parameter, but MUST NOT including the length field unless the parameter is defined so.
 type TransportParameter interface {
 	ID() uint64
 	Value() []byte
 }
 
 type GREASETransportParameter struct {
-	IdOverride    uint64 // if set to a valid GREASE ID, use this instead of randomly generated one.
-	Length        uint16 // if len(ValueOverride) == 0, will generate random data of this size.
-	ValueOverride []byte // if len(ValueOverride) > 0, use this instead of random bytes.
+	IdOverride    uint64
+	Length        uint16
+	ValueOverride []byte
 }
 
 const (
 	GREASE_MAX_MULTIPLIER = (0x3FFFFFFFFFFFFFFF - 27) / 31
 )
 
-// IsGREASEID returns true if id is a valid GREASE ID for
-// transport parameters.
 func (GREASETransportParameter) IsGREASEID(id uint64) bool {
 	return id >= 27 && (id-27)%31 == 0
 }
 
-// GetGREASEID returns a random valid GREASE ID for transport parameters.
 func (GREASETransportParameter) GetGREASEID() uint64 {
 	max := big.NewInt(GREASE_MAX_MULTIPLIER)
 
@@ -104,7 +87,7 @@ func (g *GREASETransportParameter) Value() []byte {
 	return g.ValueOverride
 }
 
-type MaxIdleTimeout uint64 // in milliseconds
+type MaxIdleTimeout uint64
 
 func (MaxIdleTimeout) ID() uint64 {
 	return max_idle_timeout
@@ -200,7 +183,6 @@ func (*DisableActiveMigration) ID() uint64 {
 	return disable_active_migration
 }
 
-// Its Value MUST ALWAYS be empty.
 func (*DisableActiveMigration) Value() []byte {
 	return []byte{}
 }
@@ -215,7 +197,7 @@ func (a ActiveConnectionIDLimit) Value() []byte {
 	return quicvarint.Append([]byte{}, uint64(a))
 }
 
-type InitialSourceConnectionID []byte // if empty, will be set to the Connection ID used for the Initial packet.
+type InitialSourceConnectionID []byte
 
 func (InitialSourceConnectionID) ID() uint64 {
 	return initial_source_connection_id
@@ -227,17 +209,17 @@ func (i InitialSourceConnectionID) Value() []byte {
 
 type VersionInformation struct {
 	ChoosenVersion    uint32
-	AvailableVersions []uint32 // Also known as "Other Versions" in early drafts.
+	AvailableVersions []uint32
 
-	LegacyID bool // If true, use the legacy-assigned ID (0xff73db) instead of the RFC-assigned one (0x11).
+	LegacyID bool
 }
 
 const (
-	VERSION_NEGOTIATION uint32 = 0x00000000 // rfc9000
-	VERSION_1           uint32 = 0x00000001 // rfc9000
-	VERSION_2           uint32 = 0x6b3343cf // rfc9369
+	VERSION_NEGOTIATION uint32 = 0x00000000
+	VERSION_1           uint32 = 0x00000001
+	VERSION_2           uint32 = 0x6b3343cf
 
-	VERSION_GREASE uint32 = 0x0a0a0a0a // -> 0x?a?a?a?a
+	VERSION_GREASE uint32 = 0x0a0a0a0a
 )
 
 func (v *VersionInformation) ID() uint64 {
@@ -261,14 +243,13 @@ func (v *VersionInformation) Value() []byte {
 }
 
 func (*VersionInformation) GetGREASEVersion() uint32 {
-	// get a random uint32
 	max := big.NewInt(math.MaxUint32)
 	randVal, err := rand.Int(rand.Reader, max)
 	if err != nil {
 		return VERSION_GREASE
 	}
 
-	return uint32(randVal.Uint64()&math.MaxUint32) | 0x0a0a0a0a // all GREASE versions are in 0x?a?a?a?a
+	return uint32(randVal.Uint64()&math.MaxUint32) | 0x0a0a0a0a
 }
 
 type PaddingTransportParameter []byte
@@ -297,7 +278,6 @@ func (*GREASEQUICBit) ID() uint64 {
 	return grease_quic_bit
 }
 
-// Its Value MUST ALWAYS be empty.
 func (*GREASEQUICBit) Value() []byte {
 	return []byte{}
 }

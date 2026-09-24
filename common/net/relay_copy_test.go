@@ -38,8 +38,6 @@ func TestRelayCopyPreservesCachedBytesAndCounters(t *testing.T) {
 	if got := output.String(); got != want {
 		t.Fatalf("relayCopy() output = %q, want %q", got, want)
 	}
-	// sing's Copy contract excludes already-cached prefix bytes from its return
-	// value while still accounting them in both counter chains.
 	if n != int64(len(streamed)) {
 		t.Errorf("relayCopy() bytes = %d, want streamed length %d", n, len(streamed))
 	}

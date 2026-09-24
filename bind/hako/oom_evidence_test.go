@@ -19,9 +19,6 @@ func setupOOMEvidenceTest(t *testing.T) string {
 	}
 	oomEvidenceLastWrite.Store(0)
 	t.Cleanup(func() { oomEvidenceLastWrite.Store(0) })
-	// The 50 MiB Setup armed a real monitor over the real test process, whose
-	// footprint dwarfs that budget; with shedding the default it would close
-	// trackers other tests register. Park it.
 	t.Cleanup(func() { startPressureThresholdMonitor(0, pressureThresholdShedEnabled.Load()) })
 	startPressureThresholdMonitor(0, pressureThresholdShedEnabled.Load())
 	return filepath.Join(opts.BasePath, oomEvidenceFileName)

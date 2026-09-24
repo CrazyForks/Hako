@@ -53,7 +53,6 @@ func (t *NativeTun) WritePacket(pkt *stack.PacketBuffer) (int, error) {
 		numIovecs++
 	}
 
-	// Allocate small iovec arrays on the stack.
 	var iovecsArr [8]unix.Iovec
 	iovecs := iovecsArr[:0]
 	if numIovecs > len(iovecsArr) {

@@ -155,9 +155,6 @@ func (m *defaultInterfaceMonitor) checkUpdate() error {
 			if routeMessage.Flags&unix.RTF_GATEWAY == 0 {
 				continue
 			}
-			// if routeMessage.Flags&unix.RTF_IFSCOPE != 0 {
-			//continue
-			//}
 			if routeInterface.Flags&net.FlagLoopback != 0 {
 				continue
 			}

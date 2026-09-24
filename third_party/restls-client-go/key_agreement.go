@@ -16,30 +16,19 @@ import (
 	"io"
 )
 
-// a keyAgreement implements the client and server side of a TLS key agreement
-// protocol by generating and processing key exchange messages.
 type keyAgreement interface {
-	// On the server side, the first two methods are called in order.
 
-	// In the case that the key agreement protocol doesn't use a
-	// ServerKeyExchange message, generateServerKeyExchange can return nil,
-	// nil.
 	generateServerKeyExchange(*Config, *Certificate, *clientHelloMsg, *serverHelloMsg) (*serverKeyExchangeMsg, error)
 	processClientKeyExchange(*Config, *Certificate, *clientKeyExchangeMsg, uint16) ([]byte, error)
 
-	// On the client side, the next two methods are called in order.
 
-	// This method may not be called if the server doesn't send a
-	// ServerKeyExchange message.
-	processServerKeyExchange(*Config, *clientHelloMsg, *serverHelloMsg, *x509.Certificate, *serverKeyExchangeMsg, []*ecdh.PrivateKey /* #Restls# */) error
+	processServerKeyExchange(*Config, *clientHelloMsg, *serverHelloMsg, *x509.Certificate, *serverKeyExchangeMsg, []*ecdh.PrivateKey) error
 	generateClientKeyExchange(*Config, *clientHelloMsg, *x509.Certificate) ([]byte, *clientKeyExchangeMsg, error)
 }
 
 var errClientKeyExchange = errors.New("tls: invalid ClientKeyExchange message")
 var errServerKeyExchange = errors.New("tls: invalid ServerKeyExchange message")
 
-// rsaKeyAgreement implements the standard TLS key agreement where the client
-// encrypts the pre-master secret to the server's public key.
 type rsaKeyAgreement struct{}
 
 func (ka rsaKeyAgreement) generateServerKeyExchange(config *Config, cert *Certificate, clientHello *clientHelloMsg, hello *serverHelloMsg) (*serverKeyExchangeMsg, error) {
@@ -60,21 +49,14 @@ func (ka rsaKeyAgreement) processClientKeyExchange(config *Config, cert *Certifi
 	if !ok {
 		return nil, errors.New("tls: certificate private key does not implement crypto.Decrypter")
 	}
-	// Perform constant time RSA PKCS #1 v1.5 decryption
 	preMasterSecret, err := priv.Decrypt(config.rand(), ciphertext, &rsa.PKCS1v15DecryptOptions{SessionKeyLen: 48})
 	if err != nil {
 		return nil, err
 	}
-	// We don't check the version number in the premaster secret. For one,
-	// by checking it, we would leak information about the validity of the
-	// encrypted pre-master secret. Secondly, it provides only a small
-	// benefit against a downgrade attack and some implementations send the
-	// wrong version anyway. See the discussion at the end of section
-	// 7.4.7.1 of RFC 4346.
 	return preMasterSecret, nil
 }
 
-func (ka rsaKeyAgreement) processServerKeyExchange(config *Config, clientHello *clientHelloMsg, serverHello *serverHelloMsg, cert *x509.Certificate, skx *serverKeyExchangeMsg, eagerKey []*ecdh.PrivateKey /* #Restls# */) error {
+func (ka rsaKeyAgreement) processServerKeyExchange(config *Config, clientHello *clientHelloMsg, serverHello *serverHelloMsg, cert *x509.Certificate, skx *serverKeyExchangeMsg, eagerKey []*ecdh.PrivateKey) error {
 	return errors.New("tls: unexpected ServerKeyExchange")
 }
 
@@ -103,7 +85,6 @@ func (ka rsaKeyAgreement) generateClientKeyExchange(config *Config, clientHello 
 	return preMasterSecret, ckx, nil
 }
 
-// sha1Hash calculates a SHA1 hash over the given byte slices.
 func sha1Hash(slices [][]byte) []byte {
 	hsha1 := sha1.New()
 	for _, slice := range slices {
@@ -112,8 +93,6 @@ func sha1Hash(slices [][]byte) []byte {
 	return hsha1.Sum(nil)
 }
 
-// md5SHA1Hash implements TLS 1.0's hybrid hash function which consists of the
-// concatenation of an MD5 and SHA1 hash.
 func md5SHA1Hash(slices [][]byte) []byte {
 	md5sha1 := make([]byte, md5.Size+sha1.Size)
 	hmd5 := md5.New()
@@ -125,10 +104,6 @@ func md5SHA1Hash(slices [][]byte) []byte {
 	return md5sha1
 }
 
-// hashForServerKeyExchange hashes the given slices and returns their digest
-// using the given hash function (for >= TLS 1.2) or using a default based on
-// the sigType (for earlier TLS versions). For Ed25519 signatures, which don't
-// do pre-hashing, it returns the concatenation of the slices.
 func hashForServerKeyExchange(sigType uint8, hashFunc crypto.Hash, version uint16, slices ...[]byte) []byte {
 	if sigType == signatureEd25519 {
 		var signed []byte
@@ -151,17 +126,11 @@ func hashForServerKeyExchange(sigType uint8, hashFunc crypto.Hash, version uint1
 	return md5SHA1Hash(slices)
 }
 
-// ecdheKeyAgreement implements a TLS key agreement where the server
-// generates an ephemeral EC public/private key pair and signs it. The
-// pre-master secret is then calculated using ECDH. The signature may
-// be ECDSA, Ed25519 or RSA.
 type ecdheKeyAgreement struct {
 	version uint16
 	isRSA   bool
 	key     *ecdh.PrivateKey
 
-	// ckx and preMasterSecret are generated in processServerKeyExchange
-	// and returned in generateClientKeyExchange.
 	ckx             *clientKeyExchangeMsg
 	preMasterSecret []byte
 }
@@ -188,10 +157,9 @@ func (ka *ecdheKeyAgreement) generateServerKeyExchange(config *Config, cert *Cer
 	}
 	ka.key = key
 
-	// See RFC 4492, Section 5.4.
 	ecdhePublic := key.PublicKey().Bytes()
 	serverECDHEParams := make([]byte, 1+2+1+len(ecdhePublic))
-	serverECDHEParams[0] = 3 // named curve
+	serverECDHEParams[0] = 3
 	serverECDHEParams[1] = byte(curveID >> 8)
 	serverECDHEParams[2] = byte(curveID)
 	serverECDHEParams[3] = byte(len(ecdhePublic))
@@ -272,11 +240,11 @@ func (ka *ecdheKeyAgreement) processClientKeyExchange(config *Config, cert *Cert
 	return preMasterSecret, nil
 }
 
-func (ka *ecdheKeyAgreement) processServerKeyExchange(config *Config, clientHello *clientHelloMsg, serverHello *serverHelloMsg, cert *x509.Certificate, skx *serverKeyExchangeMsg, keyPtr []*ecdh.PrivateKey /* #Restls# */) (err /* #Restls# */ error) {
+func (ka *ecdheKeyAgreement) processServerKeyExchange(config *Config, clientHello *clientHelloMsg, serverHello *serverHelloMsg, cert *x509.Certificate, skx *serverKeyExchangeMsg, keyPtr []*ecdh.PrivateKey) (err error) {
 	if len(skx.key) < 4 {
 		return errServerKeyExchange
 	}
-	if skx.key[0] != 3 { // named curve
+	if skx.key[0] != 3 {
 		return errors.New("tls: server selected unsupported curve")
 	}
 	curveID := CurveID(skx.key[1])<<8 | CurveID(skx.key[2])
@@ -297,23 +265,19 @@ func (ka *ecdheKeyAgreement) processServerKeyExchange(config *Config, clientHell
 		return errors.New("tls: server selected unsupported curve")
 	}
 
-	// #Restls# Begin
 	var key *ecdh.PrivateKey
 	if curveID == CurveP521 || len(keyPtr) == 0 {
 		if curveID == CurveP521 {
 			config.ClientID.Store(&HelloChrome_Auto)
 		}
-		// params, err := generateECDHEParameters(config.rand(), curveID)
 		key_, err := generateECDHEKey(config.rand(), curveID)
 		if err != nil {
 			return err
 		}
 		key = key_
 	} else {
-		// ka.params = *paramsPtr[curveIDMap[curveID]]
 		key = keyPtr[curveIDMap[curveID]]
 	}
-	// #Restls# End
 
 	ka.key = key
 

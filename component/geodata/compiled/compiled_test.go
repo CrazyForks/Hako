@@ -45,10 +45,6 @@ func TestCompiledSetRoundTrips(t *testing.T) {
 	}
 }
 
-// The name reaches this package from a configuration file, so a category that
-// names a path is a write outside the directory unless it is refused. Cleaning
-// is not enough: "cn/../../x" cleans to something legal-looking and still
-// escapes when joined by a caller that trusts the result.
 func TestPathRefusesNamesThatEscapeTheDirectory(t *testing.T) {
 	for _, name := range []string{
 		"../evil", "cn/../../evil", `..\evil`, "sub/dir", "", "   ",
@@ -86,9 +82,6 @@ func TestLoadReportsAbsenceSeparatelyFromFailure(t *testing.T) {
 	}
 }
 
-// A tunnel reads this directory while the App writes it. A reader that can see
-// a partially written file cannot tell it from a corrupt one, and would take
-// the tunnel down over a cache.
 func TestStoreIsAtomicAndLeavesNoDebris(t *testing.T) {
 	directory := t.TempDir()
 	set, count := sampleSet(t, "+.example.com")

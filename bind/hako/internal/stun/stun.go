@@ -110,9 +110,6 @@ func (f NATFiltering) String() string {
 
 type TransactionID [12]byte
 
-// DialFunc creates one UDP socket routed through the caller-selected data
-// plane and returns the exact logical address used for the first request. The
-// socket must support WriteTo for RFC 5780's alternate server addresses.
 type DialFunc func(ctx context.Context, endpoint string) (net.PacketConn, netip.AddrPort, error)
 
 type Options struct {
@@ -701,9 +698,6 @@ func paddingLength(length int) int {
 	return (4 - length%4) % 4
 }
 
-// NormalizeServer accepts host, host:port, IPv4 and bracketed or bare IPv6.
-// Schemes, paths, control characters and zero ports are rejected before any
-// resolver or socket work occurs.
 func NormalizeServer(raw string) (string, error) {
 	server := strings.TrimSpace(raw)
 	if server == "" {
@@ -737,8 +731,6 @@ func NormalizeServer(raw string) (string, error) {
 	return net.JoinHostPort(host, strconv.FormatUint(port, 10)), nil
 }
 
-// SystemDial is used by the standalone app-process test. When a Packet Tunnel
-// is active, iOS routes this ordinary UDP socket through that tunnel.
 func SystemDial(ctx context.Context, endpoint string) (net.PacketConn, netip.AddrPort, error) {
 	host, portText, err := net.SplitHostPort(endpoint)
 	if err != nil {

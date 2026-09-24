@@ -6,10 +6,6 @@ import (
 	"time"
 )
 
-// Hako's producer includes the extension's footprint in each memory frame.
-// Preserve those frames byte-for-byte. Older producers still need the bounded,
-// session-owned snapshot request; a present but unusable field is not evidence
-// of an old producer and must not trigger another request.
 const memoryFootprintFetchTimeout = time.Second
 
 func (c *ClashAPIClient) enrichMemoryFrames(ctx context.Context, next func(string)) func(string) {
@@ -29,9 +25,6 @@ func (c *ClashAPIClient) enrichMemoryFrames(ctx context.Context, next func(strin
 	}
 }
 
-// fetchSnapshotFootprint asks the extension's snapshot route for the current
-// phys_footprint. 0 means no usable reading (error, missing key, or a
-// platform that reports none) — the caller passes the frame through then.
 func (c *ClashAPIClient) fetchSnapshotFootprint(parent context.Context) int64 {
 	ctx, cancel := context.WithTimeout(parent, memoryFootprintFetchTimeout)
 	defer cancel()
@@ -56,8 +49,6 @@ func memoryPayloadObject(payload string) (map[string]json.RawMessage, bool) {
 	return object, true
 }
 
-// The legacy merge preserves other JSON values, including integers that cannot
-// round-trip through float64. Non-objects and existing fields pass through.
 func mergeFootprintIntoMemoryPayload(payload string, footprint int64) string {
 	object, valid := memoryPayloadObject(payload)
 	if !valid {

@@ -11,8 +11,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// IPAdapterWINSServerAddress structure stores a single Windows Internet Name Service (WINS) server address in a linked list of WINS server addresses for a particular adapter.
-// https://docs.microsoft.com/en-us/windows/desktop/api/iptypes/ns-iptypes-_ip_adapter_wins_server_address_lh
 type IPAdapterWINSServerAddress struct {
 	Length  uint32
 	_       uint32
@@ -21,8 +19,6 @@ type IPAdapterWINSServerAddress struct {
 	_       [4]byte
 }
 
-// IPAdapterGatewayAddress structure stores a single gateway address in a linked list of gateway addresses for a particular adapter.
-// https://docs.microsoft.com/en-us/windows/desktop/api/iptypes/ns-iptypes-_ip_adapter_gateway_address_lh
 type IPAdapterGatewayAddress struct {
 	Length  uint32
 	_       uint32
@@ -31,9 +27,6 @@ type IPAdapterGatewayAddress struct {
 	_       [4]byte
 }
 
-// IPAdapterAddresses structure is the header node for a linked list of addresses for a particular adapter. This structure can simultaneously be used as part of a linked list of IP_ADAPTER_ADDRESSES structures.
-// https://docs.microsoft.com/en-us/windows/desktop/api/iptypes/ns-iptypes-_ip_adapter_addresses_lh
-// This is a modified and extended version of windows.IpAdapterAddresses.
 type IPAdapterAddresses struct {
 	Length                 uint32
 	IfIndex                uint32
@@ -75,8 +68,6 @@ type IPAdapterAddresses struct {
 	_                      [4]byte
 }
 
-// MibIPInterfaceRow structure stores interface management information for a particular IP address family on a network interface.
-// https://docs.microsoft.com/en-us/windows/desktop/api/netioapi/ns-netioapi-_mib_ipinterface_row
 type MibIPInterfaceRow struct {
 	Family                               AddressFamily
 	_                                    [4]byte
@@ -116,16 +107,12 @@ type MibIPInterfaceRow struct {
 	DisableDefaultRoutes                 bool
 }
 
-// mibIPInterfaceTable structure contains a table of IP interface entries.
-// https://docs.microsoft.com/en-us/windows/desktop/api/netioapi/ns-netioapi-_mib_ipinterface_table
 type mibIPInterfaceTable struct {
 	numEntries uint32
 	_          [4]byte
 	table      [anySize]MibIPInterfaceRow
 }
 
-// MibIfRow2 structure stores information about a particular interface.
-// https://docs.microsoft.com/en-us/windows/desktop/api/netioapi/ns-netioapi-_mib_if_row2
 type MibIfRow2 struct {
 	InterfaceLUID               LUID
 	InterfaceIndex              uint32
@@ -171,16 +158,12 @@ type MibIfRow2 struct {
 	OutQLen                     uint64
 }
 
-// mibIfTable2 structure contains a table of logical and physical interface entries.
-// https://docs.microsoft.com/en-us/windows/desktop/api/netioapi/ns-netioapi-_mib_if_table2
 type mibIfTable2 struct {
 	numEntries uint32
 	_          [4]byte
 	table      [anySize]MibIfRow2
 }
 
-// MibUnicastIPAddressRow structure stores information about a unicast IP address.
-// https://docs.microsoft.com/en-us/windows/desktop/api/netioapi/ns-netioapi-_mib_unicastipaddress_row
 type MibUnicastIPAddressRow struct {
 	Address            RawSockaddrInet
 	_                  [4]byte
@@ -197,16 +180,12 @@ type MibUnicastIPAddressRow struct {
 	CreationTimeStamp  int64
 }
 
-// mibUnicastIPAddressTable structure contains a table of unicast IP address entries.
-// https://docs.microsoft.com/en-us/windows/desktop/api/netioapi/ns-netioapi-_mib_unicastipaddress_table
 type mibUnicastIPAddressTable struct {
 	numEntries uint32
 	_          [4]byte
 	table      [anySize]MibUnicastIPAddressRow
 }
 
-// MibAnycastIPAddressRow structure stores information about an anycast IP address.
-// https://docs.microsoft.com/en-us/windows/desktop/api/netioapi/ns-netioapi-_mib_anycastipaddress_row
 type MibAnycastIPAddressRow struct {
 	Address        RawSockaddrInet
 	_              [4]byte
@@ -215,16 +194,12 @@ type MibAnycastIPAddressRow struct {
 	ScopeID        uint32
 }
 
-// mibAnycastIPAddressTable structure contains a table of anycast IP address entries.
-// https://docs.microsoft.com/en-us/windows/desktop/api/netioapi/ns-netioapi-mib_anycastipaddress_table
 type mibAnycastIPAddressTable struct {
 	numEntries uint32
 	_          [4]byte
 	table      [anySize]MibAnycastIPAddressRow
 }
 
-// mibIPforwardTable2 structure contains a table of IP route entries.
-// https://docs.microsoft.com/en-us/windows/desktop/api/netioapi/ns-netioapi-_mib_ipforward_table2
 type mibIPforwardTable2 struct {
 	numEntries uint32
 	_          [4]byte

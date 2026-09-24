@@ -56,12 +56,6 @@ func TestControlledHysteria2Interop(t *testing.T) {
 	}
 }
 
-// controlledInteropDeadline bounds the positive-path waits (URLTest, packet
-// listen, UDP echo). These servers are all on 127.0.0.1, so the deadline is a
-// hang detector, not a latency budget -- yet at 5s the Gecko variant (obfs
-// padding 600-1100) missed it in 1/5 full-suite runs while passing 10/10 in
-// isolation, always at exactly 5.00s: scheduler pressure, not the network.
-// Green runs never pay this value; only a genuine hang does.
 const controlledInteropDeadline = 30 * time.Second
 
 func runControlledHysteria2Variant(

@@ -16,20 +16,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// GeoIPCountriesIn reports every GeoIP country code a configuration names.
-//
-// The GeoIP surfaces are narrower than geosite's, and deliberately handled as such rather
-// than by copying the geosite scanner. Geosite has a token form -- geosite:cn as a DNS
-// nameserver-policy key -- and GeoIP has none: the ONLY marker-led spelling is a rule
-// (GEOIP,cn / SRC-GEOIP,cn, and the parser trims, so GEOIP , cn is the same rule).
-//
-// Reusing the geosite scanner's "marker followed by a colon" branch here would be actively
-// wrong: dns.fallback-filter.geoip is a BOOLEAN, so "geoip: true" would be read as a
-// country code named true. The one colon-led surface that does name a country,
-// fallback-filter.geoip-code, is read structurally instead.
-//
-// Naming a country that does not exist costs a failed compile and nothing else, so this
-// errs toward collecting too much.
 func GeoIPCountriesIn(content string) []string {
 	lowered := strings.ToLower(content)
 
@@ -42,9 +28,6 @@ func GeoIPCountriesIn(content string) []string {
 		}
 		return false
 	}
-	// SRC-GEOIP must count, and it puts a '-' immediately before the word, so the boundary
-	// rule cannot reject '-' the way the geosite one does. "notgeoip" is still rejected
-	// because a letter precedes the word.
 	atBoundary := func(index int) bool {
 		if index == 0 {
 			return true
@@ -68,14 +51,10 @@ func GeoIPCountriesIn(content string) []string {
 	var found []string
 	collect := func(name string) {
 		name = strings.ToLower(strings.TrimSpace(name))
-		// Negation is applied to the matcher after loading, so !cn and cn read the same
-		// artifact; keeping the '!' would compile a second copy nothing looks up.
 		name = strings.TrimPrefix(name, "!")
 		if name == "" {
 			return
 		}
-		// lan is answered before any matcher is loaded (rules/common/geoip.go:48), so
-		// compiling it would report a failure that is not one.
 		if name == "lan" {
 			return
 		}
@@ -106,8 +85,6 @@ func GeoIPCountriesIn(content string) []string {
 		for next < len(lowered) && isSpace(lowered[next]) {
 			next++
 		}
-		// Only the comma form. A colon here is geoip: (a boolean) or geoip-code (read
-		// structurally below), and neither names a country at this position.
 		if next >= len(lowered) || lowered[next] != ',' {
 			continue
 		}
@@ -116,22 +93,14 @@ func GeoIPCountriesIn(content string) []string {
 		for end < len(lowered) && !endsSegment(lowered[end]) {
 			end++
 		}
-		// Rule form: the first piece is the country, the rest is the target and params.
 		pieces := strings.Split(lowered[start:end], ",")
 		collect(pieces[0])
-		// The segment is consumed for the reason the geosite scanner documents: rescanning
-		// it makes repeated markers on one crafted line quadratic, on the activation path.
 		offset = end
 	}
 	collectFallbackFilterGeoIPCode(content, collect)
 	return found
 }
 
-// collectFallbackFilterGeoIPCode reads dns.fallback-filter.geoip-code, the one surface that
-// names a country with no marker in front of it. Read as structure because a text scan has
-// nothing to anchor on -- and because the sibling key on the same block is a boolean.
-// Content that does not parse as YAML is left to the text scan that already ran; this path
-// only ever adds.
 func collectFallbackFilterGeoIPCode(content string, collect func(string)) {
 	var document struct {
 		DNS struct {
@@ -146,28 +115,6 @@ func collectFallbackFilterGeoIPCode(content string, collect func(string)) {
 	collect(document.DNS.FallbackFilter.GeoIPCode)
 }
 
-// PrepareGeoIPCache compiles every GeoIP country a configuration names, so the tunnel can
-// read the result instead of building it.
-//
-// It belongs in the containing App. Building geoip:us peaks at 130 MiB against a packet
-// tunnel's 50 MiB ceiling, and loading every country the shipped file holds peaks at
-// 164 MiB -- to arrive at 27.9 MiB of matchers that would have fitted all along. The App
-// has the memory to do it once; the artifacts for the whole world are 18.3 MiB and read
-// back under budget.
-//
-// A country that will not compile is reported and skipped, for the reason
-// PrepareGeoSiteCache documents: failing the whole preparation would turn "one country is
-// unavailable" into "no profile".
-//
-// geodataMode is the configuration's geodata-mode, which the caller reads with
-// GeodataModeEnabled from the profile (a rule-provider payload does not carry the key).
-// Off, which is the default, means the tunnel answers GEOIP from geoip.metadb
-// (rules/common/geoip.go) and never opens compiled-geoip, so there is nothing to prepare.
-// Before this gate the pass ran anyway, and ran wrong: the preflight had just called
-// C.Path.MMDB(), which renames the process-wide C.GeoipName to "geoip.metadb", so the
-// compile decoded the MMDB as protobuf, failed with "cannot parse invalid wire-format
-// data", and warned that the country would match nothing -- about a file the tunnel does
-// not read (found in a device log, 2026-09-02).
 func PrepareGeoIPCache(content string, geodataMode bool) (string, error) {
 	if !geodataMode {
 		return "geoip: skipped, tunnel reads geoip.metadb", nil
@@ -176,14 +123,10 @@ func PrepareGeoIPCache(content string, geodataMode bool) (string, error) {
 	if len(countries) == 0 {
 		return "geoip: no countries named", nil
 	}
-	// Compiling reads source material, which is exactly what the constrained runtime
-	// refuses to do. This process is not that one.
 	previous := geodata.CompiledGeoIPOnly()
 	geodata.SetCompiledGeoIPOnly(false)
 	defer geodata.SetCompiledGeoIPOnly(previous)
 
-	// An artifact older than the source it was built from is stale; anything newer is the
-	// same work already done.
 	sourceModified := time.Time{}
 	if info, err := os.Stat(C.Path.GeoIP()); err == nil {
 		sourceModified = info.ModTime()
@@ -192,9 +135,6 @@ func PrepareGeoIPCache(content string, geodataMode bool) (string, error) {
 	prepared, reused := 0, 0
 	var failures []string
 	for _, country := range countries {
-		// Newer than its source AND not empty, for the reason the geosite pass documents:
-		// an artifact holding nothing is a country that will silently match nothing, and a
-		// timestamp-only check would make that permanent.
 		if path, err := compiled.IPCIDRPath(geodata.CompiledGeoIPDir(), country); err == nil {
 			if info, err := os.Stat(path); err == nil && info.ModTime().After(sourceModified) {
 				if count, err := compiled.EntryCountIPCIDR(
@@ -211,36 +151,19 @@ func PrepareGeoIPCache(content string, geodataMode bool) (string, error) {
 		}
 		prepared++
 	}
-	// Returned rather than only logged, for the reason the geosite pass documents: this
-	// runs in the containing App, where the core's logger has no platform sink.
 	summary := fmt.Sprintf("geoip: %d compiled, %d current, %d failed of %d named, dir=%s",
 		prepared, reused, len(countries)-prepared-reused, len(countries),
 		geodata.CompiledGeoIPDir())
 	if len(failures) > 0 {
 		summary += " | " + strings.Join(failures, "; ")
-		// A category that would not compile is a category the tunnel matches nothing for, which
-		// is a statement about the user's rules rather than about this process. The summary
-		// above is instrumentation -- it carries a container path and a tally -- and the
-		// consuming lane selects reader-facing lines by level as well as prefix, so a failure
-		// reported only there reaches nobody. This is the same failure named, at the level that
-		// travels.
-		// One literal, not a concatenation: the consuming lane greps this text, and a
-		// sentence split across two source lines is a sentence their grep misses.
 		log.Warnln("[Apple] geoip: %d of %d named countries will match nothing (compile failed): %s",
 			len(failures), len(countries), strings.Join(failures, "; "))
 	}
 	log.Infoln("[Apple] %s", summary)
-	// Compiling holds the source material to build each artifact; the tunnel must not
-	// inherit a heap shaped by work it will never repeat.
 	geodata.ClearGeoIPCache()
 	return bridgeSafeString(summary), nil
 }
 
-// GeodataModeEnabled reports whether a configuration turns geodata-mode on, decoded the
-// way the plan decodes it: plan_resources.go stages GeoIP.dat or geoip.metadb from the
-// same raw field, so the compile pass and the staged file cannot disagree about which one
-// the tunnel will read. A configuration that does not decode enables nothing; it will not
-// activate either, and that is reported where it is parsed.
 func GeodataModeEnabled(content string) bool {
 	raw, err := config.UnmarshalRawConfig([]byte(content))
 	if err != nil {
@@ -249,68 +172,15 @@ func GeodataModeEnabled(content string) bool {
 	return raw.GeodataMode
 }
 
-// GeoIPCountryLines is GeoIPCountriesIn for a caller that cannot receive a slice.
-//
-// gomobile does not carry []string, so the generated header says
-// "skipped function GeoIPCountriesIn with unsupported parameter or return types" -- the
-// function exists, is tested, and is unreachable from Swift. A handoff document offered it
-// to the client anyway, which is the fourth time this week an assertion pointed at
-// something other than what the other side actually receives.
-//
-// Newline-delimited for the same reason PrepareGeoIPCache returns a string rather than
-// logging: this crosses to a process where the core's logger has no sink, so the value has
-// to BE the answer. The slice form stays as the Go-side source of truth and keeps the
-// tests; this only changes the shape at the boundary.
-//
-// Empty string when nothing is named, which is distinct from a one-element list containing
-// "" and does not need the caller to filter.
 func GeoIPCountryLines(content string) string {
 	return bridgeSafeString(strings.Join(GeoIPCountriesIn(content), "\n"))
 }
 
-// GeoIPCountryForIP reports the country an address belongs to, or nil when this core cannot
-// say. It is the read side of the database the GEOIP rules match against; nothing else in
-// this surface turns an address into a place.
-//
-// The judgement it serves: the reader's real egress is in one country and the destination
-// they are proxying to is in another, so traffic is going the long way round. The containing
-// app already knows its egress address; without this it would have to ask a third-party
-// service (a network call, from a client that is diagnosing the network) or open
-// geoip.metadb itself and carry a second reader of a format the core already reads.
-//
-// Setup is enough -- no running core, no tunnel, no network. The database is whichever file
-// C.Path.MMDB() finds in the home directory (constant/path.go: Country.mmdb, geoip.db or
-// geoip.metadb), which on Apple platforms is the copy the app provisions from its bundle.
-//
-// nil covers every "cannot say" there is: not an address, no database seeded, no record for
-// it. They are one shape on purpose -- a caller that had to tell them apart in order to
-// render "unknown" would be carrying a distinction it cannot act on, and a sentinel string
-// would be a value someone eventually compares a country code against. A returned box
-// always carries a code; it is never present and empty.
-//
-// It reads the MMDB, and geodata-mode configurations match GEOIP through the .dat matcher
-// instead (rules/common/geoip.go), which answers "is this address in country X" and has no
-// reverse. In practice those configurations do not provision an MMDB at all
-// (plan_resources.go selects GeoIP.dat for them), so this answers nil there without needing
-// a mode check -- but a caller must not read this as a prediction of what a GEOIP rule will
-// do under geodata-mode.
-//
-// A sing or metaV0 database can hold several codes for one address; the first is reported.
-// A caller that needs "is it in X" should ask that question of a rule, not compare against
-// this.
-//
-// A present answer is not "this address is public": the shipped database answers "private"
-// for RFC1918 space, which is a real record and a real rule (GEOIP,private). Callers that
-// mean "is this address routable" must ask that, not infer it from a country being here.
 func GeoIPCountryForIP(ip string) *StringBox {
 	address, err := netip.ParseAddr(strings.Trim(strings.TrimSpace(ip), "[]"))
 	if err != nil {
 		return nil
 	}
-	// An IPv4 written the v6 way is the same address, and a caller that took it off a socket
-	// may well hold it in that form. Unmapping is what upstream's own resolver does
-	// (component/resolver/resolver.go LookupIPWithResolver) rather than a courtesy invented
-	// here.
 	address = address.Unmap()
 	reader := mmdb.IPInstance()
 	if !reader.Available() {

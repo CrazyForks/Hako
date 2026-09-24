@@ -49,9 +49,6 @@ func transformPhysicalAddressForApple(network string, destination netip.Addr) (n
 	if !destination.IsValid() || !destination.Is4() || destination.IsLoopback() {
 		return destination, nil
 	}
-	// A destination on this LAN is not something a network-provided translator
-	// should ever be asked about: the answer would route traffic meant for the
-	// local network through whatever prefix that same network advertises.
 	if destination.IsPrivate() || destination.IsLinkLocalUnicast() || destination.IsLinkLocalMulticast() {
 		return destination, nil
 	}
@@ -73,36 +70,7 @@ func transformPhysicalAddressForApple(network string, destination netip.Addr) (n
 	return synthesized, nil
 }
 
-// validateNAT64Synthesis checks that the system's answer looks like a
-// translation of the destination it was asked about.
-//
-// The answer is derived from a NAT64 prefix the NETWORK advertises (RFC 7050
-// discovery / DNS64), so on a hostile network it is attacker-influenced input
-// reaching a dial address. Unchecked, a crafted answer redirects an outbound
-// connection anywhere: ::1 reaches this device's own listeners, a link-local
-// address reaches a neighbour, and any unrelated address silently replaces the
-// destination the configuration named -- while the core believes it is talking
-// to the original.
-//
-// Two things are required. The address must be one that can be dialed as a
-// remote destination at all, and it must EMBED the destination's four bytes at
-// one of the six positions RFC 6052 defines. That embedding is what makes it a
-// translation rather than an unrelated address.
-//
-// All six are accepted, not just /96. The first version checked the low 32
-// bits alone, on the stated premise that no Apple platform emits the other
-// lengths -- a premise that existed only in the comment asserting it. The
-// prefix comes from the NETWORK (RFC 7050 discovery), the synthesis is the
-// system's getaddrinfo, and a rejection here aborts the dial outright
-// (component/dialer/dialer.go dialContext), so on any network advertising a
-// /32../64 translation prefix that premise would have made every IPv4
-// destination unreachable. Tightening a limit needs the same standard of
-// proof as loosening one; the iOS lane caught this before it shipped.
 
-// allowLoopbackNAT64Synthesis exists for the interop test, which needs the
-// synthesized address to land on a listener it started on ::1. Production
-// never sets it: a real translation is never loopback, and accepting one is
-// exactly the redirection this validation exists to refuse.
 var allowLoopbackNAT64Synthesis = false
 
 func validateNAT64Synthesis(synthesized, destination netip.Addr) error {
@@ -123,17 +91,13 @@ func validateNAT64Synthesis(synthesized, destination netip.Addr) error {
 	return nil
 }
 
-// rfc6052EmbeddingOffsets lists, per prefix length, the four byte positions
-// holding the embedded IPv4 address (RFC 6052 section 2.2). Byte 8 is the
-// reserved u-byte and never carries address data, which is why the shorter
-// prefixes skip it.
 var rfc6052EmbeddingOffsets = [][4]int{
-	{4, 5, 6, 7},     // /32
-	{5, 6, 7, 9},     // /40
-	{6, 7, 9, 10},    // /48
-	{7, 9, 10, 11},   // /56
-	{9, 10, 11, 12},  // /64
-	{12, 13, 14, 15}, // /96
+	{4, 5, 6, 7},
+	{5, 6, 7, 9},
+	{6, 7, 9, 10},
+	{7, 9, 10, 11},
+	{9, 10, 11, 12},
+	{12, 13, 14, 15},
 }
 
 func embedsIPv4PerRFC6052(synthesized, destination netip.Addr) bool {

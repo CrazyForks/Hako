@@ -14,7 +14,6 @@ const (
 	domainStep      = "."
 )
 
-// ErrInvalidDomain means insert domain is invalid
 var ErrInvalidDomain = errors.New("invalid domain")
 
 // DomainTrie contains the main logic for adding and searching nodes for domain segments.
@@ -24,9 +23,6 @@ type DomainTrie[T any] struct {
 }
 
 // ValidAndSplitDomain lower-cases and splits a domain into its dot-separated
-// parts, reporting whether it is a well-formed pattern. It returns false for a
-// trailing dot ("a.com."), leading/trailing whitespace, or an empty segment,
-// as well as for misplaced wildcards (see below).
 func ValidAndSplitDomain(domain string) ([]string, bool) {
 	// A trailing dot would produce an empty final segment; reject it up front.
 	if domain != "" && domain[len(domain)-1] == '.' {

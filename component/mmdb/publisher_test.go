@@ -37,7 +37,6 @@ func lookup(t *testing.T, h *readerHolder) []string {
 	return IPReader{holder: h}.LookupCode(net.ParseIP("1.0.0.1"))
 }
 
-// The fixtures differ on one prefix, so one lookup says which file is live.
 func TestPublishReplacesTheFileAndTheReaderTogether(t *testing.T) {
 	p, final := newTestPublisher(t)
 	if err := p.Publish(fixture(t, "country-a.mmdb")); err != nil {
@@ -52,7 +51,6 @@ func TestPublishReplacesTheFileAndTheReaderTogether(t *testing.T) {
 	if got := lookup(t, p.holder); len(got) != 1 || got[0] != "bb" {
 		t.Fatalf("after publishing B: %v", got)
 	}
-	// Disk and memory agree: the file on the final path is the one being read.
 	onDisk, err := maxminddb.Open(final)
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +65,6 @@ func TestPublishReplacesTheFileAndTheReaderTogether(t *testing.T) {
 	if rec.Country.ISO != "BB" {
 		t.Fatalf("the file on disk answers %q, the reader answers bb", rec.Country.ISO)
 	}
-	// Nothing staged is left behind.
 	entries, _ := os.ReadDir(filepath.Dir(final))
 	for _, e := range entries {
 		if strings.Contains(e.Name(), ".staging") {
@@ -76,16 +73,13 @@ func TestPublishReplacesTheFileAndTheReaderTogether(t *testing.T) {
 	}
 }
 
-// The old reader is closed by whoever releases its last reference, never by
-// publish: a lookup in flight across a publish finishes on the reader it
-// started with, and publish does not wait for it.
 func TestAnInFlightLookupKeepsTheOldReaderOpenUntilItLetsGo(t *testing.T) {
 	p, _ := newTestPublisher(t)
 	if err := p.Publish(fixture(t, "country-a.mmdb")); err != nil {
 		t.Fatal(err)
 	}
 	closed := 0
-	old := p.holder.acquire() // a lookup in flight
+	old := p.holder.acquire()
 	old.close = func() { closed++ }
 	if err := p.Publish(fixture(t, "country-b.mmdb")); err != nil {
 		t.Fatal(err)
@@ -106,13 +100,12 @@ func TestAnInFlightLookupKeepsTheOldReaderOpenUntilItLetsGo(t *testing.T) {
 	if closed != 1 {
 		t.Fatalf("the last release must close the retired reader once, closed %d times", closed)
 	}
-	p.holder.release(p.holder.acquire()) // a reader with no retired marker is not closed by releases
+	p.holder.release(p.holder.acquire())
 	if closed != 1 {
 		t.Fatal("a live reader was closed by a release")
 	}
 }
 
-// A snapshot retired with no holders is closed by the publish itself, once.
 func TestAnUnheldOldReaderIsClosedByThePublish(t *testing.T) {
 	p, _ := newTestPublisher(t)
 	if err := p.Publish(fixture(t, "country-a.mmdb")); err != nil {
@@ -128,7 +121,6 @@ func TestAnUnheldOldReaderIsClosedByThePublish(t *testing.T) {
 	}
 }
 
-// failingOps is the real file system except for one stage made to fail.
 type failingOps struct {
 	osFileOps
 	failAt string
@@ -217,8 +209,6 @@ func stagingFiles(t *testing.T, dir string) []string {
 	return out
 }
 
-// Every stage before the rename fails closed: the error names the stage, the
-// last-known-good file and reader are untouched, and the staging file is gone.
 func TestEveryStageBeforeTheRenameFailsClosed(t *testing.T) {
 	for _, stage := range []string{"create", "write", "fsync", "close", "verify", "chmod", "rename"} {
 		t.Run(stage, func(t *testing.T) {
@@ -252,9 +242,6 @@ func TestEveryStageBeforeTheRenameFailsClosed(t *testing.T) {
 	}
 }
 
-// The check opens the CANDIDATE, not the final path, and it happens before
-// the rename -- so bytes that are not a database never reach the final path
-// at all. Bytes that are not a database make the point without a fake.
 func TestAFileThatDoesNotOpenNeverReachesTheFinalPath(t *testing.T) {
 	p, final := newTestPublisher(t)
 	if err := p.Publish(fixture(t, "country-a.mmdb")); err != nil {
@@ -279,8 +266,6 @@ func TestAFileThatDoesNotOpenNeverReachesTheFinalPath(t *testing.T) {
 	}
 }
 
-// The directory fsync is durability, not correctness: its failure is a
-// warning, the file is in place and the verified reader is published.
 func TestADirectoryFsyncFailureIsAWarningNotARollback(t *testing.T) {
 	p, _ := newTestPublisher(t)
 	if err := p.Publish(fixture(t, "country-a.mmdb")); err != nil {
@@ -295,15 +280,6 @@ func TestADirectoryFsyncFailureIsAWarningNotARollback(t *testing.T) {
 	}
 }
 
-// The stages run in the order the transaction needs: open-and-verify the
-// candidate BEFORE the rename, the rename before the directory fsync, and
-// NOTHING FALLIBLE AFTER THE RENAME.
-//
-// That last part is what the absence of a second "verify" says. The candidate
-// is opened once and that reader is what gets published: after the rename --
-// the commit -- there is no step left that can fail and leave disk ahead of
-// memory. There used to be one, and the split it made repaired itself only if
-// a later open succeeded.
 func TestTheStagesRunInTheOrderThatCannotLoseTheLastKnownGood(t *testing.T) {
 	p, _ := newTestPublisher(t)
 	ops := &failingOps{}
@@ -317,8 +293,6 @@ func TestTheStagesRunInTheOrderThatCannotLoseTheLastKnownGood(t *testing.T) {
 	}
 }
 
-// The mode of the previous file is kept; with no previous file the default
-// applies.
 func TestTheFileModeIsKeptAcrossAPublish(t *testing.T) {
 	p, final := newTestPublisher(t)
 	if err := p.Publish(fixture(t, "country-a.mmdb")); err != nil {
@@ -339,8 +313,6 @@ func TestTheFileModeIsKeptAcrossAPublish(t *testing.T) {
 	}
 }
 
-// blockingOps parks a publish inside the transaction so the test can look at
-// the lock while it is in there.
 type blockingOps struct {
 	osFileOps
 	entered chan struct{}
@@ -354,11 +326,6 @@ func (b *blockingOps) CreateTemp(dir, pattern string) (tempFile, error) {
 	return b.osFileOps.CreateTemp(dir, pattern)
 }
 
-// The whole transaction runs under the publisher's mutex: while one publish is
-// parked inside it the lock cannot be taken, and when it returns the lock is
-// free again. Deterministic -- the lock is inspected, not a race timed --
-// and it is what keeps rename(A) -> rename(B) -> publish(B) -> publish(A)
-// from leaving B on disk and A in memory.
 func TestTheTransactionHoldsTheMutexEndToEnd(t *testing.T) {
 	p, _ := newTestPublisher(t)
 	ops := &blockingOps{entered: make(chan struct{}), release: make(chan struct{})}
@@ -387,7 +354,6 @@ func TestTheTransactionHoldsTheMutexEndToEnd(t *testing.T) {
 	}
 }
 
-// Empty bytes are refused before anything is touched.
 func TestEmptyDataIsRefused(t *testing.T) {
 	p, _ := newTestPublisher(t)
 	if err := p.Publish(nil); err == nil {
@@ -395,7 +361,6 @@ func TestEmptyDataIsRefused(t *testing.T) {
 	}
 }
 
-// The ASN side goes through the same machinery.
 func TestASNPublishAnswersFromTheNewFile(t *testing.T) {
 	dir := t.TempDir()
 	final := filepath.Join(dir, "ASN.mmdb")
@@ -414,8 +379,6 @@ func TestASNPublishAnswersFromTheNewFile(t *testing.T) {
 	}
 }
 
-// blockingOpenOps parks Open: it is how a test holds a Reopen inside the
-// publisher while it inspects the mutex and runs a Publish beside it.
 type blockingOpenOps struct {
 	osFileOps
 	entered chan struct{}
@@ -423,8 +386,6 @@ type blockingOpenOps struct {
 	once    sync.Once
 }
 
-// Only the first Open parks -- the one the reopen under test makes; an update
-// that runs beside it opens its candidate without waiting.
 func (b *blockingOpenOps) Open(path string) (*maxminddb.Reader, error) {
 	first := false
 	b.once.Do(func() { first = true; close(b.entered) })
@@ -440,11 +401,6 @@ func (failingOpenOps) Open(string) (*maxminddb.Reader, error) {
 	return nil, errors.New("not a database")
 }
 
-// Reopen runs under the publisher's mutex like Publish does. Proven the same
-// way: while a reopen is parked inside Open the lock cannot be taken; when it
-// returns the lock is free. Without this, ReloadIP beside an update could open
-// the old file, pause, and publish it over the reader the update had verified
-// and renamed into place.
 func TestReopenHoldsTheMutex(t *testing.T) {
 	p, final := newTestPublisher(t)
 	if err := os.WriteFile(final, fixture(t, "country-a.mmdb"), 0o644); err != nil {
@@ -472,11 +428,6 @@ func TestReopenHoldsTheMutex(t *testing.T) {
 	}
 }
 
-// The interleaving itself: a reopen has opened the OLD file and is parked
-// before publishing; an update publishes the NEW file meanwhile. Serialized,
-// the update cannot start until the reopen is done, so the new database is
-// what ends up in memory. (Unserialized, the update would finish during the
-// pause and the reopen would then publish the old reader over it.)
 func TestAReopenParkedBeforePublishCannotShadowAnUpdate(t *testing.T) {
 	p, final := newTestPublisher(t)
 	if err := os.WriteFile(final, fixture(t, "country-a.mmdb"), 0o644); err != nil {
@@ -486,12 +437,10 @@ func TestAReopenParkedBeforePublishCannotShadowAnUpdate(t *testing.T) {
 	p.ops = ops
 	reopened := make(chan error, 1)
 	go func() { reopened <- p.Reopen() }()
-	<-ops.entered // the reopen has the old file open and is parked
+	<-ops.entered
 
 	published := make(chan error, 1)
 	go func() { published <- p.Publish(fixture(t, "country-b.mmdb")) }()
-	// Give the update a real chance to have raced ahead if the mutex were
-	// missing, then let the reopen finish.
 	select {
 	case err := <-published:
 		t.Fatalf("the update completed while a reopen was inside the transaction: %v", err)
@@ -509,16 +458,11 @@ func TestAReopenParkedBeforePublishCannotShadowAnUpdate(t *testing.T) {
 	}
 }
 
-// A file that does not open is not published: the current reader stays, and
-// the failure is the error.
 func TestReopenKeepsTheCurrentReaderWhenTheFileDoesNotOpen(t *testing.T) {
 	p, _ := newTestPublisher(t)
 	if err := p.Publish(fixture(t, "country-a.mmdb")); err != nil {
 		t.Fatal(err)
 	}
-	// (The file is not rewritten in place here on purpose: the published
-	// reader memory-maps it, and overwriting a mapped file changes what the
-	// old reader answers -- the very reason Publish renames a new inode in.)
 	p.ops = failingOpenOps{}
 	err := p.Reopen()
 	var le *LoadError
@@ -530,10 +474,6 @@ func TestReopenKeepsTheCurrentReaderWhenTheFileDoesNotOpen(t *testing.T) {
 	}
 }
 
-// The fixtures are generated with a pinned build epoch (testdata/gen), so
-// regenerating them yields the same bytes; this pins the value the reader
-// sees, which is the half of that claim a test can check without the
-// generator.
 func TestFixturesCarryThePinnedBuildEpoch(t *testing.T) {
 	const pinnedBuildEpoch = 1_700_000_000
 	for _, name := range []string{"country-a.mmdb", "country-b.mmdb", "asn-a.mmdb", "asn-b.mmdb", "metav0-no-description.mmdb", "metav0-mixed-record.mmdb", "ipinfo-short-asn.mmdb"} {
@@ -548,16 +488,9 @@ func TestFixturesCarryThePinnedBuildEpoch(t *testing.T) {
 	}
 }
 
-// The database this product ships by default is mihomo's `Meta-geoip0`, and it
-// carries no description -- so Reader.Verify() rejects it ("description -
-// Expected: non-empty slice Actual: map[]"). A transaction gated on Verify
-// therefore refused the real geoip.metadb and every update of it, while the
-// fixtures (written WITH a description) passed: the fixture had been shaped to
-// fit the code instead of the artifact. This pins the artifact's shape.
 func TestTheTransactionAcceptsADatabaseWithNoDescription(t *testing.T) {
 	data := fixture(t, "metav0-no-description.mmdb")
 
-	// The shape is the point: this is what makes the real database fail Verify.
 	probe, err := maxminddb.FromBytes(data)
 	if err != nil {
 		t.Fatal(err)
@@ -574,9 +507,6 @@ func TestTheTransactionAcceptsADatabaseWithNoDescription(t *testing.T) {
 	if err := p.Publish(data); err != nil {
 		t.Fatalf("the transaction refused a database with no description -- this is the real geoip.metadb: %v", err)
 	}
-	// Read as a Meta-geoip0 database, which is a list of codes -- the
-	// database type decides the record shape, and getting that wrong is the
-	// other half of "the fixture must be what the kernel really reads".
 	if got := lookup(t, p.holder); len(got) != 2 || got[0] != "cc" || got[1] != "dd" {
 		t.Fatalf("the published reader does not answer from the new database: %v", got)
 	}
@@ -584,7 +514,6 @@ func TestTheTransactionAcceptsADatabaseWithNoDescription(t *testing.T) {
 		t.Fatalf("the database was not committed to the final path: %v", err)
 	}
 
-	// And the other way in: first use / reload opens the same file.
 	q := newPublisher("MMDB", func() string { return final })
 	if err := q.Reopen(); err != nil {
 		t.Fatalf("reopening a committed database with no description failed: %v", err)
@@ -594,19 +523,12 @@ func TestTheTransactionAcceptsADatabaseWithNoDescription(t *testing.T) {
 	}
 }
 
-// A first update that fails must not strand the database already on disk.
-// PublishIP used to complete ipOnce before the transaction ran, so an update
-// that arrived before anything had looked an address up -- a refresh at
-// startup -- marked "seeded" and then failed on its own bytes; every later
-// IPInstance took the no-op once and the valid file was never opened, so
-// GEOIP matched nothing for the life of the process.
 func TestAFailedFirstUpdateLeavesTheDatabaseOnDiskReachable(t *testing.T) {
 	dir := t.TempDir()
 	final := filepath.Join(dir, "Country.mmdb")
 	if err := os.WriteFile(final, fixture(t, "country-a.mmdb"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// A fresh process: nothing has been looked up, nothing seeded.
 	savedPublisher := ipPublisher
 	defer func() { ipPublisher = savedPublisher }()
 	ipPublisher = newPublisher("MMDB", func() string { return final })
@@ -617,7 +539,6 @@ func TestAFailedFirstUpdateLeavesTheDatabaseOnDiskReachable(t *testing.T) {
 	if got := IPInstance().LookupCode(net.ParseIP("1.0.0.1")); len(got) != 1 || got[0] != "aa" {
 		t.Fatalf("a failed update stranded the valid database on disk: lookup answered %v, want [aa]", got)
 	}
-	// And a later good update still lands.
 	if err := PublishIP(fixture(t, "country-b.mmdb")); err != nil {
 		t.Fatal(err)
 	}
@@ -626,10 +547,6 @@ func TestAFailedFirstUpdateLeavesTheDatabaseOnDiskReachable(t *testing.T) {
 	}
 }
 
-// LoadFromBytes seeds from memory and the first load wins -- but bytes that do
-// not parse are not a load. They used to complete the same sync.Once the disk
-// path used, so garbage handed to LoadFromBytes stranded the valid database on
-// disk for the life of the process, exactly like a failed first update did.
 func TestLoadFromBytesThatDoesNotParseSeedsNothing(t *testing.T) {
 	dir := t.TempDir()
 	final := filepath.Join(dir, "Country.mmdb")
@@ -646,7 +563,6 @@ func TestLoadFromBytesThatDoesNotParseSeedsNothing(t *testing.T) {
 	}
 }
 
-// And a load that DOES parse wins over the file on disk, and stays won.
 func TestLoadFromBytesWinsAndTheFirstOneWins(t *testing.T) {
 	dir := t.TempDir()
 	final := filepath.Join(dir, "Country.mmdb")
@@ -665,7 +581,6 @@ func TestLoadFromBytesWinsAndTheFirstOneWins(t *testing.T) {
 	if got := IPInstance().LookupCode(net.ParseIP("1.0.0.1")); len(got) != 1 || got[0] != "bb" {
 		t.Fatalf("a second load overwrote the first: %v", got)
 	}
-	// An update still replaces it -- that is not a "load".
 	if err := PublishIP(fixture(t, "country-a.mmdb")); err != nil {
 		t.Fatal(err)
 	}
@@ -674,8 +589,6 @@ func TestLoadFromBytesWinsAndTheFirstOneWins(t *testing.T) {
 	}
 }
 
-// A disk open that fails is attempted once, not once per lookup: a lookup
-// happens per rule match, so a missing file must not mean a syscall per packet.
 func TestAMissingDatabaseIsOpenedOnceNotPerLookup(t *testing.T) {
 	p, _ := newTestPublisher(t)
 	counter := &countingOps{}
@@ -698,10 +611,6 @@ func (c *countingOps) Open(path string) (*maxminddb.Reader, error) {
 	return c.osFileOps.Open(path)
 }
 
-// A database path may be a symlink into a shared directory. The old code
-// wrote with os.WriteFile, which follows one; a rename onto the link would
-// replace it with a regular file and detach the arrangement without saying
-// so. The transaction lands on the real file and leaves the link a link.
 func TestPublishingThroughASymlinkKeepsTheLink(t *testing.T) {
 	root := t.TempDir()
 	shared := filepath.Join(root, "shared")
@@ -739,7 +648,6 @@ func TestPublishingThroughASymlinkKeepsTheLink(t *testing.T) {
 	if got := lookup(t, p.holder); len(got) != 1 || got[0] != "bb" {
 		t.Fatalf("the published reader is not the new database: %v", got)
 	}
-	// Nothing left beside either end of the link.
 	for _, dir := range []string{root, shared} {
 		names, _ := os.ReadDir(dir)
 		for _, n := range names {
@@ -750,17 +658,13 @@ func TestPublishingThroughASymlinkKeepsTheLink(t *testing.T) {
 	}
 }
 
-// A dangling symlink is what a first download looks like: the link is there,
-// its target is not yet. EvalSymlinks fails on one, and falling back to the
-// link's own path renamed over the link -- so the arrangement was lost in
-// exactly the case it was set up for.
 func TestPublishingThroughADanglingSymlinkKeepsTheLink(t *testing.T) {
 	root := t.TempDir()
 	shared := filepath.Join(root, "shared")
 	if err := os.MkdirAll(shared, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	real := filepath.Join(shared, "Country.mmdb") // nothing here yet
+	real := filepath.Join(shared, "Country.mmdb")
 	link := filepath.Join(root, "Country.mmdb")
 	if err := os.Symlink(real, link); err != nil {
 		t.Fatal(err)
@@ -786,7 +690,6 @@ func TestPublishingThroughADanglingSymlinkKeepsTheLink(t *testing.T) {
 	}
 }
 
-// A relative link, and a chain of links, resolve the same way.
 func TestResolveLinkFollowsRelativeAndChainedLinks(t *testing.T) {
 	root := t.TempDir()
 	real := filepath.Join(root, "real.mmdb")
@@ -794,11 +697,11 @@ func TestResolveLinkFollowsRelativeAndChainedLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := filepath.Join(root, "first.mmdb")
-	if err := os.Symlink("real.mmdb", first); err != nil { // relative
+	if err := os.Symlink("real.mmdb", first); err != nil {
 		t.Fatal(err)
 	}
 	second := filepath.Join(root, "second.mmdb")
-	if err := os.Symlink(first, second); err != nil { // chained
+	if err := os.Symlink(first, second); err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range []string{first, second} {
@@ -813,12 +716,8 @@ func TestResolveLinkFollowsRelativeAndChainedLinks(t *testing.T) {
 	}
 }
 
-// Past the depth bound, and around a loop, resolution FAILS rather than
-// handing back something that is still a link: renaming over that path is
-// exactly what the resolution exists to prevent.
 func TestResolveLinkFailsClosedOnADeepChainAndALoop(t *testing.T) {
 	root := t.TempDir()
-	// A chain longer than the bound.
 	deepest := filepath.Join(root, "real.mmdb")
 	if err := os.WriteFile(deepest, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -834,7 +733,6 @@ func TestResolveLinkFailsClosedOnADeepChainAndALoop(t *testing.T) {
 	if got, err := resolveLink(previous); err == nil {
 		t.Fatalf("a chain past the bound resolved to %q instead of failing", got)
 	}
-	// A loop.
 	a, b := filepath.Join(root, "a.mmdb"), filepath.Join(root, "b.mmdb")
 	if err := os.Symlink(b, a); err != nil {
 		t.Fatal(err)
@@ -845,18 +743,12 @@ func TestResolveLinkFailsClosedOnADeepChainAndALoop(t *testing.T) {
 	if got, err := resolveLink(a); err == nil {
 		t.Fatalf("a loop resolved to %q instead of failing", got)
 	}
-	// And a publish through such a path is refused, leaving the reader alone.
 	p := newPublisher("MMDB", func() string { return a })
 	if err := p.Publish(fixture(t, "country-a.mmdb")); err == nil {
 		t.Fatal("a publish through a symlink loop was accepted")
 	}
 }
 
-// A database can be structurally valid -- it opens, so the transaction
-// publishes it -- and still carry a record the lookup code did not expect.
-// An unchecked type assertion or a slice past the end is a panic, and inside
-// the packet tunnel that is the process dying with no crash report, which
-// already ruled out for geo data. A record like this is no match.
 func TestARecordTheLookupDidNotExpectIsNoMatchNotAPanic(t *testing.T) {
 	t.Run("a Meta-geoip0 list with a non-string element", func(t *testing.T) {
 		p, _ := newTestPublisher(t)
@@ -880,15 +772,6 @@ func TestARecordTheLookupDidNotExpectIsNoMatchNotAPanic(t *testing.T) {
 	})
 }
 
-// Nothing after the commit can fail, so memory cannot be left behind disk.
-//
-// The transaction used to open the file again after the rename, and when that
-// open failed -- EMFILE is enough -- disk was the new database and memory was
-// still the old one. The repair depended on a LATER open succeeding; if that
-// one failed too, the publisher stayed on the old database for the life of the
-// process while every hash-compare told the updater the file was up to date.
-// Here every open after the candidate's fails, and the publish still has to
-// land: the reader it publishes is the one it already verified.
 func TestNothingAfterTheCommitCanStrandMemoryBehindDisk(t *testing.T) {
 	p, final := newTestPublisher(t)
 	if err := p.Publish(fixture(t, "country-a.mmdb")); err != nil {
@@ -914,8 +797,6 @@ func TestNothingAfterTheCommitCanStrandMemoryBehindDisk(t *testing.T) {
 	}
 }
 
-// failingAfterFirstOpenOps lets the candidate's open through and fails every
-// open after it.
 type failingAfterFirstOpenOps struct {
 	osFileOps
 	opens int
@@ -929,19 +810,11 @@ func (f *failingAfterFirstOpenOps) Open(path string) (*maxminddb.Reader, error) 
 	return f.osFileOps.Open(path)
 }
 
-// Replacement works with the current reader still live and still answering.
-//
-// This is the property Windows costs the most: a reader that MAPS the file
-// stops the rename there, so on that platform the database is read into
-// memory instead (open_windows.go). The test is the same on every platform --
-// publish A, hold a lookup-capable reader on it, publish B, and both the new
-// answer and the old reader have to work.
 func TestAReplacementLandsWhileTheCurrentReaderIsStillLive(t *testing.T) {
 	p, _ := newTestPublisher(t)
 	if err := p.Publish(fixture(t, "country-a.mmdb")); err != nil {
 		t.Fatal(err)
 	}
-	// A reader held across the replacement, the way a lookup in flight holds one.
 	live := p.holder.acquire()
 	if live == nil {
 		t.Fatal("no snapshot after the first publish")
@@ -954,11 +827,9 @@ func TestAReplacementLandsWhileTheCurrentReaderIsStillLive(t *testing.T) {
 	if got := lookup(t, p.holder); len(got) != 1 || got[0] != "bb" {
 		t.Fatalf("the new database is not what answers now: %v", got)
 	}
-	// And the one held across it still answers from the database it opened.
 	if got := lookupCode(live.reader, live.databaseType, net.ParseIP("1.0.0.1")); len(got) != 1 || got[0] != "aa" {
 		t.Fatalf("the reader held across the replacement stopped answering: %v", got)
 	}
-	// A third replacement, to catch a platform that only fails after the first.
 	if err := p.Publish(fixture(t, "country-a.mmdb")); err != nil {
 		t.Fatalf("a later replacement failed: %v", err)
 	}
@@ -967,13 +838,6 @@ func TestAReplacementLandsWhileTheCurrentReaderIsStillLive(t *testing.T) {
 	}
 }
 
-// A database larger than the ceiling is not opened at all.
-//
-// On Windows that read is heap, and a replacement holds the outgoing copy and
-// the incoming one at once (open_windows.go); mapping elsewhere is cheaper but
-// still spends address space and a metadata walk. The updater bounds the
-// download that produces these files, and this is the same bound from the
-// other side: a file already on disk, however it got there.
 func TestADatabaseLargerThanTheCeilingIsNotOpened(t *testing.T) {
 	dir := t.TempDir()
 
@@ -982,8 +846,6 @@ func TestADatabaseLargerThanTheCeilingIsNotOpened(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Sparse: the test cares about the size the file reports, not about
-	// spending sixty-four megabytes of disk to say it.
 	if err := f.Truncate(MaxDatabaseBytes + 1); err != nil {
 		t.Fatal(err)
 	}
@@ -998,10 +860,6 @@ func TestADatabaseLargerThanTheCeilingIsNotOpened(t *testing.T) {
 		t.Fatalf("the refusal must name the ceiling, got %v", err)
 	}
 
-	// The other direction: a file AT the ceiling is not refused for its
-	// size. It is not a database either, so it fails -- on the parse, which
-	// is a different sentence. Without this the test would pass just as
-	// happily if the ceiling were zero.
 	at := filepath.Join(dir, "at.mmdb")
 	g, err := os.Create(at)
 	if err != nil {
@@ -1022,16 +880,6 @@ func TestADatabaseLargerThanTheCeilingIsNotOpened(t *testing.T) {
 	}
 }
 
-// writeOversizedButValidDatabase writes a database that is genuinely valid --
-// maxminddb opens it and answers lookups from it -- and one byte past the
-// ceiling.
-//
-// A file of zeros would not do: it is refused by the size check and by the
-// parse alike, so it cannot tell the two apart. This one is a real database
-// with a hole punched in the middle: the copy at the front holds the search
-// tree and the data section at the offsets the metadata names, and the copy at
-// the end is where the metadata marker is found. It costs the size it reports
-// and about two kilobytes of disk.
 func writeOversizedButValidDatabase(t *testing.T, path string) {
 	t.Helper()
 	source, err := os.ReadFile(filepath.Join("testdata", "country-a.mmdb"))
@@ -1054,15 +902,6 @@ func writeOversizedButValidDatabase(t *testing.T, path string) {
 	}
 }
 
-// Verify answers exactly what the runtime open answers, for every shape.
-//
-// These are two doors onto one file -- initialisation asks Verify, the first
-// lookup goes through openDatabaseFile -- and when they disagreed the result
-// was silent: startup reported a good database, every GEOIP or IP-ASN rule
-// then matched nothing, and nothing was logged because neither side thought
-// anything had gone wrong. The oversized-but-valid case is the one that can
-// see the disagreement; the others are here so this cannot pass by refusing
-// everything.
 func TestVerifyAnswersWhatTheRuntimeOpenAnswers(t *testing.T) {
 	dir := t.TempDir()
 
@@ -1114,7 +953,6 @@ func TestVerifyAnswersWhatTheRuntimeOpenAnswers(t *testing.T) {
 	}
 }
 
-// Bytes are held to the same ceiling as a file.
 func TestAdoptRefusesABufferPastTheCeiling(t *testing.T) {
 	p := newPublisher("MMDB", func() string { return filepath.Join(t.TempDir(), "Country.mmdb") })
 	if err := p.Adopt(make([]byte, MaxDatabaseBytes+1)); err == nil {
@@ -1127,18 +965,9 @@ func TestAdoptRefusesABufferPastTheCeiling(t *testing.T) {
 	}
 }
 
-// An inspection that did not happen is not "no symlink here".
-//
-// resolveLink used to treat every Lstat failure as a first download and hand
-// back the path as given -- so a transient EIO or EACCES on a symlinked
-// database meant the rename landed on the LINK, leaving the shared target on
-// the old database while memory published the new one, with nothing to
-// reconcile them afterwards. Only "not there" is a first download.
 func TestAnUnreadableSymlinkFailsTheResolveRatherThanPassingItThrough(t *testing.T) {
 	dir := t.TempDir()
 
-	// A directory with no execute bit: Lstat inside it fails with EACCES
-	// rather than ENOENT.
 	locked := filepath.Join(dir, "locked")
 	if err := os.Mkdir(locked, 0o700); err != nil {
 		t.Fatal(err)
@@ -1158,8 +987,6 @@ func TestAnUnreadableSymlinkFailsTheResolveRatherThanPassingItThrough(t *testing
 		t.Fatalf("the failure must say the inspection did not happen, got %v", err)
 	}
 
-	// The other direction: a path that is genuinely absent is still a first
-	// download and resolves to itself.
 	absent := filepath.Join(dir, "absent.mmdb")
 	if got, err := resolveLink(absent); err != nil || got != absent {
 		t.Fatalf("a missing file is a first download, got %q %v", got, err)

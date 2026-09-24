@@ -51,8 +51,6 @@ func serveProviderSideUpdate(writer http.ResponseWriter, request *http.Request) 
 		return
 	}
 	if err := service.sideUpdateProvider(kind, name, payload); err != nil {
-		// Provider names, paths, credentials, and payload diagnostics stay out of
-		// the cross-process response. The caller only needs a fail-closed result.
 		http.Error(writer, "provider side update rejected", http.StatusUnprocessableEntity)
 		return
 	}

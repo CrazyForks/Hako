@@ -6,23 +6,6 @@ import (
 	"time"
 )
 
-// Every outbound socket was getting Go's own keepalive defaults -- 15s idle, 15s
-// interval, 9 probes -- because component/dialer/dialer.go calls SetNetDialer above the
-// DefaultSocketHook branch, so Apple builds get it, while keepAliveIdle and
-// keepAliveInterval are only ever assigned from configuration that has no default. Zero
-// reaches Go, and net/tcpsockopt_darwin.go substitutes 15s for zero.
-//
-// On darwin that steady-state probe rate is 20x the reference: sing-box ships 5 minutes
-// idle and 75 seconds between unanswered retransmits. It matters because darwin resets
-// the idle timer after an ACKed probe and uses Interval only for retransmits, so the
-// ratio in normal operation is 15s versus 300s -- and tunnel/tunnel.go has no idle
-// teardown for relayed TCP, so an idle outbound socket keeps probing indefinitely. Each
-// probe on cellular promotes the radio out of idle.
-//
-// The change is deliberately scoped to darwin. 15s/15s is upstream's behaviour on
-// platforms that do not pay a radio-wake cost for it, and diverging there would be
-// stricter than upstream without the platform requiring it. There is precedent for the
-// shape: SetDisableKeepAlive already forces keepalive off on android.
 
 func TestUnconfiguredKeepAliveUsesAppleFriendlyDefaults(t *testing.T) {
 	if runtime.GOOS != "darwin" && runtime.GOOS != "ios" {
@@ -57,8 +40,6 @@ func TestExplicitConfigurationStillWins(t *testing.T) {
 	}
 }
 
-// TestNonAppleKeepsUpstreamZero documents the other half of the scoping decision, so a
-// future change cannot widen the carve-out without a test going red.
 func TestNonAppleKeepsUpstreamZero(t *testing.T) {
 	if runtime.GOOS == "darwin" || runtime.GOOS == "ios" {
 		t.Skip("darwin has the carve-out; this asserts the absence of one elsewhere")

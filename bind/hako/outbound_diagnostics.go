@@ -17,9 +17,6 @@ type rawOutboundDiagnosticsConfig struct {
 	} `yaml:"proxies"`
 }
 
-// snapshotOutboundEndpointKinds emits only a one-way anonymous node ID and an
-// endpoint class. It never retains or reports proxy names, server addresses,
-// ports, credentials or protocol options.
 func snapshotOutboundEndpointKinds(configContent string) map[string]string {
 	var raw rawOutboundDiagnosticsConfig
 	if err := yaml.Unmarshal([]byte(configContent), &raw); err != nil {

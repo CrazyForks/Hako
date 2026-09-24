@@ -52,13 +52,13 @@ func TestShaper(t *testing.T) {
 }
 
 func TestShaper2(t *testing.T) {
-	w1 := writeRequest{class: CLSDATA, seq: 1} // stream 0
+	w1 := writeRequest{class: CLSDATA, seq: 1}
 	w2 := writeRequest{class: CLSDATA, seq: 2}
 	w3 := writeRequest{class: CLSDATA, seq: 3}
 	w4 := writeRequest{class: CLSDATA, seq: 4}
 	w5 := writeRequest{class: CLSDATA, seq: 5}
-	w6 := writeRequest{class: CLSCTRL, seq: 6, frame: Frame{sid: 10}} // ctrl 1
-	w7 := writeRequest{class: CLSCTRL, seq: 7, frame: Frame{sid: 11}} // ctrl 2
+	w6 := writeRequest{class: CLSCTRL, seq: 6, frame: Frame{sid: 10}}
+	w7 := writeRequest{class: CLSCTRL, seq: 7, frame: Frame{sid: 11}}
 
 	var reqs shaperHeap
 	heap.Push(&reqs, w6)
@@ -89,7 +89,6 @@ func TestShaperQueueFairness(t *testing.T) {
 
 	stop := make(chan struct{})
 
-	// Producers: each stream pushes packets
 	for sid := 0; sid < streams; sid++ {
 		sid := sid
 		wg.Add(1)
@@ -112,7 +111,6 @@ func TestShaperQueueFairness(t *testing.T) {
 		}()
 	}
 
-	// Consumer: slow network, 1 pop every 10ms
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -134,7 +132,6 @@ func TestShaperQueueFairness(t *testing.T) {
 		}
 	}()
 
-	// ---- NEW: periodic live report ----
 	go func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
 		for {
@@ -149,16 +146,13 @@ func TestShaperQueueFairness(t *testing.T) {
 		}
 	}()
 
-	// run test
 	time.Sleep(testDuration)
 	close(stop)
 	wg.Wait()
 
-	// ---- final report ----
 	fmt.Println("=== FINAL COUNTS ===")
 	fmt.Println(sendCount)
 
-	// ---- fairness check ----
 	total := uint64(0)
 	sendCountLock.Lock()
 	defer sendCountLock.Unlock()
@@ -166,7 +160,7 @@ func TestShaperQueueFairness(t *testing.T) {
 		total += c
 	}
 	avg := total / streams
-	tolerance := avg / 4 // 25%
+	tolerance := avg / 4
 
 	for sid, c := range sendCount {
 		if c < avg-tolerance || c > avg+tolerance {
@@ -181,8 +175,8 @@ func TestShaperQueue_FastWriteSlowRead(t *testing.T) {
 	const (
 		streams      = 10
 		duration     = 10 * time.Second
-		producerWait = 1 * time.Microsecond  // super fast writing
-		consumerWait = 15 * time.Millisecond // super slow reading
+		producerWait = 1 * time.Microsecond
+		consumerWait = 15 * time.Millisecond
 	)
 
 	sq := NewShaperQueue()
@@ -192,7 +186,6 @@ func TestShaperQueue_FastWriteSlowRead(t *testing.T) {
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
 
-	// Producers: extremely fast writers
 	for sid := 0; sid < streams; sid++ {
 		sid := sid
 		wg.Add(1)
@@ -216,7 +209,6 @@ func TestShaperQueue_FastWriteSlowRead(t *testing.T) {
 		}()
 	}
 
-	// Consumer: very slow reader
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -238,7 +230,6 @@ func TestShaperQueue_FastWriteSlowRead(t *testing.T) {
 		}
 	}()
 
-	// Periodic monitor
 	go func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
 		for {
@@ -253,7 +244,6 @@ func TestShaperQueue_FastWriteSlowRead(t *testing.T) {
 		}
 	}()
 
-	// Run test
 	time.Sleep(duration)
 	close(stop)
 	wg.Wait()
@@ -262,13 +252,12 @@ func TestShaperQueue_FastWriteSlowRead(t *testing.T) {
 	defer sendCountLock.Unlock()
 	fmt.Printf("=== FINAL ===\ncounts=%v\nqueue remaining=%d\n", sendCount, sq.Len())
 
-	// Check fairness
 	total := uint64(0)
 	for _, v := range sendCount {
 		total += v
 	}
 	avg := total / streams
-	tolerance := avg / 3 // allow 33%
+	tolerance := avg / 3
 
 	for sid, c := range sendCount {
 		if c < avg-tolerance || c > avg+tolerance {
@@ -280,13 +269,10 @@ func TestShaperQueue_FastWriteSlowRead(t *testing.T) {
 func TestShaperQueue_PopBoundary(t *testing.T) {
 	sq := NewShaperQueue()
 
-	// 1. Empty Queue
 	if _, ok := sq.Pop(); ok {
 		t.Fatal("Pop on empty queue should return false")
 	}
 
-	// 2. Single Stream Lifecycle
-	// Push 2 items to Stream 10
 	sq.Push(writeRequest{frame: Frame{sid: 10}, seq: 1})
 	sq.Push(writeRequest{frame: Frame{sid: 10}, seq: 2})
 
@@ -294,12 +280,10 @@ func TestShaperQueue_PopBoundary(t *testing.T) {
 		t.Fatalf("Expected len 2, got %d", sq.Len())
 	}
 
-	// Pop 1
 	req, ok := sq.Pop()
 	if !ok || req.frame.sid != 10 || req.seq != 1 {
 		t.Fatalf("Expected sid 10 seq 1, got %v %v", req.frame.sid, req.seq)
 	}
-	// Check internals
 	if len(sq.streams) != 1 {
 		t.Errorf("Expected 1 stream in map, got %d", len(sq.streams))
 	}
@@ -307,12 +291,10 @@ func TestShaperQueue_PopBoundary(t *testing.T) {
 		t.Errorf("Expected 1 item in rrList, got %d", sq.rrList.Len())
 	}
 
-	// Pop 2 (Stream becomes empty)
 	req, ok = sq.Pop()
 	if !ok || req.frame.sid != 10 || req.seq != 2 {
 		t.Fatalf("Expected sid 10 seq 2, got %v %v", req.frame.sid, req.seq)
 	}
-	// Check internals - should be cleaned up
 	if len(sq.streams) != 0 {
 		t.Errorf("Expected 0 streams in map, got %d", len(sq.streams))
 	}
@@ -323,7 +305,6 @@ func TestShaperQueue_PopBoundary(t *testing.T) {
 		t.Errorf("Expected next to be nil, got %v", sq.next)
 	}
 
-	// Pop empty again
 	if _, ok := sq.Pop(); ok {
 		t.Fatal("Pop on empty queue should return false")
 	}
@@ -332,24 +313,13 @@ func TestShaperQueue_PopBoundary(t *testing.T) {
 func TestShaperQueue_MultiStreamRemoval(t *testing.T) {
 	sq := NewShaperQueue()
 
-	// Setup:
-	// Stream 10: 1 item
-	// Stream 20: 2 items
-	// Stream 30: 1 item
-	// Push order matters for Round Robin initial order if we push sequentially for new streams.
-	// NewShaperQueue appends to list.
-	// Order in list: 10, 20, 30
 
 	sq.Push(writeRequest{frame: Frame{sid: 10}, seq: 1})
 	sq.Push(writeRequest{frame: Frame{sid: 20}, seq: 1})
 	sq.Push(writeRequest{frame: Frame{sid: 20}, seq: 2})
 	sq.Push(writeRequest{frame: Frame{sid: 30}, seq: 1})
 
-	// Current List: [10, 20, 30]
-	// Next: 10
 
-	// 1. Pop Stream 10 (seq 1). Stream 10 becomes empty and should be removed.
-	// Next should move to 20.
 	req, ok := sq.Pop()
 	if !ok || req.frame.sid != 10 {
 		t.Fatalf("Expected sid 10, got %v", req.frame.sid)
@@ -360,11 +330,7 @@ func TestShaperQueue_MultiStreamRemoval(t *testing.T) {
 	if sq.rrList.Len() != 2 {
 		t.Errorf("Expected list len 2, got %d", sq.rrList.Len())
 	}
-	// Current List: [20, 30] (conceptually, implementation might be linked list nodes)
-	// Next should be 20.
 
-	// 2. Pop Stream 20 (seq 1). Stream 20 has 1 left.
-	// Next should move to 30.
 	req, ok = sq.Pop()
 	if !ok || req.frame.sid != 20 || req.seq != 1 {
 		t.Fatalf("Expected sid 20 seq 1, got %v %v", req.frame.sid, req.seq)
@@ -373,8 +339,6 @@ func TestShaperQueue_MultiStreamRemoval(t *testing.T) {
 		t.Errorf("Expected list len 2, got %d", sq.rrList.Len())
 	}
 
-	// 3. Pop Stream 30 (seq 1). Stream 30 becomes empty and removed.
-	// Next should wrap around to 20.
 	req, ok = sq.Pop()
 	if !ok || req.frame.sid != 30 {
 		t.Fatalf("Expected sid 30, got %v", req.frame.sid)
@@ -386,8 +350,6 @@ func TestShaperQueue_MultiStreamRemoval(t *testing.T) {
 		t.Errorf("Expected list len 1, got %d", sq.rrList.Len())
 	}
 
-	// 4. Pop Stream 20 (seq 2). Stream 20 becomes empty and removed.
-	// List becomes empty.
 	req, ok = sq.Pop()
 	if !ok || req.frame.sid != 20 || req.seq != 2 {
 		t.Fatalf("Expected sid 20 seq 2, got %v %v", req.frame.sid, req.seq)
@@ -401,15 +363,9 @@ func TestShaperQueue_MultiStreamRemoval(t *testing.T) {
 }
 
 func TestShaperHeap_MemoryLeak(t *testing.T) {
-	// Verify the fix for memory leak in Pop
 	h := &shaperHeap{}
 	heap.Init(h)
 
-	// Push a request with a large payload (simulated by checking the struct field)
-	// We can't easily check memory usage of the specific array slot in Go without unsafe or reflection tricks,
-	// but we can verify the logic by ensuring the popped element is returned correctly
-	// and trusting the code review that we set it to zero.
-	// However, we can check if the code runs without panic.
 
 	req := writeRequest{frame: Frame{sid: 1, data: make([]byte, 100)}}
 	heap.Push(h, req)

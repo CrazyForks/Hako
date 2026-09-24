@@ -15,7 +15,7 @@ func admissionTestProxy(t *testing.T) *Proxy {
 	h, err := outbound.NewHttp(outbound.HttpOption{
 		Name:   "admission-probe",
 		Server: "127.0.0.1",
-		Port:   1, // nothing listens; the dial fails fast
+		Port:   1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +40,6 @@ func TestURLTestAdmissionNilHookKeepsUpstreamPath(t *testing.T) {
 	SetURLTestAdmission(nil)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	// The default is upstream's exact path: no admission callback, no panic.
 	_, err := admissionTestProxy(t).URLTest(ctx, "https://www.gstatic.com/generate_204", nil)
 	if err == nil {
 		t.Fatal("dial against a closed port should fail")

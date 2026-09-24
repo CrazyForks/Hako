@@ -5,21 +5,6 @@ import (
 	"testing"
 )
 
-// The five inbound-server fields (listeners, tunnels, ss-config, vmess-config,
-// tuic-server) used to be zeroed here and are not any more -- the zero-squeeze
-// ruling restored them, because upstream allows them and the platform allows
-// them. The deviation report never followed: it still told the reader "no
-// configured inbound listeners are opened" for a configuration that opens them.
-//
-// A report that states a safety property the code stopped providing is worse
-// than no report: the reader checks it, sees the listener is closed, and stops
-// looking. And these listeners are not covered by the allow-lan permission --
-// each carries its own listen address, defaulting to 0.0.0.0
-// (listener/inbound/base.go) -- so a subscription can open an unauthenticated
-// proxy on every interface without the reader agreeing to anything.
-//
-// Threat model: the subscription author opens it, anyone on the same network
-// uses it.
 
 func deviationFor(t *testing.T, deviations []configDeviation, field string) configDeviation {
 	t.Helper()
@@ -44,11 +29,6 @@ func TestInboundServerFieldsAreNoLongerReportedAsStripped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect: %v", err)
 	}
-	// These five are honoured now, so they are not deviations at all. Leaving
-	// them in the table as `stripped` told the reader a listener was closed
-	// while the core opened it; a new category would have been dropped whole by
-	// already-shipped clients, which decode Category as a strict enum. The
-	// exposure is disclosed by the notice surface instead (below).
 	for _, field := range []string{"listeners", "tunnels", "ss-config", "vmess-config", "tuic-server"} {
 		for _, deviation := range deviations {
 			if deviation.Field == field {
@@ -60,8 +40,6 @@ func TestInboundServerFieldsAreNoLongerReportedAsStripped(t *testing.T) {
 	_ = deviationFor
 }
 
-// Honoured is not the same as silent: a listener the subscription opened, with
-// no authentication, on every interface, is exactly what the reader needs told.
 func TestConfiguredInboundListenersAreDisclosedAsExposure(t *testing.T) {
 	raw := normalizeFixture(t, `
 mode: rule
@@ -82,8 +60,6 @@ rules:
 	}
 }
 
-// `authentication` present is not the same as authentication enforced:
-// skip-auth-prefixes is a bypass list, and 0.0.0.0/0 in it means everyone.
 func TestSkipAuthPrefixesDoNotSilenceTheExposureNotice(t *testing.T) {
 	raw := normalizeFixture(t, `
 mode: rule
@@ -106,8 +82,6 @@ rules:
 	}
 }
 
-// Real authentication with an ordinary skip list (loopback) stays quiet: the
-// notice must not become noise that readers learn to ignore.
 func TestGenuineAuthenticationStaysQuiet(t *testing.T) {
 	raw := normalizeFixture(t, `
 mode: rule

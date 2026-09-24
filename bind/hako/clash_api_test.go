@@ -11,10 +11,6 @@ import (
 	"time"
 )
 
-// shortSocketDirectory is a base path a Unix socket actually fits in. t.TempDir() interpolates
-// the test's name, and Darwin's sockaddr_un.sun_path holds 103 bytes -- a descriptive test name
-// pushes the socket past it, bind() fails EINVAL, and the failure reads like the product not
-// creating a socket rather than the test not being able to name one.
 func shortSocketDirectory(t *testing.T) string {
 	t.Helper()
 	directory, err := os.MkdirTemp("/tmp", "hako-clash-")

@@ -13,7 +13,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// supplySystemResolvers stands in for SetupOptions.SystemDNSServerLines for one test.
 func supplySystemResolvers(t *testing.T, lines ...string) {
 	t.Helper()
 	previous := systemDNSSubstitutes.Load()
@@ -22,7 +21,6 @@ func supplySystemResolvers(t *testing.T, lines ...string) {
 	t.Cleanup(func() { systemDNSSubstitutes.Store(previous) })
 }
 
-// normalizedRawFor runs a whole document through the Apple packet-tunnel normalization.
 func normalizedRawFor(t *testing.T, doc map[string]any) *config.RawConfig {
 	t.Helper()
 	document, err := yaml.Marshal(doc)
@@ -37,8 +35,6 @@ func normalizedRawFor(t *testing.T, doc map[string]any) *config.RawConfig {
 	return raw
 }
 
-// stringsIn collects every string inside a value, in order (see neIncompatibleIn for
-// why the yaml round trip is needed).
 func stringsIn(t *testing.T, v any) []string {
 	t.Helper()
 	encoded, err := yaml.Marshal(v)
@@ -127,9 +123,6 @@ func TestSetupStoresSystemDNSServerLinesAndRejectsWhatIsNotAnAddress(t *testing.
 	}
 }
 
-// Every field the strip reaches, the substitution reaches: the same classification
-// drives both (dns_resolver_field_classification_test.go), so a resolver slot added
-// upstream goes red here as well as there.
 func TestSuppliedSystemResolversReplaceSystemAndDhcpInEveryResolverField(t *testing.T) {
 	supplySystemResolvers(t, "1.1.1.1", "9.9.9.9")
 	for _, field := range append(dnsFieldsByKind(t, "resolver"), dnsFieldsByKind(t, "bootstrap")...) {
@@ -142,8 +135,6 @@ func TestSuppliedSystemResolversReplaceSystemAndDhcpInEveryResolverField(t *test
 			dns := map[string]any{"enable": true, "nameserver": []string{"223.5.5.5"}}
 			dns[key] = value
 			got := stringsIn(t, normalizedDNSField(t, dns, field.Name))
-			// One expansion per list, at the first system/dhcp entry; the second
-			// system-class entry names the same resolvers and is not expanded twice.
 			want := []string{"1.1.1.1", "9.9.9.9", "223.5.5.5"}
 			if !reflect.DeepEqual(got, want) {
 				t.Errorf("dns.%s reached the core as %v, want %v", key, got, want)
@@ -167,7 +158,6 @@ func TestAPolicyWhoseResolversWereAllSystemNowNamesTheSystemResolvers(t *testing
 		}
 		return dnsServerStrings(pair.Value)
 	}
-	// Without supplied resolvers the entry fails closed, as it has since the strip.
 	if got, want := policyValue(normalizedRawFor(t, doc())), []string{"rcode://name_error"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("without supplied resolvers the emptied policy = %v, want %v", got, want)
 	}
@@ -178,9 +168,6 @@ func TestAPolicyWhoseResolversWereAllSystemNowNamesTheSystemResolvers(t *testing
 }
 
 func TestSuppliedResolversInsideTheTunnelsOwnRangesAreDropped(t *testing.T) {
-	// A list read AFTER the tunnel's DNS settings applied names the tunnel itself
-	// (198.18.0.2, or whatever fake-ip-range implies). Substituting that would
-	// reproduce #21 in a new shape, so the configuration's own ranges filter it.
 	prefixes := []netip.Prefix{netip.MustParsePrefix("172.19.0.0/16"), netip.MustParsePrefix("28.0.0.1/8")}
 	usable, dropped := usableSystemResolverSubstitutes(
 		[]string{"198.18.0.2", "172.19.0.2", "fdfe:dcba:9876::2", "28.0.0.53:53", "1.1.1.1", "[2001:db8::1]:5353"},
@@ -224,8 +211,6 @@ func TestWhenEverySuppliedResolverIsTheTunnelsOwnTheStripStands(t *testing.T) {
 }
 
 func TestMihomoParsesEverySubstituteShape(t *testing.T) {
-	// The shapes parseSystemDNSServerLines emits are handed to mihomo verbatim, so
-	// mihomo's own parser (config.go parsePureDNSServer) is the judge of them.
 	parsed, err := dns.ParseNameServer([]string{"1.1.1.1", "2001:db8::1", "1.1.1.1:5353", "[2001:db8::1]:5353"})
 	if err != nil {
 		t.Fatalf("mihomo refused a substitute shape: %v", err)

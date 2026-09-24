@@ -13,22 +13,7 @@ import (
 	D "github.com/miekg/dns"
 )
 
-// without becoming a second way to resolve.
-//
-// The split that makes it possible: every "why" except the race is decided by pure
-// functions. matchPolicy (resolver.go:316) reads r.policy and compares a domain;
-// shouldOnlyQueryFallback (resolver.go:334) reads the filters; the rcode short-circuit is a
-// type assertion. None of them touches the network, the cache, or shared state, so the
-// default explanation costs nothing and cannot perturb anything.
-//
-// Only "who won" needs an exchange, which is why it is opt-in -- and why it must not go
-// through ExchangeContext: r.group.DoChan deduplicates by question, so a probe for a name
-// the tunnel is resolving would be folded into the tunnel's execution and come back with
-// shared = true, at which point the winner is unknowable. The probe therefore reaches
-// batchExchange directly.
 
-// answeringClient returns a fixed answer and counts calls, so a test can tell a computed
-// explanation from one that went to the network.
 type answeringClient struct{ calls int }
 
 func (c *answeringClient) ExchangeContext(_ context.Context, m *D.Msg) (*D.Msg, error) {
@@ -54,9 +39,6 @@ func questionFor(name string) *D.Msg {
 	return m
 }
 
-// A domain covered by nameserver-policy reports which key matched, not merely that a
-// policy existed -- a reader with several policy entries needs to know which one caught
-// their name.
 func TestExplainReportsTheMatchedPolicyKey(t *testing.T) {
 	policyClient := &answeringClient{}
 	tree := trie.New[[]dnsClient]()
@@ -81,8 +63,6 @@ func TestExplainReportsTheMatchedPolicyKey(t *testing.T) {
 	}
 }
 
-// A name no policy covers falls to the main group, and the explanation says so rather than
-// leaving the reader to infer it from an absence.
 func TestExplainReportsMainWhenNoPolicyMatches(t *testing.T) {
 	main := &answeringClient{}
 	resolver := explainResolver(t, nil, []dnsClient{main})
@@ -97,8 +77,6 @@ func TestExplainReportsMainWhenNoPolicyMatches(t *testing.T) {
 	}
 }
 
-// The default explanation costs no query. This is the property that lets a reader press the
-// button freely, and the one that keeps the tunnel's resolve path untouched.
 func TestExplainWithoutProbeSendsNothing(t *testing.T) {
 	main := &answeringClient{}
 	resolver := explainResolver(t, nil, []dnsClient{main})
@@ -115,9 +93,6 @@ func TestExplainWithoutProbeSendsNothing(t *testing.T) {
 	}
 }
 
-// With the probe, the winner is known and the answer comes from the same exchange that
-// produced it. Reporting an address from one exchange beside a resolver from another is the
-// failure this request exists to remove.
 func TestExplainProbeReportsWinnerAndItsOwnAnswer(t *testing.T) {
 	main := &answeringClient{}
 	resolver := explainResolver(t, nil, []dnsClient{main})
@@ -136,10 +111,6 @@ func TestExplainProbeReportsWinnerAndItsOwnAnswer(t *testing.T) {
 	}
 }
 
-// The probe must not be deduplicated into whatever the tunnel is doing. If it went through
-// ExchangeContext, a concurrent resolve of the same name would swallow it and the winner
-// would be unknowable -- so the probe must not populate the shared cache either, which is
-// how a diagnostic would start changing what the tunnel serves.
 func TestExplainProbeDoesNotDisturbTheCache(t *testing.T) {
 	main := &answeringClient{}
 	resolver := explainResolver(t, nil, []dnsClient{main})
@@ -153,8 +124,6 @@ func TestExplainProbeDoesNotDisturbTheCache(t *testing.T) {
 	}
 }
 
-// An rcode:// entry answers before any network client runs, and the explanation says so
-// with no candidates raced.
 func TestExplainReportsRcodeShortCircuit(t *testing.T) {
 	resolver := explainResolver(t, nil, []dnsClient{newRCodeClient("name_error")})
 
@@ -165,10 +134,6 @@ func TestExplainReportsRcodeShortCircuit(t *testing.T) {
 	}
 }
 
-// A cached name is reported as cached, with when it expires -- and expiry can be in the
-// past, because since an expired entry is still served (TTL 1) while a refresh runs.
-// The reader is better served by "expired 3 minutes ago, still in use" than by a negative
-// countdown.
 func TestExplainReportsCacheIncludingStale(t *testing.T) {
 	resolver := explainResolver(t, nil, []dnsClient{&answeringClient{}})
 	question := questionFor("stale.example.com.")
@@ -194,9 +159,6 @@ func TestExplainReportsCacheIncludingStale(t *testing.T) {
 	}
 }
 
-// fake-ip answers most names in a fake-ip configuration without the resolver being
-// reached at all: newHandler puts withFakeIP above withResolver (dns/middleware.go:241),
-// so naming main's four DoH servers beside that answer is a confident wrong sentence.
 type fakeIPEnhancerStub struct {
 	enabled  bool
 	skipped  map[string]bool
@@ -217,10 +179,6 @@ func (s fakeIPEnhancerStub) UseHosts() bool                         { return s.u
 func (s fakeIPEnhancerStub) ShouldSkipFakeIP(host string) bool      { return s.skipped[host] }
 func (s fakeIPEnhancerStub) IPv6() bool                             { return s.ipv6 }
 
-// The stub must satisfy the same interface the running core does, or it silently
-// stops satisfying it after a method is added and every test here quietly starts
-// exercising the aware==nil path instead. That is how the production type nearly
-// shipped unasserted, and a test double can drift the same way.
 var _ middlewareAware = fakeIPEnhancerStub{}
 
 func installEnhancer(t *testing.T, stub fakeIPEnhancerStub) {
@@ -244,8 +202,6 @@ func TestExplainReportsFakeIPRatherThanResolversNobodyAsks(t *testing.T) {
 	}
 }
 
-// A name the filter sends down to the resolver must still be explained normally, or the
-// new branch would swallow the case the endpoint was built for.
 func TestExplainStillExplainsNamesFakeIPSkips(t *testing.T) {
 	installEnhancer(t, fakeIPEnhancerStub{enabled: true, skipped: map[string]bool{"cn.example": true}})
 	r := explainResolver(t, nil, []dnsClient{&answeringClient{}})
@@ -259,8 +215,6 @@ func TestExplainStillExplainsNamesFakeIPSkips(t *testing.T) {
 	}
 }
 
-// Only A and AAAA. TXT and MX fall through withFakeIP's switch to the resolver
-// (dns/middleware.go:180), so they are explained the way they always were.
 func TestExplainDoesNotClaimFakeIPForTypesItDoesNotAnswer(t *testing.T) {
 	installEnhancer(t, fakeIPEnhancerStub{enabled: true})
 	r := explainResolver(t, nil, []dnsClient{&answeringClient{}})
@@ -273,7 +227,6 @@ func TestExplainDoesNotClaimFakeIPForTypesItDoesNotAnswer(t *testing.T) {
 	}
 }
 
-// With fake-ip off, nothing changes.
 func TestExplainIsUnchangedWithoutFakeIP(t *testing.T) {
 	installEnhancer(t, fakeIPEnhancerStub{enabled: false})
 	r := explainResolver(t, nil, []dnsClient{&answeringClient{}})
@@ -290,12 +243,6 @@ func typedQuestion(name string, qType uint16) *D.Msg {
 	return m
 }
 
-// The hosts branch shipped with no test at all, while the commit that added it claimed
-// "each bound tested". Deleting the whole block passed every suite in the repository.
-//
-// withHosts runs FIRST in the chain (dns/middleware.go:237) and answers A/AAAA/CNAME from
-// resolver.DefaultHosts without the resolver being reached, so a name in `hosts:` was
-// being explained as `main` with a list of nameservers that never see it.
 func TestExplainReportsHostsRatherThanResolversNobodyAsks(t *testing.T) {
 	previousHosts := resolver.DefaultHosts
 	tree := trie.New[resolver.HostValue]()
@@ -321,8 +268,6 @@ func TestExplainReportsHostsRatherThanResolversNobodyAsks(t *testing.T) {
 			len(explanation.Candidates), explanation.Candidates)
 	}
 
-	// A name hosts does not hold must still reach the resolver, or the branch would
-	// swallow everything the moment any hosts entry exists.
 	other := r.Explain(context.Background(), typedQuestion("elsewhere.example", D.TypeA), false)
 	if other.Source == ExplainSourceHosts {
 		t.Fatal("a name hosts does not hold was attributed to hosts")
@@ -332,9 +277,6 @@ func TestExplainReportsHostsRatherThanResolversNobodyAsks(t *testing.T) {
 	}
 }
 
-// SVCB and HTTPS are answered by withFakeIP too, with an authoritative empty message
-// (dns/middleware.go:179-180). iOS asks HTTPS for almost every name it loads, so this is
-// not an exotic case -- and probe=1 would have SENT an HTTPS query the tunnel never emits.
 func TestExplainReportsFakeIPForTheTypesItAnswersEmpty(t *testing.T) {
 	installEnhancer(t, fakeIPEnhancerStub{enabled: true, ipv6: true})
 	r := explainResolver(t, nil, []dnsClient{&answeringClient{}})
@@ -349,7 +291,6 @@ func TestExplainReportsFakeIPForTheTypesItAnswersEmpty(t *testing.T) {
 			t.Fatalf("type %d named %d resolvers that receive nothing", qType, len(explanation.Candidates))
 		}
 	}
-	// A name the filter skips reaches the resolver for these types like anything else.
 	installEnhancer(t, fakeIPEnhancerStub{enabled: true, ipv6: true, skipped: map[string]bool{"skipped.example": true}})
 	skipped := r.Explain(context.Background(), typedQuestion("skipped.example", D.TypeHTTPS), false)
 	if skipped.Source == ExplainSourceFakeIP {
@@ -357,9 +298,6 @@ func TestExplainReportsFakeIPForTheTypesItAnswersEmpty(t *testing.T) {
 	}
 }
 
-// mihomo defaults dns.ipv6 to false, and withResolver then answers AAAA empty before
-// exchanging (dns/middleware.go:205). Every AAAA explanation on a default configuration
-// was naming resolvers that are never asked.
 func TestExplainReportsTheIPv6GateForAAAA(t *testing.T) {
 	installEnhancer(t, fakeIPEnhancerStub{ipv6: false})
 	r := explainResolver(t, nil, []dnsClient{&answeringClient{}})
@@ -372,7 +310,6 @@ func TestExplainReportsTheIPv6GateForAAAA(t *testing.T) {
 		t.Fatalf("named %d resolvers for a question answered above them", len(explanation.Candidates))
 	}
 
-	// A is unaffected, and with ipv6 on so is AAAA.
 	if a := r.Explain(context.Background(), typedQuestion("example.com", D.TypeA), false); a.Source == ExplainSourceIPv6Disabled {
 		t.Fatal("an A question was refused by the ipv6 gate")
 	}
@@ -382,17 +319,10 @@ func TestExplainReportsTheIPv6GateForAAAA(t *testing.T) {
 	}
 }
 
-// A question answered above the resolver never consults the resolver's cache, so the
-// response must not carry a cache expiry beside it.
-//
-// The peek used to run first and the source was overwritten afterwards, producing two
-// true-looking fields that contradict each other: source fake-ip next to "expires at".
 func TestExplainDoesNotReportACacheForAnswersAboveTheResolver(t *testing.T) {
 	installEnhancer(t, fakeIPEnhancerStub{enabled: true, ipv6: true})
 	r := explainResolver(t, nil, []dnsClient{&answeringClient{}})
 
-	// Seed the resolver's cache for the very name we then ask about, so a peek would
-	// definitely hit and the assertion cannot pass by the cache simply being empty.
 	question := typedQuestion("cached.example", D.TypeA)
 	answer := question.Copy()
 	answer.Answer = []D.RR{&D.A{

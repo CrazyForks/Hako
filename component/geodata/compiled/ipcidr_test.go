@@ -50,10 +50,6 @@ func TestCompiledCidrSetRoundTrips(t *testing.T) {
 	}
 }
 
-// A compiled country and a compiled category can carry the SAME name -- cn is both a
-// country code in GeoIP.dat and a category in GeoSite.dat -- so they cannot share a
-// directory. If they did, whichever was written second would answer for both, and a
-// tunnel would match IPs against domains.
 func TestCompiledGeoIPDoesNotCollideWithGeoSite(t *testing.T) {
 	if IPCIDRDirectoryName == DirectoryName {
 		t.Fatal("geoip and geosite artifacts share a directory; cn would overwrite cn")
@@ -72,7 +68,6 @@ func TestCompiledGeoIPDoesNotCollideWithGeoSite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Each still answers with its own contents.
 	restored, _, err := LoadIPCIDR(geoipDir, "cn")
 	if err != nil {
 		t.Fatal(err)
@@ -89,8 +84,6 @@ func TestCompiledGeoIPDoesNotCollideWithGeoSite(t *testing.T) {
 	}
 }
 
-// Reading a geosite artifact as geoip must fail loudly rather than produce an empty or
-// nonsense matcher: the behavior byte is in the format precisely so this is detectable.
 func TestCompiledCidrSetRefusesADomainArtifact(t *testing.T) {
 	domains, count := sampleSet(t, "+.example.com")
 	var buffer bytes.Buffer
@@ -108,7 +101,6 @@ func TestLoadIPCIDRReportsAnAbsentArtifact(t *testing.T) {
 	}
 }
 
-// The country code reaches this from a configuration, so it is untrusted.
 func TestIPCIDRPathRefusesUnsafeCountryNames(t *testing.T) {
 	for _, name := range []string{"", "../evil", `cn\evil`, "cn/../../evil", "c n"} {
 		if _, err := IPCIDRPath("/tmp", name); err == nil {
@@ -120,8 +112,6 @@ func TestIPCIDRPathRefusesUnsafeCountryNames(t *testing.T) {
 	}
 }
 
-// A half-written artifact must never be visible: the tunnel would read it as corrupt and
-// have no way to tell that from a real one.
 func TestStoreIPCIDRIsAtomic(t *testing.T) {
 	directory := t.TempDir()
 	set, count := sampleCidrSet(t, "1.1.1.0/24")

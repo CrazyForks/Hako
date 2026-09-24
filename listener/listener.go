@@ -97,16 +97,8 @@ func BindAddress() string {
 	return bindAddress
 }
 
-// allowLanObserver mirrors tunnel's mode seam, and allow-lan needs it more: it has THREE
-// writers, not two. The containing app's permission gate decides whether a configuration's
-// allow-lan survives parsing, hub/executor applies the parsed value, and the embedded
-// controller's PATCH /configs sets it directly. A consumer holding a snapshot cannot see two
-// of those three.
-//
-// Nil is the default and what every non-embedded build gets.
 var allowLanObserver atomic.Pointer[func(bool)]
 
-// SetAllowLanObserver installs the seam. Nil removes it.
 func SetAllowLanObserver(observe func(bool)) {
 	if observe == nil {
 		allowLanObserver.Store(nil)
@@ -750,8 +742,5 @@ func Cleanup() {
 	tunMux.Lock()
 	defer tunMux.Unlock()
 	closeTunListener()
-	// ReCreateTun compares against LastTunConf before constructing a listener.
-	// A fresh PacketFlow bridge may receive the same numeric fd after Close;
-	// retaining the previous config would falsely skip listener creation.
 	LastTunConf = LC.Tun{}
 }

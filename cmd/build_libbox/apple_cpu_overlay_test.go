@@ -13,12 +13,6 @@ import (
 	"testing"
 )
 
-// Go's internal/cpu never detects ARM64 features on GOOS=ios: cpu_arm64_other.go
-// (`arm64 && ... && (!darwin || ios)`) has an empty osInit, so HasAES/HasPMULL/HasSHA2
-// stay false and every AES-GCM byte of a vmess/TLS stream goes through the pure-Go
-// path -- 24% of the packet tunnel's CPU under load on 2026-09-02.
-// macOS (`darwin && !ios`) sets them from the M1 baseline. The overlay says the same
-// thing for iOS: every arm64 Apple SoC since A7 has the ARMv8.0 crypto extensions.
 
 func TestAppleCPUOverlayStatesOnlyTheAppleTruths(t *testing.T) {
 	root := repoRoot(t)
@@ -206,14 +200,8 @@ func runOutput(t *testing.T, name string, args ...string) string {
 }
 
 func TestAppleOverlayToolchainIsResolvedUnderTheBuildsOwnPath(t *testing.T) {
-	// The resolver used to ask the host go with the ambient PATH while gomobile ran
-	// under buildEnv(), which prepends GOPATH/bin. On a shell without GOPATH/bin the
-	// two disagreed: the resolver saw the module-cache download and refused, while the
-	// build would have used the real installation on the augmented PATH.
 	root := repoRoot(t)
 	env := buildEnv()
-	// Decide availability before asking anything inside bind/hako: that first question
-	// downloads the pin when it is absent, and a unit test does not get to spend 311 MB.
 	pin := pinnedToolchainLine(t, root)
 	hostVersion := hostGoVersion(t)
 	if !pinnedToolchainAvailable(pin, hostVersion, func(name string) (string, error) { return lookPathIn(env, name) }) {
@@ -244,7 +232,6 @@ func goEnvIn(t *testing.T, root string, env []string, name string) string {
 	return out
 }
 
-// pinnedToolchainLine reads the `toolchain goX.Y.Z` line of bind/hako's go.mod.
 func pinnedToolchainLine(t *testing.T, root string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(root, bindModuleDir, "go.mod"))
@@ -260,8 +247,6 @@ func pinnedToolchainLine(t *testing.T, root string) string {
 	return ""
 }
 
-// hostGoVersion is the host go's own version, asked with GOTOOLCHAIN=local so the
-// question itself cannot trigger a switch or a download.
 func hostGoVersion(t *testing.T) string {
 	t.Helper()
 	cmd := exec.Command("go", "env", "GOVERSION")
@@ -273,9 +258,6 @@ func hostGoVersion(t *testing.T) string {
 	return strings.TrimSpace(string(out))
 }
 
-// lookPathIn resolves an executable against the PATH inside env, not the test's. The
-// last PATH entry wins, which is what exec does with a duplicated variable -- buildEnv
-// appends its augmented PATH after the inherited one.
 func lookPathIn(env []string, name string) (string, error) {
 	path := ""
 	for _, entry := range env {
@@ -295,8 +277,6 @@ func lookPathIn(env []string, name string) (string, error) {
 	return "", exec.ErrNotFound
 }
 
-// A toolchain the go command downloaded into the module cache cannot carry an overlay,
-// and the error has to name the fix without naming a private document.
 func TestModuleCacheToolchainIsRefusedWithAnActionableError(t *testing.T) {
 	_, err := requireOverlayableGOROOT("/u/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.6.darwin-arm64", "/u/go/pkg/mod", "go1.26.6")
 	if err == nil {
@@ -308,9 +288,6 @@ func TestModuleCacheToolchainIsRefusedWithAnActionableError(t *testing.T) {
 			t.Errorf("the error must carry the command that fixes it; %q lacks %q", message, want)
 		}
 	}
-	// This error is a string literal in a file the public export ships, and the export's
-	// leak gates refuse any reference to an internal document. Assert the shape rather
-	// than the name -- naming the document here would trip the same gates this guards.
 	if doc := regexp.MustCompile(`[A-Za-z0-9_-]+\.md`).FindString(message); doc != "" {
 		t.Errorf("a string literal that ships publicly must not point at a document: %q", doc)
 	}
@@ -323,8 +300,6 @@ func TestModuleCacheToolchainIsRefusedWithAnActionableError(t *testing.T) {
 	}
 }
 
-// A build that bypassed the overlay compiles and links without complaint, so the
-// overlay carries a symbol of its own that the finished slice can be asked for.
 func TestAppleCPUOverlayCarriesAMarkerTheLinkerKeeps(t *testing.T) {
 	root := repoRoot(t)
 	fset := token.NewFileSet()
@@ -392,8 +367,6 @@ func TestAppleCPUOverlayMarkerVerdict(t *testing.T) {
 	if err := verifyAppleCPUOverlayMarker("macos-arm64_x86_64", withMarker); err == nil {
 		t.Error("a macOS slice carrying the iOS overlay means the constraint leaked and must fail")
 	}
-	// The overlay is arm64-only; an x86_64 simulator slice detects AES through cpuid and
-	// must neither need nor carry the marker.
 	if err := verifyAppleCPUOverlayMarker("ios-x86_64-simulator", without); err != nil {
 		t.Errorf("an x86_64 simulator slice has no arm64 code to overlay: %v", err)
 	}
@@ -408,8 +381,6 @@ func TestAppleCPUOverlayMarkerVerdict(t *testing.T) {
 	}
 }
 
-// nm prints only the host architecture of a universal binary unless asked for all of
-// them, so the verdict on the fat simulator slices would follow the build machine's CPU.
 func TestSliceSymbolsAreReadForEveryArchitecture(t *testing.T) {
 	args := sliceSymbolArgs("/x/Hako.framework/Hako")
 	if !slicesContain(args, "-arch") {
@@ -420,9 +391,6 @@ func TestSliceSymbolsAreReadForEveryArchitecture(t *testing.T) {
 	}
 }
 
-// The xcframework holds more than slices (Info.plist, and whatever a signing or
-// packaging step leaves next to them); the rest of build_libbox enumerates slices as
-// "*-*" and this verdict must agree with it rather than hard-failing on a stray entry.
 func TestOnlySliceDirectoriesAreJudged(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"ios-arm64", "macos-arm64_x86_64", "_CodeSignature", "dSYMs"} {
@@ -457,13 +425,9 @@ func slicesContain(list []string, want string) bool {
 	return false
 }
 
-// go build ignores an overlay key that names a file which does not exist. The day
-// upstream fixes iOS feature detection it will likely retire cpu_arm64_other.go for
-// the iOS family, and the overlay would then add a second osInit and die inside
-// internal/cpu with a redeclaration error that names nothing about this mechanism.
 func TestOverlayRefusesAGOROOTWithoutTheFileItReplaces(t *testing.T) {
 	root := repoRoot(t)
-	goroot := t.TempDir() // no src/internal/cpu/cpu_arm64_other.go here
+	goroot := t.TempDir()
 	_, err := writeAppleCPUOverlay(root, goroot, t.TempDir())
 	if err == nil {
 		t.Fatal("a GOROOT without cpu_arm64_other.go must be refused before the build, not discovered as a redeclaration deep in internal/cpu")
@@ -473,11 +437,6 @@ func TestOverlayRefusesAGOROOTWithoutTheFileItReplaces(t *testing.T) {
 	}
 }
 
-// Asking the go command anything inside bind/hako makes it honour the module's
-// toolchain line, and when that toolchain is not installed it downloads it -- 311 MB --
-// before answering. A unit test must find out whether the pin is available without
-// paying that, and skip with its own reason when it is not, rather than either
-// downloading or hiding a resolver failure behind a skip.
 func TestPinnedToolchainAvailabilityIsDecidedWithoutADownload(t *testing.T) {
 	lookPath := func(name string) (string, error) {
 		if name == "go1.26.6" {
@@ -499,7 +458,6 @@ func TestPinnedToolchainAvailabilityIsDecidedWithoutADownload(t *testing.T) {
 	}
 }
 
-// The resolver used to spawn go three times for three answers it can get in one.
 func TestGoEnvAnswersComeFromOneSpawn(t *testing.T) {
 	env := parseGoEnvLines("GOROOT=/x/go\nGOMODCACHE=/x/mod\nGOVERSION=go1.26.6\n", []string{"GOROOT", "GOMODCACHE", "GOVERSION"})
 	if env["GOROOT"] != "/x/go" || env["GOMODCACHE"] != "/x/mod" || env["GOVERSION"] != "go1.26.6" {
@@ -510,10 +468,6 @@ func TestGoEnvAnswersComeFromOneSpawn(t *testing.T) {
 	}
 }
 
-// The overlay replaces the whole file, so a future toolchain that keeps the file name
-// but gives it real iOS detection would be silently overwritten while the marker still
-// passes. The replaced file must be the one the overlay was written for: the constraint
-// that selects iOS and nothing but an empty osInit.
 func TestOverlayRefusesAReplacedFileThatHasGrownLogic(t *testing.T) {
 	root := repoRoot(t)
 	goroot := t.TempDir()
@@ -539,7 +493,6 @@ func TestOverlayRefusesAReplacedFileThatHasGrownLogic(t *testing.T) {
 	}
 }
 
-// GNU nm on PATH takes different flags; the slice verdict must use the SDK's nm.
 func TestSliceSymbolsUseTheSDKsNM(t *testing.T) {
 	name, args := sliceSymbolCommand("/x/Hako.framework/Hako")
 	if name != "xcrun" || len(args) < 2 || args[0] != "nm" {

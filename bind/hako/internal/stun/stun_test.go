@@ -288,7 +288,7 @@ func TestConcurrentCancellation(t *testing.T) {
 			go func() { defer waitGroup.Done(); cancel() }()
 		}
 		waitGroup.Wait()
-		cancel() // Make context ownership explicit after the concurrent idempotency exercise.
+		cancel()
 		select {
 		case <-done:
 		case <-time.After(time.Second):

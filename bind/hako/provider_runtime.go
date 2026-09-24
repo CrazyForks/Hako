@@ -31,10 +31,6 @@ type providerRuntimeEntry struct {
 	runtimePath    string
 }
 
-// providerVerdictCounts totals the staged tree's compile verdicts in the
-// locked wire vocabulary: compiled | notCompilable | keptSource. An entry
-// with no verdict (a proxy provider, or a rule set no publish has compiled
-// yet) is in none of the three.
 type providerVerdictCounts struct {
 	compiled      int
 	notCompilable int
@@ -52,13 +48,6 @@ func providerRuntimeKey(kind, name string) string {
 	return kind + "\x00" + name
 }
 
-// stagingCost itemises where a cold staging pass spends its time. The
-// aggregate mark said 410ms for fifty-seven providers and could not say
-// which kind of provider that was: an MRS rule set is zstd-decompressed in
-// full merely to prove it is a readable MRS (mrs_validation.go), while a
-// classical .list is scanned line by line to strip metadata rules, and a
-// cache hit is two lstats. Those are three different costs and only one of
-// them is worth attacking.
 type stagingCost struct {
 	hitCount       int
 	hitNanos       int64
@@ -96,8 +85,6 @@ func (c *stagingCost) line() string {
 
 const providerRuntimeStagedDirectoryName = "staged"
 
-// Both the publish entry and the start path resolve these the same way, so the
-// two processes write and read the same tree.
 func stagedProviderParentDirectory() string {
 	return filepath.Join(C.Path.HomeDir(), providerRuntimeDirectoryName)
 }
@@ -108,20 +95,6 @@ func stagedProviderDirectory() string {
 
 const providerRuntimeManifestName = "staged-manifest.json"
 
-// providerStagingLogicVersion names the staging algorithm, not the data: bump
-// it whenever sanitize/prepare could emit different bytes or a different
-// verdict for identical inputs, or every cached product silently keeps the
-// retired behavior. The core version in the manifest does not cover this --
-// C.Version moves with the vendored mihomo, not with this file.
-//
-// 3: the keptSource verdict — a compile refusal stages the source online
-// instead of empty on profiles without compiledRuleSetsOnly.
-// 4: records carry the staged product's digest; a hit verifies it rather than
-// trusting the size alone.
-// 6: rule entries carry the count of what was staged (Count). A hit serves the
-// record verbatim, so a manifest from before the field would serve entries
-// without it for as long as their sources stayed put; moving the version
-// restages once and every served entry has one.
 const providerStagingLogicVersion = 6
 
 type stagedProviderNoop struct {
@@ -141,46 +114,16 @@ type stagedProviderRecord struct {
 	SideUpdateSafe bool   `json:"sideUpdateSafe,omitempty"`
 	File           string `json:"file"`
 	StagedSize     int64  `json:"stagedSize"`
-	// Count is how many entries the staged product holds, for rule entries only:
-	// the header count of a compiled or source MRS, the kept entries of a set that
-	// rides as text. It is what the core will load, not what the source file says
-	// (a stripped PROCESS-NAME line is not counted). The rules page reads it when
-	// the tunnel is down and no running core can answer; with the tunnel up the
-	// live figure wins. Proxy entries carry none -- their entries are nodes.
 	Count          int                  `json:"count,omitempty"`
 	EgressNoops    []stagedProviderNoop `json:"egressNoops,omitempty"`
 	MetadataNoops  []stagedProviderNoop `json:"metadataNoops,omitempty"`
 	UnreadableWarn string               `json:"unreadableWarn,omitempty"`
-	// The MRS compile verdict. compiled is written only by a publish that
-	// compiled (the App process; the extension never compiles), but
-	// notCompilable can also be written by an extension restage on a
-	// compiled-only profile: the refusal judgement is a line scan, and it must
-	// survive a manifest invalidation or the empty-set ruling silently becomes
-	// a text load. Absent means NOT YET COMPILED — the set rides as text
-	// exactly as before any of this existed — and absent is the only spelling
-	// of that state; an empty string is not a verdict.
-	// Behavior/Format above keep the DEFINITION's original values (the cache
-	// hit compares against the configuration), so the artifact's actual
-	// strategy travels separately in CompiledBehavior.
 	CompileVerdict   string `json:"compileVerdict,omitempty"`
 	CompiledBehavior string `json:"compiledBehavior,omitempty"`
 	CompileReason    string `json:"compileReason,omitempty"`
-	// ContentSHA256 is what the staged file contained when staging produced it.
-	// A cache hit serves that file to the core without re-running sanitize,
-	// strip or compile, so before this field the only thing standing between a
-	// rewritten staged file and the running core was a size comparison -- and
-	// an equal-length rewrite passes one. The bytes are already in memory at
-	// staging time, so recording the digest costs a hash of what was just
-	// written. Absent on records written by an older core: those miss and
-	// restage, which is the safe direction.
 	ContentSHA256 string `json:"contentSHA256,omitempty"`
 }
 
-// compiledBehaviorIsKnown reports whether a manifest's recorded compiled
-// behavior is one this core can hand back to the definition. The value is
-// rewritten into the provider definition on a cache hit, and an unknown one
-// fails ParseRawConfig -- which fails the whole start, on every start, because
-// the manifest outlives the process.
 func compiledBehaviorIsKnown(behavior string) bool {
 	switch behavior {
 	case "domain", "ipcidr", "classical":
@@ -190,10 +133,6 @@ func compiledBehaviorIsKnown(behavior string) bool {
 	}
 }
 
-// maximumStagedManifestBytes bounds the manifest read. It is a JSON control
-// file listing a few dozen providers, not a payload; reading it unbounded let
-// one oversized file (or a symlink to one) end every start inside a 50 MiB
-// process.
 const maximumStagedManifestBytes = 4 << 20
 
 func stagedFileDigest(payload []byte) string {
@@ -201,10 +140,6 @@ func stagedFileDigest(payload []byte) string {
 	return hex.EncodeToString(digest[:])
 }
 
-// requireRealDirectoryOrAbsent reports an error when path exists but is not a
-// real directory -- a symlink included. Absent is fine: the caller is about to
-// create it. Lstat, not Stat, because a symlink to a directory is exactly the
-// case this exists to catch.
 func requireRealDirectoryOrAbsent(path string) error {
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -219,11 +154,6 @@ func requireRealDirectoryOrAbsent(path string) error {
 	return nil
 }
 
-// SideUpdateDeferredPrefix begins every side-update error that means "not
-// failed, applies later" — today, the refusal for a compiled rule set. The
-// client distinguishes a deferral from a failure by this prefix (exported so
-// neither side hand-copies the words), because a background refresh that
-// counts a deferral as a failure teaches BGTaskScheduler to starve the app.
 const SideUpdateDeferredPrefix = "hako: side update deferred: "
 
 const (
@@ -241,9 +171,6 @@ type stagedProviderManifest struct {
 }
 
 func stagedPolicyFingerprint(policy appleRuntimePolicy) string {
-	// Every field is a value type, so this is stable across runs; a policy
-	// that grows a field changes the fingerprint and restages everything,
-	// which is the correct default for an input nobody listed here.
 	return fmt.Sprintf("%+v", policy)
 }
 
@@ -278,9 +205,6 @@ func loadStagedProviderManifest(parent string, policy appleRuntimePolicy) *stage
 	return manifest
 }
 
-// saveStagedProviderManifest is best-effort: a manifest that fails to write
-// costs the next start a rebuild, not correctness, so staging never fails
-// over it.
 func saveStagedProviderManifest(parent string, manifest *stagedProviderManifest) {
 	payload, err := json.Marshal(manifest)
 	if err == nil {
@@ -330,14 +254,6 @@ func stagedProviderRecordMatches(record stagedProviderRecord, sourcePath, behavi
 		identity.inode == record.SourceInode
 }
 
-// stagedFileMatches decides whether the staged product on disk is still the
-// one staging produced. The size is the cheap gate; the digest is the one that
-// holds, because a rewrite that keeps the length is invisible to the size and
-// the served file never passes through sanitize/strip/compile again.
-//
-// A record with no digest predates this check and is treated as a miss: the
-// entry restages from the published source, which costs one pass and cannot
-// serve someone else's bytes.
 func stagedFileMatches(path string, record stagedProviderRecord) bool {
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Size() != record.StagedSize {
@@ -356,14 +272,8 @@ func stagedFileMatches(path string, record stagedProviderRecord) bool {
 	return stagedFileDigest(payload) == record.ContentSHA256
 }
 
-// replayStagedProviderWarnings re-emits the verdict the original staging
-// logged, so a start served from the cache warns exactly as loudly as the
-// one that did the work.
 func replayStagedProviderWarnings(name, kind string, record stagedProviderRecord) {
 	if record.UnreadableWarn != "" {
-		// The sentence has to name the right kind: a cache hit that told a
-		// reader his proxy subscription was a rule set would send him looking
-		// in the wrong file.
 		if kind == "proxy" {
 			warnUnreadableProxyProvider(name, errors.New(record.UnreadableWarn))
 		} else {
@@ -413,11 +323,6 @@ func encodeMetadataNoops(stripped []providerMetadataNoop) []stagedProviderNoop {
 	return encoded
 }
 
-// invalidateStagedProviderRecord forgets one provider's staged product. A
-// side update has just replaced the staged bytes while the tunnel runs, so
-// they no longer equal what staging would produce from the published source;
-// the next start must rebuild from that source -- which is exactly the
-// restart semantics the per-start rebuild used to provide.
 func invalidateStagedProviderRecord(kind, name string) {
 	parent := filepath.Join(C.Path.HomeDir(), providerRuntimeDirectoryName)
 	payload, err := readBoundedRegularFile(
@@ -438,11 +343,6 @@ func invalidateStagedProviderRecord(kind, name string) {
 	saveStagedProviderManifest(parent, manifest)
 }
 
-// sweepStagedProviderRuntime clears what the configuration dropped and the
-// retired per-start directories a jetsam kill used to strand. During a live
-// Reload the outgoing core may still hold a swept file's descriptor; the
-// unlinked inode stays readable, and a path-based refresh in that window
-// fails recoverably, so immediate sweeping is the right trade.
 func sweepStagedProviderRuntime(parent, stagedDirectory string, referenced map[string]struct{}) {
 	if entries, err := os.ReadDir(parent); err == nil {
 		for _, entry := range entries {
@@ -465,21 +365,6 @@ func sweepStagedProviderRuntime(parent, stagedDirectory string, referenced map[s
 	}
 }
 
-// stageProviderRuntime redirects every file-backed provider to a private
-// shadow before mihomo constructs its provider objects. The shadow starts as
-// a hard link to the immutable published revision; an update replaces only
-// the shadow inode, giving the Core copy-on-write semantics without a second
-// initial copy or a mutation of App-owned source data.
-//
-// The shadow directory is persistent, not per-start. Staging is a pure
-// function of the published bytes, the definition's schema fields and the
-// runtime policy -- and its inputs are immutable revision files, so the
-// 2026-08-05 itemised startup trace showed every tunnel start re-reading and
-// re-decoding fifty-six unchanged provider files for 347 of its 890ms. The
-// manifest beside the shadow records each product's inputs; a start whose
-// inputs still match serves the previous product for the price of two
-// lstats, and re-emits the recorded warnings so a cached start is exactly as
-// loud as the one that did the work.
 func stageProviderRuntime(raw *config.RawConfig, policy appleRuntimePolicy, compileRuleSets bool) (*providerRuntime, error) {
 	definitions := []struct {
 		kind      string
@@ -518,20 +403,12 @@ func stageProviderRuntime(raw *config.RawConfig, policy appleRuntimePolicy, comp
 			if pathInsideDirectory(sourcePath, parent) {
 				return cleanupOnError(fmt.Errorf("hako: %s provider source points into runtime storage", namespace.kind))
 			}
-			// The path is subscription-authored text and upstream's own guard is
-			// a no-op in this build (see providerSourceContained). The error
-			// names the provider, never the path: the path is what the attacker
-			// is probing with, and this text reaches the log.
 			if !providerSourceContained(sourcePath, C.Path.HomeDir()) {
 				return cleanupOnError(fmt.Errorf(
 					"hako: %s provider %q names a path outside this app's container and cannot be read",
 					namespace.kind, name))
 			}
 			if runtime == nil {
-				// A symlink planted at the runtime root would redirect every
-				// staged write, and turn the sweep below into an indiscriminate
-				// RemoveAll of a directory that is not ours. MkdirAll and Chmod
-				// both follow links, so this check comes first and uses Lstat.
 				if err := requireRealDirectoryOrAbsent(parent); err != nil {
 					return nil, fmt.Errorf("hako: provider runtime directory: %w", err)
 				}
@@ -566,10 +443,6 @@ func stageProviderRuntime(raw *config.RawConfig, policy appleRuntimePolicy, comp
 			if record, hit := manifest.Entries[key]; hit &&
 				stagedProviderRecordMatches(record, sourcePath, behavior, format) &&
 				stagedFileMatches(runtimePath, record) &&
-				// A publish that compiles must not be served yesterday's text
-				// staging: a rule record with no verdict misses, restages and
-				// gets its verdict. The extension (compileRuleSets false)
-				// keeps hitting it, which is exactly the not-yet-compiled state.
 				!(compileRuleSets && namespace.kind == "rule" &&
 					record.CompileVerdict == "" && record.UnreadableWarn == "") {
 				cost.hitCount++
@@ -578,23 +451,14 @@ func stageProviderRuntime(raw *config.RawConfig, policy appleRuntimePolicy, comp
 					logRuleProviderDisposition(name, record)
 				}
 				replayStagedProviderWarnings(name, namespace.kind, record)
-				// sideUpdateSafe belongs to the configuration, not the file:
-				// take the current definition's answer, not the recorded one.
 				record.SideUpdateSafe = sideUpdateSafe
 				entryBehavior, entryFormat := behavior, format
 				if record.CompileVerdict == compileVerdictCompiled &&
 					!compiledBehaviorIsKnown(record.CompiledBehavior) {
-					// The manifest claims an artifact but names a strategy this
-					// core cannot parse. Handing it to the definition fails
-					// ParseRawConfig and therefore the whole start, on every
-					// start. Treat the record as absent and rebuild.
 					log.Warnln("[Apple] staged rule provider %q records an unknown compiled behavior; restaging from source", name)
 					record = stagedProviderRecord{}
 				}
 				if record.CompileVerdict == compileVerdictCompiled {
-					// The three values that must agree are rewritten by the one
-					// function both processes run — the reuse path included, or
-					// the extension would read MRS bytes under a text strategy.
 					definition["format"] = "mrs"
 					definition["behavior"] = record.CompiledBehavior
 					entryBehavior, entryFormat = record.CompiledBehavior, "mrs"
@@ -610,36 +474,8 @@ func stageProviderRuntime(raw *config.RawConfig, policy appleRuntimePolicy, comp
 				continue
 			}
 
-			// The identity is taken before the bytes are read: an edit that
-			// lands between the two makes the next start's comparison miss
-			// and restage, instead of being trusted forever.
 			identity, err := stagedSourceIdentity(sourcePath)
 			if err != nil {
-				// A source this step cannot read is not a reason to refuse the
-				// whole configuration, and it used to be: one missing file
-				// provider aborted activation with a bare lstat error, while
-				// the plan's own notice promised the provider would ride empty
-				// and the tunnel would start. Both cannot be true; upstream
-				// settles which one is. hub/executor/executor.go:400-411 calls
-				// pv.Initial(), logs "initial <kind> provider %s error" on
-				// failure, and keeps going -- the provider is empty, the
-				// configuration runs.
-				//
-				// So the staging step steps aside instead. definition["path"]
-				// is left pointing at the original source, which means the core
-				// builds the provider itself and produces upstream's own error
-				// through upstream's own path. Nothing is invented here, and
-				// nothing is hidden: the failure still reaches the log, just
-				// not as a refusal.
-				//
-				// The guards ABOVE this line stay fatal on purpose. A source
-				// pointing into runtime storage, or outside the container, is
-				// not a provider that failed to load -- it is a path that must
-				// not be read at all,'s containment does not bend
-				// because upstream is more relaxed about its own filesystem.
-				//
-				// Found by Codex 2026-08-27; the plan layer had been aligned in
-				// and this half of the same refusal was left standing.
 				log.Warnln("[Apple] %s provider %q could not be staged (%v); it rides empty and the configuration still starts, as it does upstream",
 					namespace.kind, name, err)
 				continue
@@ -652,27 +488,10 @@ func stageProviderRuntime(raw *config.RawConfig, policy appleRuntimePolicy, comp
 			}
 			commitStart := time.Now()
 			if namespace.kind == "rule" {
-				// Schema before content, because upstream is fatal on one and
-				// tolerant of the other. An unparseable behavior/format STRING
-				// fails inside ParseRuleProvider (rules/provider/parse.go:34-41)
-				// during config.ParseRawConfig, where parseRuleProviders stops
-				// the whole load (config/config.go:687-690, 1014-1027) -- these
-				// definition fields are staged untouched, so tolerating the typo
-				// here would not make the config start; it would only trade this
-				// contextual error for mihomo's bare one, after logging a false
-				// "still starts". Only defects in the file's CONTENT are on
-				// upstream's warn-and-continue path below.
 				if err := ruleProviderSchemaError(behavior, format); err != nil {
 					return cleanupOnError(fmt.Errorf("hako: stage rule provider runtime: %w", err))
 				}
 				readStart := time.Now()
-				// A zero-byte published rule set is the App's deliberate
-				// staging of a failed download (the start-first ruling): skip
-				// the bounded read, whose size guard would kill the whole
-				// start with "size is invalid" before the warn-and-continue
-				// tolerance below ever ran, and hand prepare the empty
-				// payload instead — it takes the same non-fatal path as
-				// unreadable content and the rule set matches nothing.
 				var payload []byte
 				if identity.size > 0 {
 					payload, err = readBoundedRegularFile(sourcePath, int64(maximumProviderResourceBytes), "published provider")
@@ -685,8 +504,6 @@ func stageProviderRuntime(raw *config.RawConfig, policy appleRuntimePolicy, comp
 				}
 				prepareStart := time.Now()
 				prepared, stripped, prepareErr := prepareRuleProviderRuntimePayload(behavior, format, payload, policy)
-				// The two rule paths cost nothing alike: MRS is a full zstd
-				// decompression to prove readability, classical is a line scan.
 				if strings.EqualFold(strings.TrimSpace(format), "mrs") {
 					cost.mrsCount++
 					cost.mrsNanos += time.Since(prepareStart).Nanoseconds()
@@ -696,21 +513,11 @@ func stageProviderRuntime(raw *config.RawConfig, policy appleRuntimePolicy, comp
 				}
 				if compileRuleSets && prepareErr == nil &&
 					strings.EqualFold(strings.TrimSpace(format), "mrs") {
-					// Already the compact form: record it, so the hit gate stops
-					// forcing a full restage on every compile-enabled publish.
 					record.CompileVerdict = compileVerdictCompiled
 					record.CompiledBehavior = strings.ToLower(strings.TrimSpace(behavior))
 				}
 				if compileRuleSets && prepareErr == nil && identity.size > 0 &&
 					!strings.EqualFold(strings.TrimSpace(format), "mrs") {
-					// The publish process compiles; the artifact becomes the
-					// staged runtime file itself, and the definition's three
-					// values move together. A set the compiler refuses is
-					// staged EMPTY instead of stripped: RULE-SET references can
-					// hide inside AND()/OR()/NOT() and sub-rules, where a
-					// removed provider is a fatal dangling name, while an empty
-					// set matches nothing — the zero-byte deliberate-staging
-					// precedent, reused. Either way the start is never blocked.
 					content := payload
 					if len(stripped) > 0 {
 						content = prepared
@@ -720,13 +527,6 @@ func stageProviderRuntime(raw *config.RawConfig, policy appleRuntimePolicy, comp
 					cost.compileCount++
 					cost.compileNanos += time.Since(compileStart).Nanoseconds()
 					if compilation.Reason != "" {
-						// A profile without the memory ceiling keeps the source
-						// online and pays the parse, exactly as upstream does:
-						// the prepared copy when stripping preceded, the
-						// published bytes verbatim otherwise. The verdict still
-						// lands in the manifest — with the same reason a
-						// refusal records — so a hit is a hit and the account
-						// stays readable.
 						if len(stripped) > 0 {
 							if err := writeRuntimeProviderFile(runtimePath, prepared); err != nil {
 								return cleanupOnError(fmt.Errorf("hako: stage rule provider runtime: %w", err))
@@ -809,39 +609,6 @@ func stageProviderRuntime(raw *config.RawConfig, policy appleRuntimePolicy, comp
 				cost.proxyNanos += time.Since(proxyStart).Nanoseconds()
 				switch {
 				case err != nil:
-					// A subscription this core cannot read costs its own nodes
-					// and nothing else, exactly as it does upstream.
-					//
-					// This used to end the activation: the payload failed to
-					// parse here, the error reached config_pipeline.go and the
-					// tunnel never started. Upstream does not agree and does
-					// not even distinguish -- `hub/executor/executor.go:399`
-					// logs one line per failing provider and carries on -- and
-					// FlClash adds no layer of its own
-					// (`.refs/FlClash/core/hub.go:90`, `core/common.go:251`),
-					// so the same profile starts there. A TestFlight reader
-					// with a Sub-Store hosted config met the difference: his
-					// groups arrived, his nodes did not, and starting the proxy
-					// errored. The first half is upstream's answer too; the
-					// second half was ours alone.
-					//
-					// The bytes are staged verbatim rather than replaced or
-					// dropped, so what mihomo reads is what the subscription
-					// served and its own error names a real cause. Two things
-					// make that safe, and both have to hold:
-					//   * `ParseProxyProvider` only builds a vehicle
-					//     (adapter/provider/parser.go:78-95) and never reads
-					//     the file -- the read is Initial()'s, on the
-					//     warn-and-continue path above;
-					//   * this core's share-link vocabulary is never narrower
-					//     than upstream's, so a payload we cannot parse is one
-					//     mihomo cannot parse either, and no node inside it can
-					//     become the live node without having passed the egress
-					//     strip. That invariant is not an assumption: it is
-					//     pinned per link by
-					//     TestOurShareLinkVocabularyIsNeverNarrowerThanUpstream.
-					// Reverse either one and this branch has to go back to
-					// being fatal.
 					if stageErr := stageRuntimeProviderFile(sourcePath, runtimePath); stageErr != nil {
 						return cleanupOnError(fmt.Errorf("hako: stage proxy provider runtime: %w", stageErr))
 					}
@@ -866,11 +633,6 @@ func stageProviderRuntime(raw *config.RawConfig, policy appleRuntimePolicy, comp
 				return cleanupOnError(fmt.Errorf("hako: stage %s provider runtime: %w", namespace.kind, err))
 			}
 			record.StagedSize = stagedInfo.Size()
-			// The digest of what actually landed, so a later start can tell
-			// this product from one somebody rewrote. Read back rather than
-			// hashed from the in-memory buffer on purpose: the file is what the
-			// core will read, and the two differ on every path that hardlinks
-			// the source instead of writing prepared bytes.
 			entryBehavior, _ := definition["behavior"].(string)
 			entryFormat, _ := definition["format"].(string)
 			if staged, readErr := os.ReadFile(runtimePath); readErr == nil {
@@ -927,23 +689,6 @@ func pathInsideDirectory(path, directory string) bool {
 	return err == nil && filepath.IsLocal(relative)
 }
 
-// providerSourceContained reports whether a provider's source path stays
-// inside the container this process owns, resolving symlinks first.
-//
-// Upstream has this check -- C.Path.IsSafePath, called from
-// rules/provider/parse.go and adapter/provider/parser.go -- but it opens with
-// `if p.allowUnsafePath || features.CMFA { return true }` (constant/path.go),
-// and every shipped Hako binary carries the cmfa tag by ruling
-// (cmd/build_libbox/main.go:58). So in this build upstream's guard answers true
-// for every path, including `../../../../etc/passwd`. Staging reads the file
-// before upstream would look anyway, and rewrites the definition to the staged
-// copy, so nothing downstream ever sees the original path either: if this
-// function does not hold the line, nothing does.
-//
-// Symlinks are resolved because a lexical check waves through an in-container
-// link that points out of it. A path whose parents do not exist yet cannot be
-// resolved; the deepest existing ancestor is resolved instead, which is what
-// the attack would have to subvert. Failure is refusal, not acceptance.
 func providerSourceContained(sourcePath, home string) bool {
 	if home == "" {
 		return false
@@ -954,8 +699,6 @@ func providerSourceContained(sourcePath, home string) bool {
 	}
 	resolved, err := filepath.EvalSymlinks(sourcePath)
 	if err != nil {
-		// The leaf may legitimately not exist yet (staging reports that with a
-		// better error); resolve the deepest ancestor that does.
 		directory, file := filepath.Split(sourcePath)
 		resolvedDirectory, dirErr := filepath.EvalSymlinks(filepath.Clean(directory))
 		if dirErr != nil {
@@ -971,15 +714,9 @@ func stageRuntimeProviderFile(sourcePath, runtimePath string) error {
 	if err != nil {
 		return fmt.Errorf("stat published provider: %w", err)
 	}
-	// No lower bound: a zero-byte published rule set is the App's deliberate
-	// staging of a failed download (start-first ruling), staged verbatim so
-	// the profile starts and that rule set matches nothing.
 	if !before.Mode().IsRegular() || before.Size() > int64(maximumProviderResourceBytes) {
 		return fmt.Errorf("published provider is not a bounded regular file")
 	}
-	// Linked to a temporary name and renamed over: the staged directory is
-	// persistent now, so the destination may hold the previous product, and
-	// link(2) refuses to replace.
 	temporaryPath := runtimePath + ".staging"
 	_ = os.Remove(temporaryPath)
 	if err := os.Link(sourcePath, temporaryPath); err == nil {
@@ -998,8 +735,6 @@ func stageRuntimeProviderFile(sourcePath, runtimePath string) error {
 	}
 
 	if before.Size() == 0 {
-		// readBoundedRegularFile refuses empty files; the deliberate empty
-		// staging above still has to survive the copy fallback.
 		return writeRuntimeProviderFile(runtimePath, nil)
 	}
 	payload, err := readBoundedRegularFile(sourcePath, int64(maximumProviderResourceBytes), "published provider")
@@ -1041,10 +776,6 @@ func writeRuntimeProviderFile(path string, payload []byte) error {
 	return nil
 }
 
-// ruleProviderSchemaError reports whether the behavior/format STRINGS parse.
-// It exists so staging can separate what upstream refuses at config load (these
-// strings, via ParseRuleProvider) from what upstream tolerates per provider at
-// Initial() (the file's content) -- the two halves of the staging switch above.
 func ruleProviderSchemaError(behavior, format string) error {
 	if _, err := P.ParseBehavior(behavior); err != nil {
 		return fmt.Errorf("hako: provider behavior: %w", err)
@@ -1065,14 +796,6 @@ func prepareRuleProviderRuntimePayload(behavior, format string, payload []byte, 
 		return nil, nil, fmt.Errorf("hako: provider format: %w", formatErr)
 	}
 	if parsedBehavior == P.Classical && parsedFormat != P.MrsRule {
-		// One cheap pass, whatever the profile. The capability decides which
-		// owner-metadata kinds this platform can resolve -- a macOS packet
-		// tunnel keeps PROCESS-NAME/-PATH and UID, which come from the one
-		// socket-table read, and loses only IN-USER and SOURCE-APP-*, which no
-		// Apple profile can ever answer -- and nothing else here needs
-		// the payload parsed. Judging whether each entry would build was the
-		// same judgement upstream makes again at load, and it cost more than
-		// everything else staging does put together.
 		return stageClassicalProviderPayloadForApple(payload, parsedFormat, policy.processMetadata())
 	}
 	if err := ValidateProviderForIOS("rule", behavior, format, payload); err != nil {
@@ -1081,43 +804,16 @@ func prepareRuleProviderRuntimePayload(behavior, format string, payload []byte, 
 	return payload, nil, nil
 }
 
-// logKeptSourceRuleProvider is informational on purpose: the set still runs,
-// as source, exactly as upstream runs it — only the compile acceleration is
-// absent, and the reason says why. Both the staging that did the work and a
-// cached start replay the same line.
-// logRuleProviderDisposition says, for every rule provider and exactly once per
-// staging, what happened to it. Derived from the finished record rather than
-// emitted from each branch, so a path nobody remembered to instrument cannot
-// stay silent -- which is the defect this exists to fix.
-//
-// Until 2026-08-22 the core only spoke up when something was WRONG: compiled-to-MRS
-// and kept-as-source were logged on the publishing path, and the extension staging
-// fresh said nothing at all. On a television, where delivery goes through the
-// extension, that meant "this set rides as text" and "this set became MRS" looked
-// identical in the log -- and the only way to tell was to notice a PROCESS-NAME
-// stripping WARNING, which happens to prove the core held the source. A census
-// assembled from someone else's side effects is not a census; the tvOS lane could
-// establish 9 of 15 and no more.
-//
-// Info level: this is the normal outcome of a normal start, not a complaint. The
-// warnings for the abnormal cases still fire on top of it.
 func logRuleProviderDisposition(name string, record stagedProviderRecord) {
 	switch {
 	case record.UnreadableWarn != "":
 		log.Infoln("[Apple] rule provider %q: not readable by this core, loads no rules", name)
 	case record.CompileVerdict == compileVerdictCompiled:
-		// No rule count here: the record does not carry one, and a line that
-		// printed a zero for every cache hit would be worse than one that says
-		// nothing. The publishing path logs the count and the byte size on its
-		// own line, right where it has them.
 		log.Infoln("[Apple] rule provider %q: compiled to MRS", name)
 	case record.CompileVerdict == compileVerdictKeptSource:
 		log.Infoln("[Apple] rule provider %q: kept as source, every rule loads (%s)",
 			name, record.CompileReason)
 	default:
-		// The extension stages without compiling, so it reaches here for every set
-		// it did not already have an artifact for. Saying so is the point: silence
-		// here was indistinguishable from a compiled set.
 		log.Infoln("[Apple] rule provider %q: staged as source, not compiled on this profile", name)
 	}
 }
@@ -1126,16 +822,6 @@ func logKeptSourceRuleProvider(name, reason string) {
 	log.Infoln("[Apple] rule provider %q is kept as source and rides as text on this profile: %s", name, reason)
 }
 
-// warnUnreadableRuleProvider is the provider-level counterpart of the per-rule
-// warnings below: those report entries skipped inside a provider that still
-// loads, this reports a provider that will not load at all. The distinction
-// matters to whoever reads the log, because the remedy differs -- a skipped rule
-// is usually a desktop-only rule kind, an unloadable provider is usually a bad
-// URL or a format/extension mismatch.
-//
-// The reason is carried in full. It is the only place the cause survives: the
-// core does not fail, so the App sees a started tunnel, and without this line a
-// rule set that silently matches nothing would look identical to one that works.
 func warnUnreadableProxyProvider(name string, cause error) {
 	log.Warnln("[Apple] proxy-provider %q cannot be read by this core and will load no proxies: %v; "+
 		"the configuration still starts and every other provider is unaffected, "+
@@ -1168,9 +854,6 @@ func warnProviderEgressNoops(name string, stripped []providerEgressNoop) {
 	}
 }
 
-// close releases this service's references. The staged directory stays on
-// disk on purpose: it is the cache the next start reuses, and the sweep at
-// staging time -- not stop time -- is what bounds it.
 func (runtime *providerRuntime) close() {
 	if runtime == nil {
 		return
@@ -1186,29 +869,16 @@ func (s *BoxService) sideUpdateProvider(kind, name string, payload []byte) error
 		return fmt.Errorf("hako: provider runtime is unavailable")
 	}
 	if s.providerRuntime == nil {
-		// Nothing was staged -- every provider in this configuration is remote or
-		// inline -- so the only side update possible is the remote kind.
 		return sideUpdateRemoteProvider(kind, name, payload, currentRuntimePolicy(s.platform.UnderNetworkExtension()))
 	}
 	entry, exists := s.providerRuntime.entries[providerRuntimeKey(kind, name)]
 	if !exists {
-		// Not staged means not file-backed. A remote provider the app could not
-		// download at activation runs on its http vehicle, and the app, once it
-		// has fetched the payload through the tunnel, hands it in here.
 		return sideUpdateRemoteProvider(kind, name, payload, s.providerRuntime.policy)
 	}
 	if !entry.sideUpdateSafe {
 		return fmt.Errorf("hako: provider affects Apple platform routes or lacks side-update metadata")
 	}
 	if entry.compiled {
-		// Machine-checkable: the prefix is an exported constant, so the client
-		// classifies by HakoSideUpdateDeferredPrefix instead of matching prose.
-		// A deferral counted as a failure would have BGTaskScheduler back off
-		// the whole refresh budget.
-		// The live provider was built on the MRS artifact; validating or serving
-		// the fresh text under that strategy is wrong in both directions. The
-		// bytes are already in the published source, so the update applies at
-		// the next foreground activation, which recompiles.
 		return fmt.Errorf("%sthis rule set runs compiled; the update applies at the next activation", SideUpdateDeferredPrefix)
 	}
 	runtimePayload := payload
@@ -1276,12 +946,6 @@ func (s *BoxService) sideUpdateProvider(kind, name string, payload []byte) error
 	return fmt.Errorf("hako: provider update rejected: %w", updateError)
 }
 
-// stagedRuleSetCount counts the entries of a rule set from the bytes that landed in
-// the runtime directory, with the behavior and format the core will read them under
-// (a compiled set is counted as the MRS it became). It is the same reader the app uses
-// to inspect a set before import, so the two figures agree. A set that cannot be
-// counted -- empty, or unreadable in a way staging already warned about -- records no
-// count rather than a wrong one.
 func stagedRuleSetCount(behavior, format string, staged []byte) int {
 	if len(staged) == 0 {
 		return 0
@@ -1293,16 +957,10 @@ func stagedRuleSetCount(behavior, format string, staged []byte) int {
 	return count
 }
 
-// remoteSideUpdater is what a live http-vehicle provider offers a side update:
-// parse, write to its own path, apply -- the same path a scheduled pull takes.
 type remoteSideUpdater interface {
 	SideUpdate(payload []byte) error
 }
 
-// sideUpdateRemoteProvider applies an app-fetched payload to a live provider that
-// runs on an http vehicle. The payload is prepared exactly as a staged one would be
-// (rule metadata the platform cannot evaluate stripped; proxy egress fields the
-// extension cannot honour stripped), then handed to the provider itself.
 func sideUpdateRemoteProvider(kind, name string, payload []byte, policy appleRuntimePolicy) error {
 	var live P.Provider
 	var prepared []byte
@@ -1350,8 +1008,6 @@ func sideUpdateRemoteProvider(kind, name string, payload []byte, policy appleRun
 	return nil
 }
 
-// ruleFormatSpelling turns the enum back into the word a definition writes, which is
-// what the payload preparers parse; the enum's String() is a type name, not that word.
 func ruleFormatSpelling(format P.RuleFormat) string {
 	switch format {
 	case P.TextRule:

@@ -17,7 +17,6 @@ import (
 	"github.com/metacubex/sing/common/logger"
 )
 
-// Although its theoretical maximum may be 64k, I don’t yet know of any practical use case for that. For memory-usage reasons, I’m just using a 2k buffer.
 const maxICMPPacketSize = 2048
 
 var _ tun.DirectRouteDestination = (*Destination)(nil)

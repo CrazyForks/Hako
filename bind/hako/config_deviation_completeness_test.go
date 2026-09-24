@@ -10,35 +10,7 @@ import (
 	"github.com/TokenPLS/Hako/config"
 )
 
-// Nothing this core changes about a configuration may go unregistered.
-//
-// CONFIG-DEVIATION-REGISTRY.json is what the client lanes gate against: a field in the
-// registry must not also be a control the reader can set, because that is a control the core
-// then ignores. The registry is generated from deviationRules, so it cannot drift from the
-// route that serves the same var -- but deviationRules is a table of sentences maintained
-// beside the code that does the overriding, not by it. A field that finalizeConfigForApple
-// changes and nobody added a rule for is absent from the registry, and a client gate reading
-// the registry goes green on it. That is the false green this test closes, and it is the one
-// shape a golden over deviationRules can never catch: both halves would agree, and both would
-// be missing the same row.
-//
-// So the question is asked of the code instead. Seed every reachable field of a parsed
-// configuration with a marker, run the real finalize path once per runtime profile, and diff
-// the struct by reflection. Every field that moved has to be a field the registry already
-// names as forced or stripped for that profile.
-//
-// Twice, with opposite seeds. A force that writes false is invisible against a zero value and
-// a force that writes "" is invisible against an empty string, so one pass seeds everything
-// high and the other seeds everything low, and the union is what the core is capable of
-// touching. Measuring one side only is the mistake of using a positive control as a
-// discriminator: it lights up and it cannot tell the two cases apart.
 
-// Go paths whose struct carries no json tag, mapped to the field name the registry uses.
-// Checked in both directions below -- an entry naming a field that no longer exists fails,
-// and so does an observed change that is neither tagged nor listed here. It is a map rather
-// than a derivation because kebab-casing QUICGoDisableGSO or ExternalControllerTLS means
-// guessing at the spelling, and a guessed key that happens to match nothing reads exactly
-// like a field nobody registered.
 var deviationFieldAliases = map[string]string{
 	"Controller.ExternalController":            "external-controller",
 	"Controller.ExternalControllerTLS":         "external-controller-tls",
@@ -59,8 +31,6 @@ var deviationFieldAliases = map[string]string{
 	"NTP.WriteToSystem":                        "ntp.write-to-system",
 }
 
-// The top-level members finalizeConfigForApple can reach. Rules name tun fields without a
-// "general." prefix because that is how a reader writes them.
 var deviationProbeRoots = []struct {
 	goName string
 	prefix string
@@ -79,8 +49,6 @@ type observedChange struct {
 	after  string
 }
 
-// seedValue returns a marker for a field, distinguishable from any value the core would write
-// by accident. high=false produces the opposite marker so a write in either direction shows.
 func seedValue(t reflect.Type, high bool, path string) (reflect.Value, bool) {
 	switch t.Kind() {
 	case reflect.Bool:
@@ -105,8 +73,6 @@ func seedValue(t reflect.Type, high bool, path string) (reflect.Value, bool) {
 	}
 }
 
-// seedStruct fills every settable scalar it can reach, allocating pointers on the way so a
-// nil branch does not hide a field from the probe.
 func seedStruct(v reflect.Value, high bool, path string, depth int) {
 	if depth > 6 {
 		return
@@ -123,7 +89,7 @@ func seedStruct(v reflect.Value, high bool, path string, depth int) {
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
 			field := v.Type().Field(i)
-			if field.PkgPath != "" { // unexported
+			if field.PkgPath != "" {
 				continue
 			}
 			child := path
@@ -144,7 +110,6 @@ func seedStruct(v reflect.Value, high bool, path string, depth int) {
 	}
 }
 
-// diffStruct walks two seeded-then-run copies and reports every scalar that moved.
 func diffStruct(before, after reflect.Value, path string, depth int, out *[]observedChange) {
 	if depth > 6 || !before.IsValid() || !after.IsValid() {
 		return
@@ -184,8 +149,6 @@ func diffStruct(before, after reflect.Value, path string, depth int, out *[]obse
 	}
 }
 
-// registryFieldFor maps a Go path onto the field name a rule would use, preferring the json
-// tag the struct already carries.
 func registryFieldFor(root string, prefix string, goPath string, rootType reflect.Type) (string, bool) {
 	if alias, ok := deviationFieldAliases[root+"."+goPath]; ok {
 		return alias, true
@@ -234,14 +197,11 @@ func rulesByField() map[string][]deviationRule {
 }
 
 func TestEveryFieldTheCoreChangesIsRegistered(t *testing.T) {
-	// allow-lan reads a process-wide atomic that another test may have moved.
 	restore := allowLanPermitted.Load()
 	t.Cleanup(func() { allowLanPermitted.Store(restore) })
 
 	byField := rulesByField()
 
-	// Both directions of the alias map, so a rename on either side fails here instead of
-	// silently turning a registered field into an unaccounted change.
 	configType := reflect.TypeOf(config.Config{})
 	for goPath, field := range deviationFieldAliases {
 		root := strings.SplitN(goPath, ".", 2)
@@ -342,17 +302,6 @@ func TestEveryFieldTheCoreChangesIsRegistered(t *testing.T) {
 							change.goPath, field, change.before, change.after))
 						continue
 					}
-					// unavailable counts, and the first version of this test was wrong to
-					// skip it. It excluded unavailable on the theory that "upstream cannot do
-					// this here" describes a fact rather than an action, so a field carrying
-					// it should not also be moving. Three of them do move -- redir-port,
-					// tproxy-port and dns.listen-routing-mark are zeroed as defence in depth
-					// over a raw layer that already dropped them -- and the distinction does
-					// not change the answer to the question the registry is gated on. That
-					// question is "may the reader set this and have it honoured", and
-					// unavailable answers no as flatly as stripped does. Treating the clear as
-					// unregistered would have pushed three correct entries toward being
-					// recategorised to make a test pass.
 					fires := false
 					for _, rule := range matches {
 						if rule.applies == nil || rule.applies(policy) {
@@ -382,7 +331,6 @@ func TestEveryFieldTheCoreChangesIsRegistered(t *testing.T) {
 	}
 }
 
-// The probe has to be able to see a change before "no unregistered changes" means anything.
 func TestTheDeviationProbeSeesAChange(t *testing.T) {
 	cfg := &config.Config{}
 	seedStruct(reflect.ValueOf(cfg), true, "", 0)

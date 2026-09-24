@@ -34,9 +34,6 @@ type NativeTun struct {
 	msgHdrsOutput []rawfile.MsgHdrX
 	buffers       []*buf.Buffer
 	stopFd        stopfd.StopFD
-	// poller holds one kqueue for the device's lifetime. The per-call form spends a
-	// descriptor on every would-block cycle, and an EMFILE there is surfaced as a read
-	// error on the ingress path; see internal/rawfile_darwin/poller.go.
 	poller       *rawfile.Poller
 	options      Options
 	inet4Address [4]byte
@@ -86,8 +83,6 @@ func New(options Options) (Tun, error) {
 	var tunFd int
 	batchSize := ((512 * 1024) / int(options.MTU)) + 1
 	if options.FileDescriptor == 0 {
-		// Keep the condition in this function so the compiler removes the
-		// native AF_SYSTEM/utun branch entirely from cmfa Apple frameworks.
 		if platformTunRequiresFileDescriptor {
 			return nil, E.New("cmfa Darwin TUN requires a platform-provided file descriptor")
 		}
@@ -131,8 +126,6 @@ func New(options Options) (Tun, error) {
 		stopFd:        common.Must1(stopfd.New()),
 		writeMsgX:     options.EXP_SendMsgX,
 	}
-	// One kqueue for the device's lifetime. Failing here is a handled startup error;
-	// failing per poll would surface as an ingress read error instead.
 	poller, pollerErr := rawfile.NewPoller(nativeTun.stopFd.ReadFD)
 	if pollerErr != nil {
 		_ = nativeTun.tunFile.Close()
@@ -174,15 +167,11 @@ func init() {
 }
 
 func (t *NativeTun) Close() error {
-	// A cmfa host owns Apple DNS settings. Keeping this condition on the
-	// compile-time constant also lets the linker remove dscacheutil/shell code.
 	if !platformTunRequiresFileDescriptor {
 		defer flushDNSCache()
 	}
 	t.stopFd.Stop()
 	err := t.tunFile.Close()
-	// Release the poller's kqueue before the stop descriptor it watches, so the kqueue
-	// never outlives a descriptor number that could be handed to something else.
 	if t.poller != nil {
 		_ = t.poller.Close()
 	}
@@ -193,10 +182,10 @@ func (t *NativeTun) Close() error {
 const utunControlName = "com.apple.net.utun_control"
 
 const (
-	SIOCAIFADDR_IN6       = 2155899162 // netinet6/in6_var.h
-	IN6_IFF_NODAD         = 0x0020     // netinet6/in6_var.h
-	IN6_IFF_SECURED       = 0x0400     // netinet6/in6_var.h
-	ND6_INFINITE_LIFETIME = 0xFFFFFFFF // netinet6/nd6.h
+	SIOCAIFADDR_IN6       = 2155899162
+	IN6_IFF_NODAD         = 0x0020
+	IN6_IFF_SECURED       = 0x0400
+	ND6_INFINITE_LIFETIME = 0xFFFFFFFF
 )
 
 type ifAliasReq struct {
@@ -366,8 +355,6 @@ func configure(tunFd int, recvMsgX bool, batchSize int) error {
 func (t *NativeTun) BatchRead() ([]*buf.Buffer, error) {
 	for i := 0; i < t.batchSize; i++ {
 		iovecs := t.iovecs[i].nextIovecs()
-		// Cannot clear only the length field. Older versions of the darwin kernel will check whether other data is empty.
-		// https://github.com/Darm64/XNU/blob/xnu-2782.40.9/bsd/kern/uipc_syscalls.c#L2026-L2048
 		t.msgHdrs[i] = rawfile.MsgHdrX{}
 		t.msgHdrs[i].Msg.Iov = &iovecs[0]
 		t.msgHdrs[i].Msg.Iovlen = 2

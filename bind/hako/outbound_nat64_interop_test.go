@@ -41,10 +41,6 @@ func TestControlledNAT64OuterTransportInterop(t *testing.T) {
 	go serveUDPEcho(udpTarget)
 
 	setupNAT64PolicyTest(t)
-	// The synthesized address has to be a listener this test actually started,
-	// which means loopback -- a shape production refuses on purpose (a network
-	// that can name ::1 as a translation redirects egress at this device's own
-	// services). The seam is opened only here.
 	allowLoopbackNAT64Synthesis = true
 	t.Cleanup(func() { allowLoopbackNAT64Synthesis = false })
 	setPhysicalNetworkCapabilities(false, true)

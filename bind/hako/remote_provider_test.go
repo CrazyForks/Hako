@@ -12,11 +12,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// . A remote provider the app could not download at activation used to be a
-// refusal at three layers; a subscription with dozens of rule-set links then held
-// the app for minutes while it tried. Now the definition rides through as written,
-// the core starts it empty and fetches it in the background, and the app can hand
-// in a payload it fetched through the tunnel.
 
 const remoteProviderYAML = `
 mode: rule
@@ -50,7 +45,6 @@ func TestRemoteProviderWithAUsableURLIsAcceptedAtEveryLayer(t *testing.T) {
 	if err := CheckConfig(remoteProviderYAML); err != nil {
 		t.Fatalf("CheckConfig refused a remote provider: %v", err)
 	}
-	// No resource map: the app downloaded nothing. The definition must survive whole.
 	out, err := FinalizeForIOS(remoteProviderYAML, "")
 	if err != nil {
 		t.Fatalf("FinalizeForIOS: %v", err)
@@ -60,7 +54,6 @@ func TestRemoteProviderWithAUsableURLIsAcceptedAtEveryLayer(t *testing.T) {
 			t.Fatalf("finalized configuration lost %q:\n%s", want, out.Value)
 		}
 	}
-	// With a staged copy the rewrite to file stands exactly as before.
 	staged, err := FinalizeForIOS(remoteProviderYAML, `{"providerPaths":{"ads":"/data/providers/ads.yaml"}}`)
 	if err != nil {
 		t.Fatalf("FinalizeForIOS with a staged copy: %v", err)
@@ -90,8 +83,6 @@ func TestRemoteProviderWithAUsableURLStartsEmptyAndIsFetchedLater(t *testing.T) 
 		t.Fatalf("Setup: %v", err)
 	}
 	C.SetHomeDir(options.WorkingPath)
-	// The core's own log stream, not logrus: the deferral line is what tells a
-	// reader the empty provider is expected, and it must not read as a failure.
 	subscription := log.Subscribe()
 	t.Cleanup(func() { log.UnSubscribe(subscription) })
 	seen := make(chan string, 1)
@@ -138,8 +129,6 @@ func TestRemoteProviderWithAUsableURLStartsEmptyAndIsFetchedLater(t *testing.T) 
 		t.Fatalf("the log must say the load was deferred, not that it failed; got %q", line)
 	}
 
-	// The app fetched it through the tunnel and hands it in. The live provider
-	// applies it and keeps a copy where the next start will find it.
 	payload := []byte("payload:\n  - ads.example.com\n  - '+.tracker.example.net'\n")
 	if err := svc.sideUpdateProvider("rule", "ads", payload); err != nil {
 		t.Fatalf("side update over the http vehicle: %v", err)

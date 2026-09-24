@@ -45,9 +45,6 @@ func init() {
 	}()
 }
 
-// setupServer starts new server listening on a random localhost port and
-// returns address of the server, function to stop the server, new client
-// connection to this server or an error.
 func setupServer(tb testing.TB) (addr string, stopfunc func(), client net.Conn, err error) {
 	ln, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
@@ -89,9 +86,6 @@ func handleConnection(conn net.Conn) {
 	}
 }
 
-// setupServer starts new server listening on a random localhost port and
-// returns address of the server, function to stop the server, new client
-// connection to this server or an error.
 func setupServerV2(tb testing.TB) (addr string, stopfunc func(), client net.Conn, err error) {
 	ln, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
@@ -165,7 +159,6 @@ func TestEcho(t *testing.T) {
 
 func TestWriteTo(t *testing.T) {
 	const N = 1 << 20
-	// server
 	ln, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +203,6 @@ func TestWriteTo(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// client
 	session, _ := Client(conn, nil)
 	stream, _ := session.OpenStream()
 	sndbuf := make([]byte, N)
@@ -240,7 +232,6 @@ func TestWriteToV2(t *testing.T) {
 	config := DefaultConfig()
 	config.Version = 2
 	const N = 1 << 20
-	// server
 	ln, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
 		t.Fatal(err)
@@ -285,7 +276,6 @@ func TestWriteToV2(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// client
 	session, _ := Client(conn, config)
 	stream, _ := session.OpenStream()
 	sndbuf := make([]byte, N)
@@ -321,8 +311,7 @@ func TestGetDieCh(t *testing.T) {
 	dieCh := ss.GetDieCh()
 	errCh := make(chan error, 1)
 
-	go func() { // server reader
-		// keep reading until error
+	go func() {
 		buf := make([]byte, 1024)
 		for {
 			_, err := ss.Read(buf)
@@ -621,7 +610,6 @@ func TestKeepAliveBlockWriteTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cli.Close()
-	//when writeFrame block, keepalive in old version never timeout
 	blockWriteCli := &blockWriteConn{cli}
 
 	config := DefaultConfig()
@@ -791,7 +779,6 @@ func TestRandomFrame(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stop()
-	// pure random
 	session, _ := Client(cli, nil)
 	for i := 0; i < 100; i++ {
 		rnd := make([]byte, rand.Uint32()%1024)
@@ -800,7 +787,6 @@ func TestRandomFrame(t *testing.T) {
 	}
 	cli.Close()
 
-	// double syn
 	cli, err = net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
@@ -812,7 +798,6 @@ func TestRandomFrame(t *testing.T) {
 	}
 	cli.Close()
 
-	// random cmds
 	cli, err = net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
@@ -825,7 +810,6 @@ func TestRandomFrame(t *testing.T) {
 	}
 	cli.Close()
 
-	// random cmds & sids
 	cli, err = net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
@@ -837,7 +821,6 @@ func TestRandomFrame(t *testing.T) {
 	}
 	cli.Close()
 
-	// random version
 	cli, err = net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
@@ -850,7 +833,6 @@ func TestRandomFrame(t *testing.T) {
 	}
 	cli.Close()
 
-	// incorrect size
 	cli, err = net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
@@ -865,20 +847,18 @@ func TestRandomFrame(t *testing.T) {
 	buf := make([]byte, headerSize+len(f.data))
 	buf[0] = f.ver
 	buf[1] = f.cmd
-	binary.LittleEndian.PutUint16(buf[2:], uint16(len(rnd)+1)) /// incorrect size
+	binary.LittleEndian.PutUint16(buf[2:], uint16(len(rnd)+1))
 	binary.LittleEndian.PutUint32(buf[4:], f.sid)
 	copy(buf[headerSize:], f.data)
 
 	session.conn.Write(buf)
 	cli.Close()
 
-	// writeFrame after die
 	cli, err = net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	session, _ = Client(cli, nil)
-	//close first
 	session.Close()
 	for i := 0; i < 100; i++ {
 		f := newFrame(1, byte(rand.Uint32()), rand.Uint32())
@@ -892,7 +872,6 @@ func TestWriteFrameInternal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stop()
-	// pure random
 	session, _ := Client(cli, nil)
 	for i := 0; i < 100; i++ {
 		rnd := make([]byte, rand.Uint32()%1024)
@@ -901,13 +880,11 @@ func TestWriteFrameInternal(t *testing.T) {
 	}
 	cli.Close()
 
-	// writeFrame after die
 	cli, err = net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	session, _ = Client(cli, nil)
-	//close first
 	session.Close()
 	for i := 0; i < 100; i++ {
 		f := newFrame(1, byte(rand.Uint32()), rand.Uint32())
@@ -918,7 +895,6 @@ func TestWriteFrameInternal(t *testing.T) {
 		session.writeFrameInternal(f, timer.C, CLSDATA)
 	}
 
-	// random cmds
 	cli, err = net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
@@ -933,7 +909,6 @@ func TestWriteFrameInternal(t *testing.T) {
 
 		session.writeFrameInternal(f, timer.C, CLSDATA)
 	}
-	//deadline occur
 	{
 		c := make(chan time.Time)
 		close(c)
@@ -957,7 +932,6 @@ func TestWriteFrameInternal(t *testing.T) {
 		f := newFrame(1, byte(rand.Uint32()), rand.Uint32())
 		c := make(chan time.Time)
 		go func() {
-			//die first, deadline second, better for coverage
 			time.Sleep(time.Second)
 			session.Close()
 			time.Sleep(time.Second)
@@ -1027,13 +1001,12 @@ func Test8GBTransferV1(t *testing.T) {
 	defer stop()
 	session, _ := Client(cli, nil)
 	stream, _ := session.OpenStream()
-	const N = 8 << 30 // 8GB
+	const N = 8 << 30
 
 	testRandomLength(t, stream, N)
 	session.Close()
 }
 
-// This test validates large data transfer (8GB) over a single stream with random data
 func Test8GBTransferV2(t *testing.T) {
 	config := DefaultConfig()
 	config.Version = 2
@@ -1044,13 +1017,12 @@ func Test8GBTransferV2(t *testing.T) {
 	defer stop()
 	session, _ := Client(cli, config)
 	stream, _ := session.OpenStream()
-	const N = 8 << 30 // 8GB
+	const N = 8 << 30
 
 	testRandomLength(t, stream, N)
 	session.Close()
 }
 
-// Test random length with random data transfer for 1GB
 func TestRandomLengthRandomDataTransferV1(t *testing.T) {
 	_, stop, cli, err := setupServer(t)
 	if err != nil {
@@ -1059,7 +1031,7 @@ func TestRandomLengthRandomDataTransferV1(t *testing.T) {
 	defer stop()
 	session, _ := Client(cli, nil)
 	stream, _ := session.OpenStream()
-	const N = 1 << 30 // 1GB
+	const N = 1 << 30
 
 	testRandomLength(t, stream, N)
 	session.Close()
@@ -1075,7 +1047,7 @@ func TestRandomLengthRandomDataTransferV2(t *testing.T) {
 	defer stop()
 	session, _ := Client(cli, config)
 	stream, _ := session.OpenStream()
-	const N = 1 << 30 // 1GB
+	const N = 1 << 30
 
 	testRandomLength(t, stream, N)
 	session.Close()
@@ -1089,12 +1061,11 @@ func testRandomLength(t *testing.T, stream *Stream, N int64) {
 	bytesSent := int64(0)
 	bytesReceived := int64(0)
 
-	// Writer goroutine
 	go func() {
 		r := rand.New(writerSrc)
 		lastPrint := int64(0)
 		for bytesSent < N {
-			length := rand.Intn(1<<20) + 1 // Random length between 1 and 1MB
+			length := rand.Intn(1<<20) + 1
 			if bytesSent+int64(length) > N {
 				length = int(N - bytesSent)
 			}
@@ -1108,18 +1079,17 @@ func testRandomLength(t *testing.T, stream *Stream, N int64) {
 				return
 			}
 			bytesSent += int64(n)
-			if bytesSent-lastPrint >= (1 << 28) { // Log every 256MB
+			if bytesSent-lastPrint >= (1 << 28) {
 				lastPrint = bytesSent
 				t.Log("Sent:", bytesSent, "bytes")
 			}
 		}
 	}()
 
-	// Reader goroutine
 	r := rand.New(readerSrc)
 	lastPrint := int64(0)
 	for bytesReceived < N {
-		length := rand.Intn(1<<20) + 1 // Random length between 1 and 1MB
+		length := rand.Intn(1<<20) + 1
 		if bytesReceived+int64(length) > N {
 			length = int(N - bytesReceived)
 		}
@@ -1135,7 +1105,7 @@ func testRandomLength(t *testing.T, stream *Stream, N int64) {
 			}
 		}
 		bytesReceived += int64(n)
-		if bytesReceived-lastPrint >= (1 << 28) { // Log every 256MB
+		if bytesReceived-lastPrint >= (1 << 28) {
 			lastPrint = bytesReceived
 			t.Log("Received:", bytesReceived, "bytes")
 		}
@@ -1261,7 +1231,6 @@ func bench(b *testing.B, rd io.Reader, wr io.Writer) {
 	}()
 	for i := 0; i < b.N; i++ {
 		wr.Write(buf)
-		// invalidate L3 Cache
 		buf = make([]byte, 128*1024)
 	}
 	wg.Wait()

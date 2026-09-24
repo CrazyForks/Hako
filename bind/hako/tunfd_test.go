@@ -12,8 +12,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// fdPlatform hands out a fixed fd from OpenTun and records the TunOptions it
-// received, so the fd two-phase can be tested without a real NE.
 type fdPlatform struct {
 	recordingPlatform
 	fd          int32
@@ -24,10 +22,6 @@ type fdPlatform struct {
 }
 
 func TestStartSurfacesPacketFlowBridgeDupFailure(t *testing.T) {
-	// This production-tag test reaches the real Unix controller. Darwin caps
-	// sockaddr_un paths at 103 bytes, while testing.T.TempDir can itself exceed
-	// that under /var/folders. Use a deterministic short root so this test
-	// reaches the intended invalid-TUN assertion instead of testing path length.
 	base, err := os.MkdirTemp("/tmp", "hako-tun-")
 	if err != nil {
 		t.Fatalf("short temp dir: %v", err)
@@ -40,13 +34,6 @@ func TestStartSurfacesPacketFlowBridgeDupFailure(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
-	// A descriptor that was never opened, not one that was closed. Closing a
-	// pipe end and handing its NUMBER over assumed the number stayed unused for
-	// the rest of Start -- and Start opens files: the interface monitor, the log
-	// writer, provider staging and its manifest. The number came back into use,
-	// dup succeeded on a stranger's descriptor, and this test stopped exercising
-	// the failure it is named after. A number far above any table this process
-	// will grow is invalid for the same reason and stays that way.
 	const neverOpenedFD = 1 << 20
 	if _, err := unix.FcntlInt(uintptr(neverOpenedFD), unix.F_GETFD, 0); err == nil {
 		t.Fatalf("fd %d is unexpectedly open; pick a higher one", neverOpenedFD)
@@ -200,8 +187,6 @@ func TestTunConfigurationsEqualDoesNotMutateInputs(t *testing.T) {
 	}
 }
 
-// the bridge fd injected into sing-tun is a duplicate whose lifetime
-// is independent of the original retained by Swift's PacketFlow adapter.
 func TestPrepareTunBridgeFDDupsIndependently(t *testing.T) {
 	var fds [2]int
 	if err := unix.Pipe(fds[:]); err != nil {
@@ -229,7 +214,6 @@ func TestPrepareTunBridgeFDDupsIndependently(t *testing.T) {
 		t.Fatalf("OpenTun got TunOptions inet4 %q, want 198.18.0.1/30", platform.gotInet4)
 	}
 
-	// Close the ORIGINAL fd the platform gave us. The dup must survive.
 	if err := unix.Close(readEnd); err != nil {
 		t.Fatalf("close original: %v", err)
 	}

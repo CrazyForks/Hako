@@ -25,23 +25,9 @@ import (
 func configRouter() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", getConfigs)
-	// PATCH is deliberately OUTSIDE the embed gate, and the split is the point. One condition
-	// used to cover all three, with a comment giving the reasons for the other two: PUT replaces
-	// the running configuration and so bypasses the immutable revision pipeline, POST /geo
-	// downloads inside the extension. Neither is true of PATCH -- it writes no file and
-	// fetches nothing; it flips runtime switches.
-	//
-	// The cost of the shared condition was concrete: switching between rule/global/direct is the
-	// most ordinary thing a Clash dashboard does, and it answered 405 on a device.
-	//
-	// PATCH's ReCreate* calls are not a rebuild when nothing changed. ReCreateTun returns at
-	// `if tunConf.Equal(LastTunConf)` (listener/listener.go:515) and the port listeners short
-	// out the same way, so a body of {"mode":"global"} reaches tunnel.SetMode and nothing else.
 	if !embedMode {
-		r.Put("/", updateConfigs) // replaces the configuration: revision pipeline
+		r.Put("/", updateConfigs)
 	}
-	// Same handler, same measurement, same switch as /upgrade/geo -- so the two cannot drift into
-	// disagreeing about whether this core may fetch geo data.
 	if !embedMode || geoUpdaterAllowed {
 		r.Post("/geo", updateGeoDatabases)
 	}

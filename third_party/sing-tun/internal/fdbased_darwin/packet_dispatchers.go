@@ -54,11 +54,6 @@ func (b *iovecBuffer) nextIovecs() []unix.Iovec {
 	return b.iovecs
 }
 
-// pullBuffer extracts the enough underlying storage from b.buffer to hold n
-// bytes. It removes this storage from b.buffer, returns a new buffer
-// that holds the storage, and updates pulledIndex to indicate which part
-// of b.buffer's storage must be reallocated during the next call to
-// nextIovecs.
 func (b *iovecBuffer) pullBuffer(n int) buffer.Buffer {
 	pulled := buffer.Buffer{}
 	pulled.Append(b.views[0])
@@ -79,28 +74,16 @@ func (b *iovecBuffer) release() {
 	}
 }
 
-// readVDispatcher uses readv() system call to read inbound packets and
-// dispatches them.
-//
-// +stateify savable
 type readVDispatcher struct {
 	stopfd.StopFD
-	// fd is the file descriptor used to send and receive packets.
 	fd int
 
-	// e is the endpoint this dispatcher is attached to.
 	e *endpoint
 
-	// buf is the iovec buffer that contains the packet contents.
 	buf *iovecBuffer
 
-	// mgr is the processor goroutine manager.
 	mgr *processorManager
 
-	// poller owns one kqueue for this dispatcher's lifetime. Creating one per poll
-	// spends a descriptor on the ingress path, and an EMFILE there is reported as a
-	// dispatch error, which dispatchLoop treats as terminal -- so a transient
-	// descriptor shortage used to end ingress permanently.
 	poller *rawfile.Poller
 }
 
@@ -131,7 +114,6 @@ func (d *readVDispatcher) release() {
 	_ = d.poller.Close()
 }
 
-// dispatch reads one packet from the file descriptor and dispatches it.
 func (d *readVDispatcher) dispatch() (bool, tcpip.Error) {
 	n, errno := rawfile.BlockingReadvUntilStoppedPolled(d.poller, d.fd, d.buf.nextIovecs())
 	if n <= 0 || errno != 0 {
@@ -151,47 +133,28 @@ func (d *readVDispatcher) dispatch() (bool, tcpip.Error) {
 	if !d.e.parseInboundHeader(pkt, addr) {
 		return false, nil
 	}
-	// Packets arrive already checksum-validated by the OS kernel over a
-	// lossless local socketpair; mark them so gVisor skips redundant software
-	// re-validation on every ingress packet. Mirrors the recvMMsg dispatcher,
-	// which set this flag while readV did not.
 	pkt.RXChecksumValidated = d.e.caps&stack.CapabilityRXChecksumOffload != 0
 	d.mgr.queuePacket(pkt, d.e.hdrSize > 0)
 	d.mgr.wakeReady()
 	return true, nil
 }
 
-// recvMMsgDispatcher uses the recvmmsg system call to read inbound packets and
-// dispatches them.
-//
-// +stateify savable
 type recvMMsgDispatcher struct {
 	stopfd.StopFD
-	// fd is the file descriptor used to send and receive packets.
 	fd int
 
-	// e is the endpoint this dispatcher is attached to.
 	e *endpoint
 
-	// bufs is an array of iovec buffers that contain packet contents.
 	bufs []*iovecBuffer
 
-	// msgHdrs is an array of MMsgHdr objects where each MMsghdr is used to
-	// reference an array of iovecs in the iovecs field defined above.  This
-	// array is passed as the parameter to recvmmsg call to retrieve
-	// potentially more than 1 packet per unix.
 	msgHdrs []rawfile.MsgHdrX `state:"nosave"`
 
-	// pkts is reused to avoid allocations.
 	pkts stack.PacketBufferList
 
-	// gro coalesces incoming packets to increase throughput.
 	gro gro.GRO
 
-	// mgr is the processor goroutine manager.
 	mgr *processorManager
 
-	// poller owns one kqueue for this dispatcher's lifetime; see readVDispatcher.
 	poller *rawfile.Poller
 }
 
@@ -230,15 +193,10 @@ func (d *recvMMsgDispatcher) release() {
 	_ = d.poller.Close()
 }
 
-// recvMMsgDispatch reads more than one packet at a time from the file
-// descriptor and dispatches it.
 func (d *recvMMsgDispatcher) dispatch() (bool, tcpip.Error) {
-	// Fill message headers.
 	for k := range d.msgHdrs {
 		iovecs := d.bufs[k].nextIovecs()
 		iovLen := len(iovecs)
-		// Cannot clear only the length field. Older versions of the darwin kernel will check whether other data is empty.
-		// https://github.com/Darm64/XNU/blob/xnu-2782.40.9/bsd/kern/uipc_syscalls.c#L2026-L2048
 		d.msgHdrs[k] = rawfile.MsgHdrX{}
 		d.msgHdrs[k].Msg.Iov = &iovecs[0]
 		d.msgHdrs[k].Msg.SetIovlen(iovLen)
@@ -257,7 +215,6 @@ func (d *recvMMsgDispatcher) dispatch() (bool, tcpip.Error) {
 	}
 	recordIngressRead(readBytes, uint64(nMsgs))
 
-	// Process each of received packets.
 
 	d.e.mu.RLock()
 	addr := d.e.addr
@@ -275,7 +232,6 @@ func (d *recvMMsgDispatcher) dispatch() (bool, tcpip.Error) {
 		})
 		d.pkts.PushBack(pkt)
 
-		// Mark that this iovec has been processed.
 		d.msgHdrs[k].Msg.Iovlen = 0
 
 		if d.e.parseInboundHeader(pkt, addr) {

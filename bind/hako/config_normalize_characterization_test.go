@@ -7,16 +7,6 @@ import (
 	"github.com/TokenPLS/Hako/config"
 )
 
-// normalizeRawConfigForApple walks the configuration six times, once per
-// concern: strip nameservers a packet tunnel cannot use, repair the bootstrap
-// they may have emptied, notice fragments naming things this extension cannot
-// route, strip per-outbound egress overrides, strip owner-metadata rules, and
-// strip the same from inline rule-provider payloads. Together they cost 33ms on
-// a 578KB subscription -- the largest bind-side item on a start.
-//
-// Merging the walks is only safe if each concern's behaviour is written down
-// first. Three of the six had no test naming them. These are that net: they
-// describe what each pass must still do, not how many passes there are.
 
 func normalizeFixture(t *testing.T, yaml string) *config.RawConfig {
 	t.Helper()
@@ -31,10 +21,6 @@ func nePolicy() appleRuntimePolicy {
 	return runtimePolicyFor(runtimeProfileIOSPacketTunnel, true)
 }
 
-// A nameserver naming a proxy the static configuration never defines cannot be
-// routed by an extension, and is kept verbatim on purpose: stripping it could
-// silently reroute DNS through a different proxy or DIRECT. It fails closed per
-// query instead, and the reader is told.
 func TestNormalizeReportsButKeepsAnUnroutableDNSFragment(t *testing.T) {
 	raw := normalizeFixture(t, `
 mode: rule
@@ -55,7 +41,6 @@ rules:
 		t.Fatal("the fragment must be kept verbatim; stripping it would reroute DNS silently")
 	}
 
-	// A fragment naming a proxy that does exist is ordinary and says nothing.
 	fine := normalizeFixture(t, `
 mode: rule
 proxies:
@@ -72,12 +57,6 @@ rules:
 	}
 }
 
-// The unroutable-fragment diagnostic quotes the nameserver as the reader wrote
-// it. It used to render `scheme://host#name` on the
-// argument that a DoH URL can authenticate by userinfo, query or path -- but
-// this diagnostic exists to tell someone WHICH entry is misrouted, the entry is
-// their own, and it is already on this device verbatim in the profile the
-// message is about.
 func TestUnroutableDNSFragmentDiagnosticQuotesTheEntry(t *testing.T) {
 	raw := normalizeFixture(t, `
 mode: rule
@@ -96,24 +75,16 @@ rules:
 		t.Fatal("a fragment naming an undefined proxy must still be reported")
 	}
 	joined := strings.Join(reported, "\n")
-	// The entry, as written: host, fragment, and the parts an earlier build
-	// dropped. A reader with two NextDNS profiles cannot tell which one is
-	// misrouted from `https://dns.nextdns.io#Ghost`.
 	for _, part := range []string{"doh.example.com", "Ghost", "s3cr3tPass", "SECRETTOKEN", "abc123profile"} {
 		if !strings.Contains(joined, part) {
 			t.Fatalf("the diagnostic dropped %q; it must quote the entry as written:\n%s", part, joined)
 		}
 	}
-	// And the config itself is untouched either way.
 	if !strings.Contains(strings.Join(raw.DNS.NameServer, "|"), "s3cr3tPass") {
 		t.Fatal("the nameserver must stay verbatim in the config")
 	}
 }
 
-// Owner-metadata rules survive normalize untouched. Removing them was this
-// fork's own invention: upstream under find-process-mode off -- the value this
-// fork forces, and one any mihomo user can write -- keeps the rule and lets it
-// evaluate against empty metadata. Normalize now only reports them.
 func TestNormalizeKeepsOwnerMetadataRulesInOrder(t *testing.T) {
 	source := `
 mode: rule
@@ -126,8 +97,6 @@ rules:
 `
 	raw := normalizeFixture(t, source)
 
-	// normalizeFixture does not run normalize, so nothing is removed here; this pins the
-	// unmodified shape the pipeline receives.
 	want := []string{
 		"DOMAIN,first.example,DIRECT", "PROCESS-NAME,Mail,DIRECT",
 		"DOMAIN,second.example,DIRECT", "UID,501,DIRECT", "DOMAIN,third.example,DIRECT",
@@ -145,8 +114,6 @@ rules:
 	}
 }
 
-// An inline rule-provider payload is normalized by the same rule: the entry
-// stays, and the reader is told which entry cannot resolve its metadata.
 func TestNormalizeKeepsMetadataRulesInsideInlineRuleProviders(t *testing.T) {
 	raw := normalizeFixture(t, `
 mode: rule
@@ -173,9 +140,6 @@ rules:
 	}
 }
 
-// The six passes are separate today. Whatever replaces them has to leave the
-// same configuration behind, so this pins the whole normalize step over a
-// fixture that trips every concern at once.
 func TestNormalizeLeavesTheSameConfigurationHoweverItWalksIt(t *testing.T) {
 	source := `
 mode: rule
@@ -220,8 +184,6 @@ rules:
 	if !sawProcessRule {
 		t.Fatal("an owner-metadata rule was removed from the main rules block; they are kept and reported now")
 	}
-	// UID is removed even from an inline payload: upstream cannot construct it on GOOS=ios,
-	// and an unconstructible rule anywhere fails the whole configuration.
 	if rendered := strings.Join(inlineProviderPayloadStrings(t, raw, "inline"), "|"); strings.Contains(rendered, "UID,") {
 		t.Fatalf("UID survived in the inline payload: %s", rendered)
 	}

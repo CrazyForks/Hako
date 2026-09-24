@@ -8,21 +8,6 @@ import (
 	mihomoDNS "github.com/TokenPLS/Hako/dns"
 )
 
-// Parity against mihomo's own documented DNS configuration.
-//
-// The fixture is the example block from the official documentation
-// (.refs/Meta-Docs/docs/config/dns/index.md), not one written here, because a fixture
-// written here proves only that this core agrees with itself. It happens to exercise every
-// key a leak-prevention setup depends on: proxy-server-nameserver (node domains),
-// direct-nameserver (direct egress), nameserver-policy (split DNS), fallback plus
-// fallback-filter (trusted results), and fake-ip (the domain survives to the outbound).
-//
-// The assertion for each is the same one settled: what mihomo produces from this YAML
-// is what this core produces from it. Anything else means a reader's leak-prevention
-// configuration protects them somewhere else and not here.
-//
-// parseConfigForIOS is compared against config.Parse on the identical bytes, so the test
-// cannot drift into agreeing with the wrong side: config.Parse IS mihomo's parser.
 
 const documentedDNSBlock = `
 mode: rule
@@ -86,9 +71,6 @@ func TestDocumentedDNSBlockSurvivesUnchanged(t *testing.T) {
 		t.Fatalf("this core rejected mihomo's documented example: %v", err)
 	}
 
-	// Every key a leak-prevention setup rests on, compared field by field. A reader who
-	// wrote proxy-server-nameserver to keep node lookups off the local resolver has to get
-	// exactly that here, or the protection they configured is not the protection they have.
 	for _, probe := range []struct {
 		what      string
 		theirs    []string
@@ -152,11 +134,6 @@ func TestDocumentedDNSBlockSurvivesUnchanged(t *testing.T) {
 	}
 }
 
-// The shape the reader who filed this actually wrote, and the shape they compared it
-// against. Both must land where mihomo lands: with the block, fake-ip and their single
-// resolver; without it, DNS off and mihomo's own redir-host default — because mihomo turns
-// nothing on for a configuration that did not ask, except dns.enable, which an Apple
-// packet tunnel requires and which is the only field allowed to differ.
 func TestReportedShapesMatchMihomo(t *testing.T) {
 	const withBlock = `
 mode: rule
@@ -185,10 +162,6 @@ dns:
 			if err != nil {
 				t.Fatalf("this core rejected what mihomo accepted: %v", err)
 			}
-			// enable is the one field allowed to differ, and only upward: an Apple
-			// packet tunnel captures port 53 whatever the configuration says, so
-			// serving no DNS means SERVFAIL for everything. Everything below
-			// this line must still be mihomo's.
 			if !ours.DNS.Enable {
 				t.Fatalf("dns.enable must end up on inside a packet tunnel")
 			}
@@ -203,15 +176,6 @@ dns:
 	}
 }
 
-// dns.enable is the one field an Apple packet tunnel requires, and the requirement is
-// mechanical: with it false the core serves no DNS (DefaultService nil -> ServeMsg
-// ErrIPNotFound -> SERVFAIL) while the tunnel still captures every port 53 packet, because
-// ShouldHijackDns never asks whether a resolver exists. A desktop user meets that only by
-// enabling tun and can step back out; here there is no step back.
-//
-// What this pins is that the forcing stays MINIMAL. Only enable is set. The resolvers, the
-// mode and the bootstrap are whatever mihomo's own parser produced, byte for byte, so a
-// reader who writes no dns block gets mihomo's defaults rather than something chosen here.
 func TestDisabledDNSIsEnabledAndNothingElseIsTouched(t *testing.T) {
 	const noDNS = "mode: rule\nrules:\n  - MATCH,DIRECT\n"
 	mihomo, err := config.Parse([]byte(noDNS))

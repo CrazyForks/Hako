@@ -7,16 +7,6 @@ import (
 	"testing"
 )
 
-// What a subscription actually ships. A rule-provider arrives as source text
-// and is parsed on every start; the compiled form is read in milliseconds and
-// holds the same rules. Measured on this module: 111,803 domain lines cost
-// 76ms and +60.8 MiB to compile once, 3ms and +11.4 MiB to read back, and
-// 1.4 MiB of text becomes 0.4 MiB on disk.
-//
-// Not every list can make the trip. `classical` has no compact representation
-// — a rule set that mixes DOMAIN-KEYWORD, IP-CIDR or a logical rule stays what
-// it is, and the answer has to say so rather than fail or, worse, silently
-// drop what it could not carry.
 
 func TestCompileRuleProviderTurnsDomainTextIntoAnArtifactTheCoreReads(t *testing.T) {
 	dir := compileStagingHome(t)
@@ -40,8 +30,6 @@ func TestCompileRuleProviderTurnsDomainTextIntoAnArtifactTheCoreReads(t *testing
 	if err != nil || info.Size() == 0 {
 		t.Fatalf("artifact missing or empty: %v", err)
 	}
-	// The reader is the core's own, so the artifact is only good if the core
-	// takes it back.
 	artifact, readErr := os.ReadFile(out)
 	if readErr != nil {
 		t.Fatal(readErr)

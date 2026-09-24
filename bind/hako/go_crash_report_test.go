@@ -8,34 +8,12 @@ import (
 	"testing"
 )
 
-// A Go panic or fatal throw inside the Network Extension currently leaves nothing to
-// read afterwards, which is why nothing in the audit that produced this file can be
-// confirmed or refuted from the field.
-//
-// The measured chain: gomobile builds Apple targets as a c-archive, so
-// runtime.tracebackCrash is set and fatalpanic does reach crash() -> SIGABRT, and an
-// .ips report IS produced. But Apple's frame-pointer unwinder cannot walk Go stacks:
-// in a real report every thread terminates at runtime.asmcgocall.abi0, the string
-// "panic" appears nowhere, and the only thing it says is that the Go runtime called
-// raise(). Meanwhile the traceback itself goes to fd 2, and fd 2 in a
-// system-launched app extension is /dev/null -- measured on three of them on this
-// machine, one with 21 KB written into the void. So the comment at setup.go claiming
-// "Darwin crash reports/OSLog remain authoritative for hard faults" is false for
-// faults raised in Go code.
-//
-// debug.SetCrashOutput gives the runtime a second destination. Coverage is broader
-// than panics: fatalthrow routes through the same crash path, so concurrent map
-// writes, out-of-memory throws and slice-bounds faults land there too. Two things it
-// cannot catch, deliberately not claimed anywhere: jetsam (SIGKILL, already covered
-// by oom_evidence.go) and "all goroutines are asleep" (checkdead early-returns in
-// archive builds).
 
 func TestGoCrashOutputArchivesThePreviousRunBeforeTruncating(t *testing.T) {
 	base := t.TempDir()
 	live := filepath.Join(base, goCrashReportFileName)
 	previous := filepath.Join(base, goCrashReportPreviousFileName)
 
-	// A traceback left behind by a run that died.
 	const traceback = "panic: hako internal diagnostics: intentional Go crash\n\ngoroutine 42 [running]:\n"
 	if err := os.WriteFile(live, []byte(traceback), 0o600); err != nil {
 		t.Fatal(err)
@@ -78,9 +56,6 @@ func TestGoCrashOutputWithNoPreviousRunLeavesNoArchive(t *testing.T) {
 	}
 }
 
-// TestConsumeGoCrashReportReturnsAndRemoves mirrors ConsumeOOMEvidence: the report is
-// handed over once and then deleted, so a corrupt or stale file cannot produce an
-// endless startup loop and a traceback does not linger on the device forever.
 func TestConsumeGoCrashReportReturnsAndRemoves(t *testing.T) {
 	base := t.TempDir()
 	previous := filepath.Join(base, goCrashReportPreviousFileName)
@@ -105,12 +80,6 @@ func TestConsumeGoCrashReportReturnsAndRemoves(t *testing.T) {
 	}
 }
 
-// TestConsumeGoCrashReportTruncatesInsteadOfFailing is the difference from
-// ConsumeOOMEvidence, and it is deliberate. OOM evidence is a fixed-shape JSON
-// document, so oversize means corrupt and erroring is right. A traceback has no bound
-// -- SetTraceback("all") dumps every goroutine -- and the panicking goroutine comes
-// FIRST, so the head of an oversized file is the most valuable part of it. Refusing to
-// read would throw away the answer to keep a rule.
 func TestConsumeGoCrashReportTruncatesInsteadOfFailing(t *testing.T) {
 	base := t.TempDir()
 	previous := filepath.Join(base, goCrashReportPreviousFileName)
@@ -140,15 +109,6 @@ func TestConsumeGoCrashReportTruncatesInsteadOfFailing(t *testing.T) {
 	}
 }
 
-// TestRealPanicLandsInTheCrashFile is the assertion the other three cannot make: that
-// the runtime actually writes there. It panics for real in a subprocess whose fd 2 is
-// /dev/null -- exactly what a system-launched app extension has -- and reads the file
-// back. If SetCrashOutput were not wired up, the traceback would be gone and this fails.
-//
-// The child exits 2 here rather than 134 because a test binary is not a c-archive, so
-// runtime.tracebackCrash is unset and fatalpanic does not raise SIGABRT. The shipped
-// xcframework IS a c-archive and does raise it. The capture works in both shapes, which
-// is the point: it does not depend on which exit path the build happens to take.
 func TestRealPanicLandsInTheCrashFile(t *testing.T) {
 	if base := os.Getenv(crashProbeEnvironmentKey); base != "" {
 		if err := armGoCrashOutputAt(base); err != nil {

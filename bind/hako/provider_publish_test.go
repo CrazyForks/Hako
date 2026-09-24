@@ -13,15 +13,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// The extension stages every file-backed provider at tunnel start: 413ms of an
-// 865ms cold start on a 56-provider subscription, inside a fifty-megabyte
-// budget, while the reader watches a spinner. The App already holds those same
-// bytes -- it downloaded them -- so the work can happen there instead, once per
-// revision, where the reader is already waiting on the network.
-//
-// That only holds if both processes produce the same product. These tests pin
-// the contract: identical inputs, byte-identical staged files and manifest, and
-// an extension start that serves them without reading a provider.
 
 const publishTestProxy = "proxies:\n" +
 	"  - name: a\n    type: ss\n    server: 1.2.3.4\n    port: 443\n" +
@@ -81,10 +72,6 @@ func capturePublishLog(t *testing.T) *bytes.Buffer {
 	return &logBuffer
 }
 
-// One line at the end of a publish says where the products landed and what
-// the verdicts were. It exists because a staging tree written under an
-// unexpected home directory took a night to find; with this line the answer
-// is the first thing the log says.
 func TestPublishLogsWhereItWroteAndTheVerdictCounts(t *testing.T) {
 	options := testOptions(t)
 	if err := Setup(options); err != nil {
@@ -92,10 +79,6 @@ func TestPublishLogsWhereItWroteAndTheVerdictCounts(t *testing.T) {
 	}
 	home := options.WorkingPath
 	C.SetHomeDir(home)
-	// IP-CIDR runs fine on every Apple profile (nothing strips it), and the
-	// domain strategy cannot store it, so this set is a genuine
-	// notCompilable -- unlike the shared fixture's PROCESS-NAME, which iOS
-	// strips before the compiler ever sees it.
 	rulePath := filepath.Join(home, "published-cidr.yaml")
 	if err := os.WriteFile(rulePath,
 		[]byte("payload:\n  - DOMAIN-SUFFIX,example.com\n  - IP-CIDR,10.0.0.0/8,no-resolve\n"), 0o600); err != nil {
@@ -143,11 +126,6 @@ func TestPublishLogsEvenWhenNothingIsFileBacked(t *testing.T) {
 	}
 }
 
-// The App runs outside the Network Extension, and three policy fields turn on
-// that very boolean -- networkExtension, requirePacketTunnelDNS,
-// repairPacketTunnelDNS. Staging for "this process" would therefore fingerprint
-// differently from the extension and miss every entry, so the publish entry
-// names the profile it is staging FOR rather than reading the one it runs in.
 func TestPublishStagesForTheProfileTheExtensionWillRun(t *testing.T) {
 	options := testOptions(t)
 	if err := Setup(options); err != nil {
@@ -180,9 +158,6 @@ func TestPublishStagesForTheProfileTheExtensionWillRun(t *testing.T) {
 	}
 }
 
-// Same inputs, same product. If the two processes could disagree by a single
-// byte the manifest would not be a cache, it would be a correctness bug that
-// only shows up on the device.
 func TestPublishAndExtensionStagingAgreeByteForByte(t *testing.T) {
 	options := testOptions(t)
 	if err := Setup(options); err != nil {
@@ -197,7 +172,6 @@ func TestPublishAndExtensionStagingAgreeByteForByte(t *testing.T) {
 	}
 	byPublish := stagedTree(t, home)
 
-	// Wipe and let the extension path build the same thing from the same source.
 	if err := os.RemoveAll(filepath.Join(home, providerRuntimeDirectoryName)); err != nil {
 		t.Fatal(err)
 	}
@@ -224,9 +198,6 @@ func TestPublishAndExtensionStagingAgreeByteForByte(t *testing.T) {
 	}
 }
 
-// The whole point: after a publish, the extension's own staging pass reads no
-// provider file at all. The cost line is the witness -- every entry a hit,
-// nothing read, nothing decoded.
 func TestExtensionReadsNoProviderAfterAPublish(t *testing.T) {
 	options := testOptions(t)
 	if err := Setup(options); err != nil {
@@ -259,9 +230,6 @@ func TestExtensionReadsNoProviderAfterAPublish(t *testing.T) {
 	}
 }
 
-// A publish for one profile must not silently serve another. The macOS packet
-// tunnel keeps PROCESS-NAME rules the iOS one strips, so a shared staging would
-// hand one platform the other's rules.
 func TestAPublishForAnotherProfileIsNotServed(t *testing.T) {
 	options := testOptions(t)
 	if err := Setup(options); err != nil {
@@ -290,10 +258,6 @@ func TestAPublishForAnotherProfileIsNotServed(t *testing.T) {
 	}
 }
 
-// An unreadable rule set is not a reason to refuse an import. Upstream stages
-// it, fails to load it, logs that, and keeps every other rule; was
-// written after refusing one cost a reader twenty-six working rule sets. The
-// publish path inherits that ruling, not a stricter one.
 func TestPublishDoesNotRefuseAnUnreadableRuleSet(t *testing.T) {
 	options := testOptions(t)
 	if err := Setup(options); err != nil {
@@ -305,7 +269,6 @@ func TestPublishDoesNotRefuseAnUnreadableRuleSet(t *testing.T) {
 	if err := os.WriteFile(proxyPath, []byte(publishTestProxy), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// format: mrs over an HTML error page -- the exact shape of the incident.
 	brokenPath := filepath.Join(home, "broken-rule.mrs")
 	if err := os.WriteFile(brokenPath, []byte("<!DOCTYPE html><html>404</html>"), 0o600); err != nil {
 		t.Fatal(err)

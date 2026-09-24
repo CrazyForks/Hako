@@ -55,10 +55,6 @@ func (c *httpServerConn) Write(b []byte) (int, error) {
 		return 0, io.ErrClosedPipe
 	}
 
-	// The metacubex HTTP/2 writer can retain the payload until its asynchronous
-	// frame write completes. io.Writer callers (notably smux) are allowed to
-	// reuse their buffer as soon as Write returns, so transfer an owned snapshot
-	// at this boundary.
 	n, err := c.w.Write(bytes.Clone(b))
 	if err == nil && c.flusher != nil {
 		c.flusher.Flush()

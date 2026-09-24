@@ -44,7 +44,6 @@ type startupPhasePageRecord struct {
 
 func newStartupPhaseEpoch() string {
 	var epoch [16]byte
-	// crypto/rand.Read terminates the process if secure randomness is unavailable.
 	_, _ = rand.Read(epoch[:])
 	return hex.EncodeToString(epoch[:])
 }
@@ -64,22 +63,6 @@ func parseStartupPhaseCursor(cursor string) (string, int64, bool) {
 	return epoch, sequence, true
 }
 
-// StartupPhaseTracePage returns a versioned JSON page of whole startup records.
-// An empty cursor and throughCursor capture the current tail without replaying
-// history; capture before Setup to include early stages. The beginCursor permits
-// explicit replay. A supplied throughCursor fixes an inclusive upper boundary;
-// empty throughCursor captures the current head for this page. Reuse the returned
-// throughCursor to finish a fixed window without reading later production.
-// Cursors identify process events and do not acknowledge consumer file writes.
-//
-// Zero maxBytes reads metadata without advancing a supplied cursor. Positive
-// values must be at least 1024 and are capped at 65536; the entire encoded JSON
-// response, including repaired text and metadata, fits that effective budget.
-// Pages also contain at most 256 events. A recordTooLarge or metadataTooLarge
-// status leaves the cursor unchanged; oversized metadata is omitted from the
-// error response, and the legacy diagnostic getter remains available explicitly.
-// Invalid parameters produce a small error envelope, never echoing unbounded
-// input. Existing process history and legacy getters remain unchanged.
 func StartupPhaseTracePage(cursor string, throughCursor string, maxBytes int64) string {
 	page := startupPhaseTracePageSnapshot(cursor, throughCursor, maxBytes)
 	result, _ := json.Marshal(page)
@@ -162,8 +145,6 @@ func startupPhaseTracePageSnapshot(cursor string, throughCursor string, maxBytes
 			page.ThroughCursor = throughCursor
 		}
 	}
-	// Snapshot only immutable string headers while holding the history lock.
-	// Encoding and even rejecting adversarial text must not stall the producer.
 	var lines []string
 	if cursor != "" && maxBytes > 0 {
 		end := page.From + min(page.Through-page.From, int64(startupPhasePageRecordLimit))
@@ -202,7 +183,6 @@ func startupPhaseTracePageSnapshot(cursor string, throughCursor string, maxBytes
 		if len(page.Records) > 0 {
 			cost++
 		}
-		// next appears both as a JSON number and inside its ASCII cursor.
 		growth := len(strconv.FormatInt(next+1, 10)) - len(strconv.FormatInt(page.Next, 10))
 		cost += int64(2 * growth)
 		if used+cost > budget {
@@ -219,12 +199,6 @@ func startupPhaseTracePageSnapshot(cursor string, throughCursor string, maxBytes
 	return page
 }
 
-// boundedStartupPhaseText has bridgeSafeString's exact repair semantics:
-// each run of invalid UTF-8 becomes one replacement rune. Raw byte length is
-// not a lower bound on repaired length. Stop only after repaired output exceeds
-// the budget; valid oversized input is rejected without scanning its full tail.
-// A long invalid run can require a long scan, but happens outside phaseMu and
-// never allocates a copy proportional to that raw run.
 func boundedStartupPhaseText(value string, limit int) (string, bool) {
 	if len(value) <= limit && utf8.ValidString(value) {
 		return value, true

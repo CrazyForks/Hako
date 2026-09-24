@@ -80,7 +80,6 @@ func (f *ICMPForwarder) HandlePacket(id stack.TransportEndpointID, pkt *stack.Pa
 				return true
 			}
 			if action != nil {
-				// TODO: handle error
 				_ = icmpWritePacketBuffer(action, pkt)
 				return true
 			}
@@ -94,7 +93,6 @@ func (f *ICMPForwarder) HandlePacket(id stack.TransportEndpointID, pkt *stack.Pa
 		ipHdr.SetChecksum(^ipHdr.CalculateChecksum())
 		outgoingEP, gErr := f.stack.GetNetworkEndpoint(DefaultNIC, header.IPv4ProtocolNumber)
 		if gErr != nil {
-			// TODO: log error
 			return true
 		}
 		route, gErr := f.stack.FindRoute(
@@ -105,7 +103,6 @@ func (f *ICMPForwarder) HandlePacket(id stack.TransportEndpointID, pkt *stack.Pa
 			false,
 		)
 		if gErr != nil {
-			// TODO: log error
 			return true
 		}
 		defer route.Release()
@@ -118,9 +115,6 @@ func (f *ICMPForwarder) HandlePacket(id stack.TransportEndpointID, pkt *stack.Pa
 			return false
 		}
 		if icmpHdr.Code() != 0 {
-			// The IPv6 built-in echo reply path lacks the LocalAddressTemporary
-			// check its IPv4 sibling has, so returning false would make the stack
-			// reply on behalf of arbitrary forwarded destinations.
 			return true
 		}
 		sourceAddr := M.AddrFromIP(ipHdr.SourceAddressSlice())
@@ -147,7 +141,6 @@ func (f *ICMPForwarder) HandlePacket(id stack.TransportEndpointID, pkt *stack.Pa
 				return true
 			}
 			if action != nil {
-				// TODO: handle error
 				pkt.IncRef()
 				_ = icmpWritePacketBuffer(action, pkt)
 				return true
@@ -166,7 +159,6 @@ func (f *ICMPForwarder) HandlePacket(id stack.TransportEndpointID, pkt *stack.Pa
 		}))
 		outgoingEP, gErr := f.stack.GetNetworkEndpoint(DefaultNIC, header.IPv4ProtocolNumber)
 		if gErr != nil {
-			// TODO: log error
 			return true
 		}
 		route, gErr := f.stack.FindRoute(
@@ -177,7 +169,6 @@ func (f *ICMPForwarder) HandlePacket(id stack.TransportEndpointID, pkt *stack.Pa
 			false,
 		)
 		if gErr != nil {
-			// TODO: log error
 			return true
 		}
 		defer route.Release()

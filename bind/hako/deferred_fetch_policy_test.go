@@ -9,14 +9,6 @@ import (
 	"github.com/TokenPLS/Hako/component/resource"
 )
 
-// The three knobs Setup turns for remote providers on Apple, pinned together because
-// they are one policy: the first fetch does not sit on
-// the Start path, a download the profile put no size-limit on is capped at the provider
-// ceiling, and the downloads Initial no longer waits for are bounded to the same five
-// the executor bounds Initial itself to. Each is a package-level knob in
-// component/resource that defaults to upstream's behaviour; nothing but this Setup
-// turns them, so a Setup that stopped turning one would leave upstream's behaviour in
-// place with no test saying so.
 func TestSetupTurnsTheDeferredFetchKnobsTogether(t *testing.T) {
 	if err := Setup(testOptions(t)); err != nil {
 		t.Fatalf("Setup: %v", err)

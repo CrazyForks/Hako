@@ -56,8 +56,6 @@ func TestJSONToYamlRoundTripsCompleteConfigTree(t *testing.T) {
 }
 
 func TestYamlToJSONRejectsNonObjectRoot(t *testing.T) {
-	// A multi-document config is no longer rejected here: first-document-wins is
-	// covered by TestYamlToJSONTakesFirstDocumentLikeUpstream.
 	for name, input := range map[string]string{
 		"sequence": "- one\n- two\n",
 		"scalar":   "hello\n",
@@ -72,10 +70,6 @@ func TestYamlToJSONRejectsNonObjectRoot(t *testing.T) {
 }
 
 func TestYamlToJSONTakesFirstDocumentLikeUpstream(t *testing.T) {
-	// Upstream yaml.v3 Unmarshal decodes only the first document and ignores the
-	// rest, and every upstream-aligned Core entry (FormatConfig, CheckConfig,
-	// Start, PlatformConfigIntentJSON) accepts a multi-document config by taking
-	// document one. YamlToJSON must not reject it at activation.
 	for name, input := range map[string]string{
 		"valid second document":       "mode: rule\n---\nmode: global\n",
 		"malformed trailing document": "mode: rule\n---\n[unterminated\n",
@@ -134,8 +128,6 @@ func TestYAMLJSONBridgeOutputIsDeterministic(t *testing.T) {
 	if firstYAML.Value != secondYAML.Value {
 		t.Fatalf("YAML output changed: %q != %q", firstYAML.Value, secondYAML.Value)
 	}
-	// Source order is preserved, not alphabetized: "zebra" precedes "alpha" and
-	// the nested "second" precedes "first" exactly as written.
 	if !strings.HasPrefix(firstYAML.Value, "zebra:") {
 		t.Fatalf("YAML did not preserve source key order: %q", firstYAML.Value)
 	}
@@ -167,15 +159,6 @@ func TestYAMLJSONBridgeRoundTripsOfficialConfigCatalog(t *testing.T) {
 }
 
 func TestYAMLJSONBridgePreservesNameserverPolicyOrder(t *testing.T) {
-	// nameserver-policy (and proxy-server-nameserver-policy) are first-match and
-	// order-sensitive in the kernel: config.go builds them into an
-	// orderedmap.OrderedMap and dns/resolver.go matchPolicy walks them in order,
-	// returning the first hit; makePolicy also groups consecutive plain-domain
-	// entries into one DomainTrie, so reordering changes both first-match and
-	// trie grouping. The client override bridge (YamlToJSON then JSONToYaml) must
-	// preserve source order. These orders are deliberately NOT alphabetical
-	// ("+.example.com" sorts before "geosite:cn"), so an alphabetizing bridge
-	// fails this test.
 	const source = `dns:
   enable: true
   nameserver-policy:
@@ -193,8 +176,6 @@ func TestYAMLJSONBridgePreservesNameserverPolicyOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("YamlToJSON: %v", err)
 	}
-	// The JSON intermediate the client override script consumes must already be
-	// ordered — historically the first order-destruction point (map+Marshal).
 	if got := nameserverPolicyKeysFromJSON(t, asJSON.Value); !reflect.DeepEqual(got, want) {
 		t.Fatalf("JSON nameserver-policy order = %v, want %v", got, want)
 	}
@@ -226,9 +207,6 @@ func TestYamlToJSONRejectsUnsafeAndAmbiguousInput(t *testing.T) {
 			"f: &f [*e,*e,*e,*e,*e,*e,*e,*e,*e]\n" +
 			"g: [*f,*f,*f,*f,*f,*f,*f,*f,*f]\n",
 		"duplicate top-level key": "mode: rule\nmode: direct\n",
-		// An alias key and a scalar key that resolve to the same string are not
-		// duplicates to yaml.v3's node-level check, so the pre-flight accepts
-		// them; the resolved-key collision must still be rejected.
 		"alias-resolved duplicate key": "seed: &k mode\n*k: first\nmode: second\n",
 		"merge alias to sequence":      "base: &b [1, 2]\nm:\n  <<: *b\n  y: 1\n",
 		"merge nested sequence":        "base: &b {x: 1}\nm:\n  <<: [[*b]]\n  y: 1\n",
@@ -243,7 +221,6 @@ func TestYamlToJSONRejectsUnsafeAndAmbiguousInput(t *testing.T) {
 }
 
 func TestYamlToJSONTreatsQuotedMergeKeyAsLiteral(t *testing.T) {
-	// A quoted "<<" is a !!str key, not a merge directive; it must survive.
 	box, err := YamlToJSON("m:\n  \"<<\": literal\n  y: 2\n")
 	if err != nil {
 		t.Fatalf("YamlToJSON: %v", err)
@@ -256,7 +233,6 @@ func TestYamlToJSONTreatsQuotedMergeKeyAsLiteral(t *testing.T) {
 }
 
 func TestYamlToJSONResolvesValidSequenceMerge(t *testing.T) {
-	// A flat sequence of mappings is a valid merge; earlier sources win.
 	box, err := YamlToJSON("one: &one {a: 1}\ntwo: &two {b: 2, a: 9}\nm:\n  <<: [*one, *two]\n  c: 3\n")
 	if err != nil {
 		t.Fatalf("YamlToJSON: %v", err)
@@ -309,10 +285,6 @@ func decodeJSONNumbers(t *testing.T, value string) map[string]any {
 	return root
 }
 
-// The full projection stays (design §4-6). Script paths, whole-document
-// rewrites, backup redaction and migration diffs genuinely need everything --
-// including keys this kernel does not know. If YamlToJSON ever starts
-// dropping content, the projection work has quietly amputated its neighbors.
 func TestYamlToJSONStillCarriesEverything(t *testing.T) {
 	box, err := YamlToJSON(`
 some-unknown-top-level-key: {kept: true}
@@ -331,8 +303,6 @@ proxies:
 	if err := json.Unmarshal([]byte(box.Value), &root); err != nil {
 		t.Fatalf("result does not decode: %v", err)
 	}
-	// Deep values, not key presence: a hollowed-out `dns: {}` would keep the
-	// key while losing the content.
 	unknown, _ := root["some-unknown-top-level-key"].(map[string]any)
 	if kept, _ := unknown["kept"].(bool); !kept {
 		t.Fatalf("unknown key's nested content lost: %+v", root["some-unknown-top-level-key"])

@@ -31,17 +31,10 @@ func TestCheckConfigUsesIOSPreflightWithoutStartingCore(t *testing.T) {
 		t.Fatalf("CheckConfig created controller socket: %v", err)
 	}
 
-	// dns.enable: false is mihomo's own default and most of what subscriptions
-	// publish never sets it. A packet tunnel does need core DNS, but needing it
-	// is a reason to supply it, not a reason to refuse the configuration.
 	repaired := strings.Replace(helloYAML, "enable: true", "enable: false", 1)
 	if err := CheckConfig(repaired); err != nil {
 		t.Fatalf("dns.enable: false must be repaired, not refused: %v", err)
 	}
-	// What is still refused is upstream's own verdict, not ours: a bootstrap
-	// survivor mihomo rejects. dhcp:// is stripped, and what is left is a
-	// hostname rather than an IP, which fails mihomo's pure-IP check
-	// (config/config.go:1459-1473) — there is nothing to repair it into.
 	invalid := strings.Replace(helloYAML, "enable: true",
 		"enable: true\n  default-nameserver: [dhcp://en0, \"https://dns.google/dns-query\"]", 1)
 	if err := CheckConfig(invalid); err == nil {
@@ -155,11 +148,6 @@ func TestPlatformConfigIntentFingerprintTracksRouteValuesNotOnlyCounts(t *testin
 }
 
 func TestPlatformConfigIntentToleratesEmptyOrIPv6OnlyFakeIPRange(t *testing.T) {
-	// An explicit empty (IPv6-only) dns.fake-ip-range is valid: upstream only
-	// parses fake-ip-range when non-empty and parseTun falls back to the
-	// DefaultRawConfig 198.18.0.1/16 for the tun IPv4, and Hako's own
-	// CheckConfig/Start accept it. PlatformConfigIntentJSON must not reject it; the
-	// fingerprint falls back to the same default instead of erroring.
 	fingerprint := func(t *testing.T, configContent string) string {
 		t.Helper()
 		intent, err := PlatformConfigIntentJSON(configContent)
@@ -188,10 +176,6 @@ func TestPlatformConfigIntentToleratesEmptyOrIPv6OnlyFakeIPRange(t *testing.T) {
 }
 
 func TestPlatformConfigIntentRejectsNonEmptyInvalidFakeIPRange(t *testing.T) {
-	// The fallback is only for an empty fake-ip-range. A NON-empty value must be a
-	// valid IPv4 prefix, exactly as upstream ParseRawConfig requires -- otherwise
-	// the client would persist Apple VPN intent for a config CheckConfig/Start
-	// later reject.
 	for name, value := range map[string]string{
 		"not a prefix":      "not-a-prefix",
 		"invalid v4 length": "1.2.3.4/33",
@@ -239,12 +223,6 @@ func TestPlatformConfigIntentFingerprintTracksEffectiveTunRestartFields(t *testi
 }
 
 func TestCheckConfigToleratesHostRouteKnobsEndToEnd(t *testing.T) {
-	// End-to-end proof of the tolerate + strip contract: a config a desktop
-	// mihomo accepts — carrying interface-name, routing-mark, find-process-mode,
-	// tun UID/interface/port host filters, auto-redirect and a PROCESS-NAME rule
-	// — must pass the full iOS preflight (Setup + CheckConfig) unchanged. None of
-	// it can execute in the NE and none of it changes which proxy handles a flow,
-	// so the config still starts. This is the "every upstream config must start" contract.
 	if err := Setup(testOptions(t)); err != nil {
 		t.Fatal(err)
 	}
@@ -278,11 +256,6 @@ rules:
 }
 
 func TestCheckConfigStartsRealisticUpstreamConfig(t *testing.T) {
-	// A single realistic upstream config a desktop mihomo accepts, carrying every
-	// knob the tolerate+strip commits handle at once: top-level interface/mark +
-	// find-process-mode, tun host-route filters, a system/dhcp query resolver,
-	// per-proxy and group egress overrides, and PROCESS/UID rules. It must start
-	// on iOS — the "every upstream config must start; unsupported settings are tolerated and stripped" capstone.
 	if err := Setup(testOptions(t)); err != nil {
 		t.Fatal(err)
 	}
@@ -376,8 +349,6 @@ func TestCheckConfigStripsSystemNameserverButRejectsSystemBootstrap(t *testing.T
 	if err := Setup(testOptions(t)); err != nil {
 		t.Fatal(err)
 	}
-	// A system/dhcp entry in a query-resolver list is stripped (tolerate + strip);
-	// the config still starts as long as an explicit resolver remains.
 	const withSystemQuery = `
 mode: rule
 dns:
@@ -393,9 +364,6 @@ rules:
 	if err := CheckConfig(withSystemQuery); err != nil {
 		t.Fatalf("config with a system/dhcp query resolver must start (stripped), got: %v", err)
 	}
-	// A bootstrap (default-nameserver) carrying system/dhcp + usable IPs strips
-	// the system entry and keeps the IPs — the config starts. This is the common
-	// real shape (e.g. [system, 180.76.76.76, 8.8.8.8]), not the synthetic [system].
 	const withBootstrapAndResolvers = `
 mode: rule
 dns:
@@ -411,16 +379,6 @@ rules:
 	if err := CheckConfig(withBootstrapAndResolvers); err != nil {
 		t.Fatalf("bootstrap with usable IPs must start (system stripped, IPs kept), got: %v", err)
 	}
-	// A system-only bootstrap starts. This used to be refused, on the stated
-	// grounds that "mihomo requires a non-empty pure-IP default-nameserver" --
-	// which is not what mihomo does: its pure-IP check explicitly `continue`s
-	// past ns.Net == "system" (config/config.go:1461-1463), so a system bootstrap
-	// is legal upstream. The cost of the refusal was concrete: a profile whose
-	// nameservers are all IP literals never needs the bootstrap at all, and it
-	// still would not start.
-	//
-	// filterBootstrap keeps the list rather than stripping it to empty, so what
-	// reaches mihomo is the config the user wrote.
 	const withSystemOnlyBootstrap = `
 mode: rule
 dns:
@@ -436,10 +394,6 @@ rules:
 	if err := CheckConfig(withSystemOnlyBootstrap); err != nil {
 		t.Fatalf("system-only default-nameserver bootstrap must start (upstream permits it), got: %v", err)
 	}
-	// dhcp:// in the same slot is still rejected -- by mihomo, not by us. It is
-	// not exempted from the pure-IP check the way system is, and "en0" parses as
-	// neither host:port nor a URL with an IP host, so ParseRawConfig returns
-	// "default nameserver should be pure IP" (config/config.go:1464-1470).
 	const withDHCPBootstrap = `
 mode: rule
 dns:
@@ -452,17 +406,9 @@ proxies:
 rules:
   - MATCH,DIRECT
 `
-	// dhcp:// is the whole bootstrap, so stripping it empties the list and the
-	// repair substitutes mihomo's own explicit resolvers. Refusing here would
-	// mean refusing a config over a field the reader can neither keep (the NE
-	// cannot bind 0.0.0.0:68) nor be expected to know needs replacing.
 	if err := CheckConfig(withDHCPBootstrap); err != nil {
 		t.Fatalf("a dhcp:// bootstrap must be repaired, not refused: %v", err)
 	}
-	// Stripping the ONLY query resolver leaves the list empty, and the repair
-	// refills it with mihomo's defaults rather than leaving the core to fall
-	// back to its hardcoded system resolvers (dns/system.go:71), which would
-	// leak DNS. The substitution is a logged repair, not a silent one.
 	const onlySystem = `
 mode: rule
 dns:
@@ -480,12 +426,6 @@ rules:
 }
 
 func TestPlatformConfigIntentToleratesEveryHostRouteKnob(t *testing.T) {
-	// Host-route knobs iOS cannot execute (interface binding, routing marks,
-	// process-based routing, per-UID/port host filters, PROCESS rules) are
-	// TOLERATED: the physical egress is chosen by NWPathMonitor and the sandbox
-	// exposes no such metadata, so they are stripped rather than rejected. A
-	// config carrying them still yields a valid Apple routing intent — this is
-	// what lets any upstream mihomo config start on iOS.
 	tolerated := []string{
 		"interface-name: en0\n",
 		"routing-mark: 233\n",
@@ -502,10 +442,6 @@ func TestPlatformConfigIntentToleratesEveryHostRouteKnob(t *testing.T) {
 			t.Fatalf("host-route knob should be tolerated (stripped), got PlatformConfigIntentJSON(%q) = %v", configContent, err)
 		}
 	}
-	// route-address-set was the one exception, on the ground that it "changes WHICH traffic
-	// enters the tunnel". It does not: sing-tun consumes it only through autoRedirect, in
-	// redirect_linux.go and the nftables files, and upstream ignores it off Linux. The
-	// exception is gone, so the tolerate-and-strip contract now has no holes in it.
 	alsoTolerated := []string{
 		"tun:\n  route-address-set: [cn]\n",
 		"tun:\n  route-exclude-address-set: [cn]\n",
@@ -545,13 +481,6 @@ func TestCommandSchemaCompatibility(t *testing.T) {
 	}
 }
 
-// ValidateConfigShape is a typed-shape contract, deliberately NOT
-// FormatConfig-equivalence. FormatConfig re-encodes the document and enforces a
-// 4 MiB limit on that formatted result -- a result its validateSource caller
-// throws away. For a validator that produces nothing, a limit on a discarded
-// artifact is neither upstream behavior nor platform-required, which is this
-// house's own test for a self-made constraint. The one divergence this creates
-// is pinned below, on purpose, so it can never become an accident.
 func TestValidateConfigShapeMatchesFormatConfigOnOrdinaryDocuments(t *testing.T) {
 	cases := map[string]string{
 		"minimal":            "proxies: []\n",
@@ -575,17 +504,9 @@ func TestValidateConfigShapeMatchesFormatConfigOnOrdinaryDocuments(t *testing.T)
 	}
 }
 
-// The intended divergence: a compact document whose FORMATTED form would
-// exceed the 4 MiB result limit. FormatConfig rejects it over an artifact it
-// then discards; ValidateConfigShape accepts it, and any stage that actually
-// produces an oversized artifact (merge, finalize, yamlToJSON) still refuses
-// with its own readable reason. If this test ever fails, the contract changed
-// by accident -- that is what it is here to catch.
 func TestValidateConfigShapeAcceptsWhatOnlyTheDiscardedResultLimitRejected(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("rules: [")
-	// ~3.4 MiB compact input; formatting adds a space per element, pushing the
-	// encoded result past the 4 MiB bound while the input stays under it.
 	for i := 0; i < 1_200_000; i++ {
 		if i > 0 {
 			b.WriteString(",")

@@ -19,9 +19,6 @@ static long long hako_process_cpu_time_ns() {
 */
 import "C"
 
-// processCPUTimeNanoseconds returns cumulative whole-process CPU time. The
-// value is monotonic for one process and may grow faster than wall time when
-// multiple cores execute concurrently. -1 means the platform call failed.
 func processCPUTimeNanoseconds() int64 {
 	return int64(C.hako_process_cpu_time_ns())
 }

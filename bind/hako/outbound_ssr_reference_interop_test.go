@@ -175,9 +175,6 @@ func startSSRReference(t *testing.T, reference string, password string) (string,
 
 	processContext, cancelProcess := context.WithCancel(context.Background())
 	referenceLog := &synchronizedSSRLog{}
-	// The pinned Python reference derives protocol padding from TCP_MAXSEG.
-	// Loopback advertises a synthetic MSS above the SSR frame limit on macOS,
-	// unlike a real network path, so its wrapper bounds only that observation.
 	command := exec.CommandContext(processContext, reference, "-c", configPath, "--forbidden-ip", "192.0.2.0/24", "-v")
 	command.Env = append(os.Environ(), ssrReferenceMSSVariable+"="+ssrReferenceMSS)
 	command.Stdout = io.Discard

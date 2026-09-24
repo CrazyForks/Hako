@@ -9,17 +9,6 @@ import (
 	"testing"
 )
 
-// The client used to read the failure out of the kernel's English prose: a
-// dozen `contains` matched against wordings this tree is free to change, so a
-// reworded error silently changed the category with nothing going red.
-// Classification belongs here, where the error still has its type, and it is
-// done with errors.Is/As so it survives rewording.
-//
-// It deliberately does NOT have a "dns" kind. That was the client's invented
-// category, matched on the substring "dns", and it merged the very things that
-// solve a case: today a user's nodes all failed with EADDRNOTAVAIL (a socket
-// bound to a physical interface) where ECONNREFUSED would have meant
-// nothing was listening. One category cannot say that; the errno can.
 
 func TestClassifyURLTestFailureReadsTypesNotWords(t *testing.T) {
 	for _, tc := range []struct {
@@ -31,9 +20,6 @@ func TestClassifyURLTestFailureReadsTypesNotWords(t *testing.T) {
 		wantErrno string
 	}{
 		{
-			// The shape of today's real defect, wrapped exactly as the dialer
-			// wraps it: component/dialer/dialer.go:455 uses %w, so the chain
-			// survives all the way here.
 			name:      "loopback write refused by a bound socket",
 			err:       fmt.Errorf("dns resolve failed: %w", &net.OpError{Op: "write", Err: syscall.EADDRNOTAVAIL}),
 			satisfied: true,
@@ -62,8 +48,6 @@ func TestClassifyURLTestFailureReadsTypesNotWords(t *testing.T) {
 			wantErrno: "",
 		},
 		{
-			// Answered, just not with the status the caller wanted. This is an
-			// outcome, not an error, so it arrives with err == nil.
 			name:      "answered with an unexpected status",
 			err:       nil,
 			satisfied: false,
@@ -94,8 +78,6 @@ func TestClassifyURLTestFailureReadsTypesNotWords(t *testing.T) {
 	}
 }
 
-// the verbatim sentence is never replaced by the classification, it
-// travels beside it. A reader who needs the truth gets the truth.
 func TestClassifyURLTestFailureKeepsTheVerbatimSentence(t *testing.T) {
 	err := fmt.Errorf("dns resolve failed: %w", &net.OpError{Op: "write", Err: syscall.EADDRNOTAVAIL})
 	got := ClassifyURLTestFailure(err, true, 0)
@@ -104,16 +86,12 @@ func TestClassifyURLTestFailureKeepsTheVerbatimSentence(t *testing.T) {
 	}
 }
 
-// A success is not a failure, and must classify as nothing at all.
 func TestClassifyURLTestFailureIsNilOnSuccess(t *testing.T) {
 	if got := ClassifyURLTestFailure(nil, true, 204); got != nil {
 		t.Fatalf("a satisfied probe with no error classified as %+v", got)
 	}
 }
 
-// The poison the iOS lane asked for, as a test rather than a ritual: rewording
-// the kernel's prose must not move the category. If this ever fails, the
-// classifier has grown a substring match.
 func TestClassifyURLTestFailureSurvivesRewording(t *testing.T) {
 	inner := &net.OpError{Op: "write", Err: syscall.EADDRNOTAVAIL}
 	for _, prose := range []string{

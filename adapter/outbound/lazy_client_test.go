@@ -126,8 +126,6 @@ func TestHysteria2ConstructionDefersTheHeavyState(t *testing.T) {
 	runtime.GC()
 	runtime.ReadMemStats(&after)
 	perNode := (int64(after.HeapAlloc) - int64(before.HeapAlloc)) / nodes
-	// 10001 ports × 2B ≈ 20KB per node in the array alone today, plus the
-	// client. Deferred, a node should keep only its option and base.
 	if perNode > 8*1024 {
 		t.Fatalf("each idle hysteria2 node retains %d bytes at load; the ports "+
 			"array and the client must wait for the first dial", perNode)

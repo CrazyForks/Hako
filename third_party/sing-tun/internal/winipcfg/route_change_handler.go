@@ -11,7 +11,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// RouteChangeCallback structure allows route change callback handling.
 type RouteChangeCallback struct {
 	cb   func(notificationType MibNotificationType, route *MibIPforwardRow2)
 	wait sync.WaitGroup
@@ -24,9 +23,6 @@ var (
 	routeChangeHandle         = windows.Handle(0)
 )
 
-// RegisterRouteChangeCallback registers a new RouteChangeCallback. If this particular callback is already
-// registered, the function will silently return. Returned RouteChangeCallback.Unregister method should be used
-// to unregister.
 func RegisterRouteChangeCallback(callback func(notificationType MibNotificationType, route *MibIPforwardRow2)) (*RouteChangeCallback, error) {
 	s := &RouteChangeCallback{cb: callback}
 
@@ -50,7 +46,6 @@ func RegisterRouteChangeCallback(callback func(notificationType MibNotificationT
 	return s, nil
 }
 
-// Unregister unregisters the callback.
 func (callback *RouteChangeCallback) Unregister() error {
 	routeChangeAddRemoveMutex.Lock()
 	defer routeChangeAddRemoveMutex.Unlock()

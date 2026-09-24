@@ -55,14 +55,6 @@ func TestProxyShareLifecycleSurvivesReloadAndClosesWithService(t *testing.T) {
 	}
 }
 
-// A community subscription almost always carries a mixed-port. Upstream never
-// refuses anything because a listener exists -- its sharing story IS the
-// config's own port (allow-lan), and a genuine port collision is a logged bind
-// error, warn-and-continue (listener/listener.go ReCreateMixed). Our old rule
-// ("any config listener present -> share refused") was written when NE stripped
-// every config listener, so it refused nobody; after returned the inbound
-// surface to users it started refusing exactly the configs people actually
-// import. Ruled 2026-08-15: drop the refusal, let bind report collisions.
 func TestProxyShareCoexistsWithConfigMixedPort(t *testing.T) {
 	if err := Setup(testOptions(t)); err != nil {
 		t.Fatal(err)
@@ -88,15 +80,6 @@ func TestProxyShareCoexistsWithConfigMixedPort(t *testing.T) {
 	assertProxyShareStatus(t, service, true, sharePort)
 	assertTCPListenerReachable(t, sharePort, true)
 
-	// Whether sharing on the config's own port collides is decided by the
-	// platform, not by us: the config listener (allow-lan off) holds
-	// 127.0.0.1:P while the share binds the wildcard, and macOS sanctions that
-	// pair while iOS refuses it (measured on an iPad: share on 7899 -> 200,
-	// share on the config's 7890 -> a genuine bind failure). This test runs on
-	// the host, so it pins the refusal that is ours to keep either way -- an occupied wildcard
-	// port must surface as the OS bind error, never as a policy sentence about
-	// listeners. Do not restate the macOS half as a cross-platform fact; that
-	// mistake nearly turned iOS's correct rejection into a regression hunt.
 	if err := service.StopProxyShare(); err != nil {
 		t.Fatal(err)
 	}
@@ -140,10 +123,6 @@ func TestProxyShareRequiresBoundedCredentialsAndRunningService(t *testing.T) {
 }
 
 func TestProxySharePasswordFloorFollowsProtocolNotStrengthPolicy(t *testing.T) {
-	// The LAN proxy-share credential floor must match the wire protocol
-	// (SOCKS5 RFC 1929 / HTTP Basic RFC 7617 accept a non-empty 1...255-byte
-	// password) and upstream's verbatim authenticator, not an invented 12-byte
-	// strength policy. Password strength is a non-blocking client-side hint.
 	const validPort int32 = 1082
 	const validUser = "user"
 
@@ -219,8 +198,6 @@ func TestClashAPIClientControlsProxyShareWithoutLeakingCredentials(t *testing.T)
 	if _, err := client.request(http.MethodPut, "/hako/v1/proxy-share", proxyShareRequest{
 		Port:     int32(port),
 		Username: "private-user",
-		// A control character keeps the request invalid post floor-change so the
-		// rejection path is still exercised, and the error must not echo the secret.
 		Password: rejectedSecret + "\n",
 	}); err == nil || strings.Contains(err.Error(), rejectedSecret) {
 		t.Fatalf("rejected proxy-share request leaked credentials: %v", err)
@@ -236,17 +213,6 @@ func TestClashAPIClientControlsProxyShareWithoutLeakingCredentials(t *testing.T)
 	assertProxyShareStatusJSON(t, status, false, 0)
 }
 
-// One 422 for every failure leaves the App with nothing to say. A user whose
-// subscription carries mixed-port 7890 and who shares on 7890 gets a genuine
-// bind failure -- on iOS, where the wildcard share and the config's loopback
-// listener DO collide (macOS disagrees; see proxy_share.go) -- and the only
-// remedy is "pick another port". The App could not tell them that, because
-// "port unavailable" and "your password has a newline in it" arrived as the
-// same sentence.
-//
-// Naming the unavailable port leaks nothing: the caller chose it, holds the
-// App Group socket, and could learn the same thing by binding it. What must
-// stay redacted is WHAT holds it, and every credential.
 func TestProxyShareUnavailablePortIsDistinguishableFromOtherRejections(t *testing.T) {
 	if err := Setup(testOptions(t)); err != nil {
 		t.Fatal(err)
@@ -299,7 +265,6 @@ func TestProxyShareUnavailablePortIsDistinguishableFromOtherRejections(t *testin
 	if !strings.Contains(portErr.Error(), strconv.Itoa(occupiedPort)) {
 		t.Fatalf("the port rejection does not name the port the caller asked for: %q", portErr)
 	}
-	// The redaction that must survive: what holds the port, and any credential.
 	for _, forbidden := range []string{"listener", "127.0.0.1", "0.0.0.0", secret, "private-password-value"} {
 		if strings.Contains(portErr.Error(), forbidden) {
 			t.Fatalf("port rejection leaked %q: %s", forbidden, portErr)

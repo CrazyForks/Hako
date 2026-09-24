@@ -165,9 +165,6 @@ func (s *System) start() error {
 			time.Sleep(time.Second)
 		}
 		if err != nil {
-			// The v4 listener and its accept goroutine are already live; leaving them behind on
-			// a failed start leaks a socket and a goroutine per attempt into a memory-capped
-			// extension process, and nobody upstream of here closes a stack that never started.
 			if s.tcpListener != nil {
 				_ = s.tcpListener.Close()
 				s.tcpListener = nil
@@ -183,32 +180,9 @@ func (s *System) start() error {
 	return nil
 }
 
-// listenWithTunBind is the only way start() opens its TCP listeners. It attaches the
-// IP_BOUND_IF hook that lets an NE-scoped extension socket receive packets injected on the tun
-// (see stack_system_bindif_darwin.go), and it re-resolves the tun's interface index on EVERY
-// call on purpose: the caller's retry loop exists because the tun address may not be on the
-// interface yet when start() begins -- retryableListenError retries exactly that condition --
-// and that is the same window in which the index lookup cannot succeed. Resolving once before
-// the loop would skip the bind in precisely the runs the loop was built to save, and a lookup
-// miss is itself retryable (errTunAddressNotPresent wraps EADDRNOTAVAIL) for the same reason.
-//
-// NOTHING here touches the outbound dialer -- binding egress to the tun is the loop the NE
-// scope exists to prevent. Off darwin the lookup reports -1, bindListenerSupported is false,
-// and this is a plain Listen.
-//
-// To whoever resolves the next upstream merge: upstream's version of start() listens through a
-// ListenConfig named `listener`; that variable is deliberately gone from this fork so a
-// PARTIAL conflict resolved in upstream's favour fails to compile. A wholesale take-theirs of
-// the whole function compiles -- that direction is pinned behaviourally instead, by the test
-// that swaps the enumeration seam to an empty table and requires start() to FAIL (it can only
-// fail there by routing through this method).
 func (s *System) listenWithTunBind(base net.ListenConfig, network, address string, tunAddr netip.Addr) (net.Listener, error) {
 	index, carriers, enumErr := interfaceIndexCarrying(tunAddr)
 	if enumErr != nil && bindListenerSupported {
-		// Not "address not there yet" -- the enumeration itself failed, and the reader of this
-		// line needs to chase getifaddrs, not their tun addressing. The platform side already
-		// wrapped it retryably: a transient (ENOMEM under the extension's memory cap) heals on
-		// the next attempt.
 		s.logger.Warn("[bindif] interface enumeration failed: ", enumErr)
 		return nil, enumErr
 	}
@@ -218,16 +192,11 @@ func (s *System) listenWithTunBind(base net.ListenConfig, network, address strin
 	if hook := bindListenerToInterfaceControl(index, s.logger); hook != nil {
 		base.Control = control.Append(base.Control, hook)
 	} else if bindListenerSupported {
-		// Listening unbound "successfully" would be a tunnel that starts with TCP silently
-		// dead -- the multi-day failure the bind exists to end. Fail the attempt the same way
-		// upstream's own Listen on the absent address would, and let the caller retry.
 		s.logger.Warn("[bindif] no up interface carries ", tunAddr, " yet; not listening unbound on ", network)
 		return nil, errTunAddressNotPresent
 	}
 	ln, err := base.Listen(s.ctx, network, address)
 	if err == nil && index >= 0 {
-		// True by construction: the bind hook fails the Listen when the setsockopt fails, so
-		// reaching here with an index means the listener really is bound to it.
 		s.logger.Info("[bindif] ", network, " listener bound to interface index ", index)
 	}
 	return ln, err

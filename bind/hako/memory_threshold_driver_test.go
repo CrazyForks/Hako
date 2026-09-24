@@ -8,14 +8,6 @@ import (
 	"github.com/TokenPLS/Hako/tunnel/statistic"
 )
 
-// The driver's job is to turn decisions into actions, so what matters here is the gate: with
-// shedding off, a trigger must record evidence and touch nothing; with it on, the same trigger
-// must actually close connections.
-//
-// Report-only is the default on purpose and against upstream, which acts by default. The action
-// closes every tracked connection, and the last time this tree shed on pressure the measured
-// outcome was that it freed almost nothing while killing every app's session. These counters are
-// what a device run produces to justify turning it on.
 
 type pressureProbeTracker struct {
 	statistic.Tracker
@@ -34,16 +26,6 @@ func joinPressureProbe(t *testing.T, id string) *pressureProbeTracker {
 	return probe
 }
 
-// withThresholdMachine installs a machine and a fixed sample, restoring the package state after.
-//
-// Two disciplines here, both learned from a deterministic -race failure:
-// every swap of pressureThresholdSample happens under pressureThresholdMu,
-// because the live poll loop reads the hook under that mutex
-// (stepPressureThreshold) -- a bare assignment races it; and any monitor
-// goroutine a previous test armed (Setup -> startPressureThresholdMonitor
-// leaves its loop running past the test that started it) is stopped first, so
-// a stray stepper can neither race the swap nor bump the shared trigger
-// counters mid-assertion.
 func withThresholdMachine(t *testing.T, mode thresholdMode, limit uint64, sample pressureSample, shed bool) *pressureMachine {
 	t.Helper()
 
@@ -71,9 +53,6 @@ func withThresholdMachine(t *testing.T, mode thresholdMode, limit uint64, sample
 	return machine
 }
 
-// setPressureSampleForTest swaps the sample hook under the same mutex the poll
-// loop reads it under. Tests must use this instead of assigning the package
-// variable directly.
 func setPressureSampleForTest(sample func() pressureSample) {
 	pressureThresholdMu.Lock()
 	pressureThresholdSample = sample
@@ -124,9 +103,6 @@ func TestEnablingShedActuallyClosesConnections(t *testing.T) {
 	}
 }
 
-// TestSustainedEpisodeShedsOnceNotPerPoll is the reason the hysteresis exists, checked through the
-// driver rather than the state machine: a busy process hovering near its budget must not have
-// every connection closed ten times a second.
 func TestSustainedEpisodeShedsOnceNotPerPoll(t *testing.T) {
 	thresholds := computeLimitThresholds(testLimit, pressureSafetyMargin)
 	machine := withThresholdMachine(t, thresholdModeLimit, testLimit,
@@ -143,21 +119,15 @@ func TestSustainedEpisodeShedsOnceNotPerPoll(t *testing.T) {
 	}
 }
 
-// TestPredictedTriggersAreCountedSeparately: the two reasons need telling apart in a device
-// report, because a prediction firing often means the thresholds are wrong, while a threshold
-// crossing firing often means the budget is genuinely too small.
 func TestPredictedTriggersAreCountedSeparately(t *testing.T) {
 	machine := withThresholdMachine(t, thresholdModeLimit, testLimit, atUsage(20<<20), false)
 
 	beforePredicted := pressureThresholdPredictedCount.Load()
 
-	// Baseline poll well below every threshold.
 	machine.notifyPressure()
 	stepPressureThreshold(machine)
 
-	// Now a reading that only a growth rate can explain.
 	setPressureSampleForTest(func() pressureSample { return atUsage(39 << 20) })
-	// The machine measures elapsed time from its own baseline, so give it some.
 	time.Sleep(2 * pressureMinInterval)
 	stepPressureThreshold(machine)
 
@@ -166,9 +136,6 @@ func TestPredictedTriggersAreCountedSeparately(t *testing.T) {
 	}
 }
 
-// TestNotifyPressureWithNoMachineIsSafe: the OS notification can arrive before Setup arms the
-// machine, or after a re-Setup replaced it. A nil dereference there would take down the extension
-// during a memory episode, which is the worst possible moment.
 func TestNotifyPressureWithNoMachineIsSafe(t *testing.T) {
 	pressureThresholdMu.Lock()
 	priorMachine, priorWake := pressureThresholdMachine, pressureThresholdWake
@@ -180,11 +147,9 @@ func TestNotifyPressureWithNoMachineIsSafe(t *testing.T) {
 		pressureThresholdMu.Unlock()
 	})
 
-	notifyPressureThreshold() // must not panic
+	notifyPressureThreshold()
 }
 
-// TestDiagnosticsExposeTheEvidence: report-only mode is worthless if the counts cannot be read off
-// a device.
 func TestDiagnosticsExposeTheEvidence(t *testing.T) {
 	report := pressureThresholdDiagnostics()
 	for _, key := range []string{

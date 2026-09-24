@@ -100,13 +100,10 @@ func (rp *ruleSetProvider) Initial() error {
 	return err
 }
 
-// Format is the rule format this provider parses its payload with.
 func (rp *ruleSetProvider) Format() P.RuleFormat {
 	return rp.format
 }
 
-// SideUpdate feeds a payload obtained elsewhere (the app fetched it through the
-// tunnel) into the live provider: parsed, written to the vehicle path, applied.
 func (rp *ruleSetProvider) SideUpdate(payload []byte) error {
 	_, _, err := rp.Fetcher.SideUpdate(payload)
 	return err
@@ -117,7 +114,6 @@ func (rp *ruleSetProvider) Update() error {
 	return err
 }
 
-// metadataSnapshot pairs the derived strategy with its loaded cache generation.
 func (rp *ruleSetProvider) metadataSnapshot() (metadata providerForApi, hash string) {
 	rp.ReadLoadedContent(func(loadedHash string, updatedAt time.Time) {
 		metadata = providerForApi{
@@ -130,7 +126,6 @@ func (rp *ruleSetProvider) metadataSnapshot() (metadata providerForApi, hash str
 	return
 }
 
-// LoadedMetadataJSON snapshots cache identity and derived rule metadata together.
 func (rp *ruleSetProvider) LoadedMetadataJSON() ([]byte, error) {
 	metadata, hash := rp.metadataSnapshot()
 	return json.Marshal(struct {
@@ -344,7 +339,6 @@ func (i *inlineProvider) VehicleType() P.VehicleType {
 	return P.Inline
 }
 
-// LoadedMetadataJSON avoids serializing the immutable inline payload for status.
 func (i *inlineProvider) LoadedMetadataJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		providerForApi

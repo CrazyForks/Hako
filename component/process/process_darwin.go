@@ -91,14 +91,6 @@ func findProcessName(network string, ip netip.Addr, port int) (uint32, string, e
 		srcIP = srcIP.Unmap()
 
 		if ip == srcIP {
-			// xsocket_n.so_uid then xsocket_n.so_last_pid, adjacent fields at the same base.
-			//
-			// The uid was returned as a hardcoded 0 here for as long as this file existed, which
-			// silently broke every UID rule on darwin: a rule for uid 0 matched everything and a
-			// rule for any real uid matched nothing. sing-box reads it at so+64
-			// (searcher_darwin_shared.go, darwinXsocketUID) and reads the pid at so+68 exactly as
-			// this code already does, so the two implementations agree on the struct layout and
-			// the neighbouring field is the cross-check.
 			uid := readNativeUint32(buf[so+64 : so+68])
 			pid := readNativeUint32(buf[so+68 : so+72])
 			pp, err := getExecPathFromPID(pid)

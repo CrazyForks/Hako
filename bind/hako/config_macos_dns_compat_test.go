@@ -12,16 +12,6 @@ func setMacOSDNSProfileForTest(t *testing.T, profile runtimeProfile) {
 	setupRuntimeProfile.Store(uint32(profile))
 }
 
-// A configuration with no dns block starts, and DNS is turned on for it -- the one field an
-// Apple packet tunnel requires. The requirement is mechanical rather than stylistic:
-// updateDNS tears the resolver down when enable is false
-// (hub/executor/executor.go:238-247), ServeMsg then returns ErrIPNotFound and relayDnsPacket
-// answers SERVFAIL, while the tunnel keeps capturing every port 53 packet because
-// ShouldHijackDns (sing_tun/dns.go:21-27) never asks whether a resolver exists. A desktop
-// user reaches that only by enabling tun and can step back out; a packet tunnel cannot.
-//
-// It is not refused either: refusing made this the only tunnel such a configuration would
-// not start on. It starts, with DNS on and nothing else touched.
 func TestPacketTunnelEnablesDNSAndChangesNothingElse(t *testing.T) {
 	setMacOSDNSProfileForTest(t, runtimeProfileMacOSPacketTunnel)
 	cfg, err := parseConfigForIOS("rules:\n  - MATCH,DIRECT\n", true)

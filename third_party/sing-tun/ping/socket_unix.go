@@ -24,14 +24,14 @@ func connect(privileged bool, controlFunc control.Func, destination netip.Addr) 
 		err     error
 	)
 	if destination.Is4() {
-		network = "ip4" // like std's netFD.ctrlNetwork
+		network = "ip4"
 		if !privileged {
 			fd, err = unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, unix.IPPROTO_ICMP)
 		} else {
 			fd, err = unix.Socket(unix.AF_INET, unix.SOCK_RAW, unix.IPPROTO_ICMP)
 		}
 	} else {
-		network = "ip6" // like std's netFD.ctrlNetwork
+		network = "ip6"
 		if !privileged {
 			fd, err = unix.Socket(unix.AF_INET6, unix.SOCK_DGRAM, unix.IPPROTO_ICMPV6)
 		} else {
@@ -55,10 +55,6 @@ func connect(privileged bool, controlFunc control.Func, destination netip.Addr) 
 		}
 	}
 	if destination.Is4() && (runtime.GOOS == "linux" || runtime.GOOS == "android") {
-		//err = unix.SetsockoptInt(fd, unix.IPPROTO_IP, unix.IP_RECVTOS, 1)
-		//if err != nil {
-		//	return nil, err
-		//}
 		err = unix.SetsockoptInt(fd, unix.IPPROTO_IP, unix.IP_RECVTTL, 1)
 		if err != nil {
 			return nil, E.Cause(err, "setsockopt()")
@@ -88,7 +84,6 @@ func connect(privileged bool, controlFunc control.Func, destination netip.Addr) 
 	}
 
 	if runtime.GOOS == "darwin" && !privileged {
-		// When running in NetworkExtension on macOS, write to connected socket results in EPIPE.
 		var packetConn net.PacketConn
 		packetConn, err = net.FilePacketConn(file)
 		if err != nil {

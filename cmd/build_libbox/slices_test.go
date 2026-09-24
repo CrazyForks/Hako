@@ -5,10 +5,6 @@ import (
 	"testing"
 )
 
-// iOS and macOS have to be independently packageable: their Core capabilities now differ and
-// they are consumed through separate locks. The risk in a slice filter is not that it fails --
-// it is that it silently succeeds with a platform missing, because the resulting xcframework
-// still looks valid and only breaks at the consumer, possibly a release later.
 
 func sliceNames(plans []appleSlicePlan) []string {
 	names := make([]string, 0, len(plans))
@@ -92,17 +88,15 @@ func TestSelectAppleSlices(t *testing.T) {
 	}
 }
 
-// TestSelectAppleSlicesRejectsUnknownNames is the important half. A typo must stop the build,
-// not produce an artifact quietly missing a platform.
 func TestSelectAppleSlicesRejectsUnknownNames(t *testing.T) {
 	plans := appleSerialBuildPlan()
 
 	for _, request := range []string{
-		"iOS",            // group names are lowercase; a capitalised one is a typo, not an alias
-		"ios-sim",        // plausible abbreviation that is not a real slice
-		"macos-device",   // the macOS slice has no -device suffix
-		"watchos",        // a platform this artifact does not carry
-		"ios,tvos-arm64", // a gomobile target spelling rather than a plan name
+		"iOS",
+		"ios-sim",
+		"macos-device",
+		"watchos",
+		"ios,tvos-arm64",
 	} {
 		t.Run(request, func(t *testing.T) {
 			selected, err := selectAppleSlices(request, plans)
@@ -111,7 +105,6 @@ func TestSelectAppleSlicesRejectsUnknownNames(t *testing.T) {
 					"has to fail the build, because a partial xcframework still looks valid and "+
 					"only breaks at the consumer", request, sliceNames(selected))
 			}
-			// The error has to be actionable, so it must list what is valid.
 			for _, expected := range []string{"macos", "ios-device"} {
 				if !strings.Contains(err.Error(), expected) {
 					t.Fatalf("error %q does not mention the valid name %q", err, expected)
@@ -121,8 +114,6 @@ func TestSelectAppleSlicesRejectsUnknownNames(t *testing.T) {
 	}
 }
 
-// TestAppleSliceGroupsCoverEveryPlan: if a slice is added to the build plan and no group
-// contains it, "-slices ios,macos,tvos" would quietly stop covering the whole artifact.
 func TestAppleSliceGroupsCoverEveryPlan(t *testing.T) {
 	covered := make(map[string]bool)
 	for _, names := range appleSliceGroups() {
@@ -138,14 +129,6 @@ func TestAppleSliceGroupsCoverEveryPlan(t *testing.T) {
 	}
 }
 
-// TestASharedNameMeansTheSameThing guards the resolution order. A token is looked up as a
-// group first, so a name that is both a group and a slice makes the slice unreachable on its
-// own -- harmless only while the group expands to exactly that slice.
-//
-// "macos" is such a name today, and it is fine because the macOS slice is already universal
-// (arm64 + amd64), so the group and the slice denote the same build. The day macOS gains a
-// second slice -- Catalyst, or a separate simulator -- the group would silently stop meaning
-// what "-slices macos" used to mean, and this test is what says so.
 func TestASharedNameMeansTheSameThing(t *testing.T) {
 	groups := appleSliceGroups()
 	for _, plan := range appleSerialBuildPlan() {

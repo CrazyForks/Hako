@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// The configuration a reader writes when they mean "Google's names here, the rest of .com
-// there". Both transforms on the activation path used to hand the core the opposite.
 const orderSensitiveConfig = `mixed-port: 7890
 log-level: warning
 dns:
@@ -37,7 +35,6 @@ func indexOfKey(t *testing.T, document, key string) int {
 	return at
 }
 
-// The one that routes traffic. Everything else in this file is a guard around it.
 func TestFinalizeKeepsTheNameserverPolicyInTheOrderItWasWritten(t *testing.T) {
 	box, err := FinalizeForIOS(orderSensitiveConfig, "")
 	if err != nil {
@@ -54,8 +51,6 @@ func TestFinalizeKeepsTheNameserverPolicyInTheOrderItWasWritten(t *testing.T) {
 	}
 }
 
-// Finalize runs whether or not the reader set anything, which is why this defect did not need
-// an override to bite.
 func TestFinalizeReordersNothingWithNoOverrideInvolved(t *testing.T) {
 	box, err := FinalizeForIOS(orderSensitiveConfig, "")
 	if err != nil {
@@ -84,8 +79,6 @@ func TestMergeKeepsTheNameserverPolicyInTheOrderItWasWritten(t *testing.T) {
 	}
 }
 
-// Order is not the only thing the pass must not disturb: it re-emits the document, so it has
-// to give back the same keys with the same values.
 func TestRestoringOrderChangesNothingButOrder(t *testing.T) {
 	transformed := "b: 2\na: 1\nc:\n    y: 2\n    x: 1\n"
 	got := restoreSourceKeyOrder("a: 1\nb: 2\nc:\n  x: 1\n  y: 2\n", transformed)
@@ -95,8 +88,6 @@ func TestRestoringOrderChangesNothingButOrder(t *testing.T) {
 	}
 }
 
-// A key the transform introduced has no place in the source order, and inventing one would
-// mean it lands somewhere different depending on what else is in the document.
 func TestAddedKeysFollowTheSourceKeys(t *testing.T) {
 	got := restoreSourceKeyOrder("z: 1\na: 2\n", "a: 2\nadded: 3\nz: 1\n")
 	if !strings.HasPrefix(got, "z: 1\na: 2\n") {
@@ -110,8 +101,6 @@ func TestAddedKeysFollowTheSourceKeys(t *testing.T) {
 	}
 }
 
-// The pass exists to preserve an ordering. Losing the document because it could not is a
-// worse outcome than the ordering it was trying to save.
 func TestAnUnparseableSideLeavesTheDocumentAlone(t *testing.T) {
 	transformed := "a: 1\n"
 	if got := restoreSourceKeyOrder("\tthis is not yaml: [", transformed); got != transformed {
@@ -123,8 +112,6 @@ func TestAnUnparseableSideLeavesTheDocumentAlone(t *testing.T) {
 	}
 }
 
-// A configuration using anchors reaches the transform with them resolved, so the two sides
-// disagree in shape. It must terminate and it must not lose anything.
 func TestAnchorsInTheSourceDoNotDerailThePass(t *testing.T) {
 	source := "base: &b\n  y: 2\n  x: 1\nuse: *b\n"
 	transformed := "base:\n    x: 1\n    y: 2\nuse:\n    x: 1\n    y: 2\n"
@@ -136,7 +123,6 @@ func TestAnchorsInTheSourceDoNotDerailThePass(t *testing.T) {
 	}
 }
 
-// Mappings nested inside a sequence are reached -- a proxy or a rule-provider holds one.
 func TestAMappingInsideAListIsReordered(t *testing.T) {
 	got := restoreSourceKeyOrder(
 		"proxies:\n  - name: a\n    type: ss\n",
@@ -147,7 +133,6 @@ func TestAMappingInsideAListIsReordered(t *testing.T) {
 	}
 }
 
-// Sequences were never the problem and must not become one.
 func TestListOrderIsUntouched(t *testing.T) {
 	box, err := FinalizeForIOS(orderSensitiveConfig, "")
 	if err != nil {
@@ -160,10 +145,6 @@ func TestListOrderIsUntouched(t *testing.T) {
 	}
 }
 
-// A policy written entirely in the app, with the file never mentioning one. The override
-// text is ordered JSON -- "+.google.com" first, "+.com" second -- and the merge emits it
-// through a Go map. Without the override as a second reference it is "added by the
-// transform", and the transform's emit order is the alphabet. The iOS lane found this one.
 func TestAPolicyWrittenOnlyInTheOverrideKeepsTheOverridesOrder(t *testing.T) {
 	raw := "mixed-port: 7890\nproxies: []\nrules:\n  - MATCH,DIRECT\n"
 	override := `{"patch":{"dns":{"enable":true,"nameserver-policy":{"+.google.com":"8.8.8.8","+.com":"223.5.5.5"}}}}`
@@ -178,11 +159,8 @@ func TestAPolicyWrittenOnlyInTheOverrideKeepsTheOverridesOrder(t *testing.T) {
 	}
 }
 
-// When the file and the override both carry a key, the file's position wins. The override
-// only supplies order for keys the file does not have; it cannot move a key the file placed.
 func TestTheFilesOrderWinsOverTheOverridesForKeysBothHave(t *testing.T) {
 	raw := "dns:\n  nameserver-policy:\n    \"+.google.com\": 8.8.8.8\n    \"+.com\": 223.5.5.5\nproxies: []\nrules:\n  - MATCH,DIRECT\n"
-	// The override lists them the other way round and changes one value.
 	override := `{"patch":{"dns":{"nameserver-policy":{"+.com":"1.1.1.1","+.google.com":"8.8.8.8"}}}}`
 	box, err := MergeOverrideForIOS(raw, override)
 	if err != nil {
@@ -198,9 +176,6 @@ func TestTheFilesOrderWinsOverTheOverridesForKeysBothHave(t *testing.T) {
 	}
 }
 
-// A malformed override must not be able to displace the file's order -- it is simply not a
-// reference. (MergeOverrideForIOS rejects malformed JSON before the pass runs; this exercises
-// the pass directly so the guarantee does not depend on that.)
 func TestAMalformedSecondReferenceIsIgnored(t *testing.T) {
 	got := restoreKeyOrderFrom("b: 2\na: 1\n", "a: 1\nb: 2\n", "{not json")
 	if got != "a: 1\nb: 2\n" {

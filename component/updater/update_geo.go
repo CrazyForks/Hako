@@ -45,20 +45,6 @@ func SetGeoUpdateInterval(newGeoUpdateInterval int) {
 	updateInterval = newGeoUpdateInterval
 }
 
-// hashExistingDatabase hashes what is already on disk, through one handle and
-// under the same ceiling as everything else here.
-//
-// Upstream read this file with os.ReadFile, for no reason but to decide
-// whether the download changed anything -- so a file left oversized by a
-// legacy build, a hand install or a half-written update was allocated whole
-// before the bounded vehicle ever ran, which is the allocation the ceiling
-// above exists to refuse. An oversized file hashes to nothing on purpose:
-// it is not a database this process will open (component/mmdb/open.go refuses
-// the same size), so the only useful outcome is for the next download to
-// count as a change and replace it.
-//
-// Every failure is the same answer -- no hash known -- because that is what
-// the caller does with it: ask the endpoint for the file.
 func hashExistingDatabase(path string, ceiling int64) utils.HashType {
 	f, err := os.Open(path)
 	if err != nil {
@@ -76,13 +62,6 @@ func hashExistingDatabase(path string, ceiling int64) utils.HashType {
 	return utils.MakeHash(buf)
 }
 
-// geoDatabase is one downloadable geo artifact: what it is called, where it
-// comes from, where it goes, and how big it is allowed to be.
-//
-// The ceiling is per FORMAT and lives here so it cannot be attached at three
-// call sites and forgotten at the fourth. It was one number for a while, and
-// that made the updater refuse a .dat the Apple pipeline installs quite
-// happily -- a file already in use that could never be refreshed.
 type geoDatabase struct {
 	name    string
 	url     func() string
@@ -97,40 +76,16 @@ var (
 	geoSiteDatabase = geoDatabase{"GeoSite", geodata.GeoSiteUrl, func() string { return C.Path.GeoSite() }, geodata.MaxDatFileBytes}
 )
 
-// geoVehicle is where the ceiling is attached, and the only place any geo
-// download is built. One byte above the ceiling, so an oversized body comes
-// back one byte too long instead of exactly full and ambiguous.
 func geoVehicle(url, path string, ceiling int64) *resource.HTTPVehicle {
 	return resource.NewHTTPVehicle(url, path, "", nil, defaultHttpTimeout, ceiling+1)
 }
 
-// downloadGeoDatabase is the one door every geo download goes through.
-//
-// Upstream built each vehicle with sizeLimit 0 -- no ceiling -- and the body
-// is whatever a configured endpoint decides to send. That was already a
-// full-size allocation on every platform (Read buffers the response), and the
-// Windows opener now reads the published file into the heap as well, so an
-// oversized database is charged two or three times over while a lookup keeps
-// the old reader alive. The ceiling is the one this artifact's format sets,
-// initialisation uses.
-//
-// io.LimitReader inside the vehicle stops at the limit instead of failing, so
-// the ceiling is set one byte higher and the overflow is reported here: a
-// silently truncated database would otherwise reach the verifier and be
-// rejected as corrupt, which is the right outcome told the wrong way.
-//
-// changed is false when the endpoint returned what is already on disk; err is
-// the caller's message with the database's name in it.
 func downloadGeoDatabase(db geoDatabase) (data []byte, changed bool, err error) {
 	name := db.name
 	vehicle := geoVehicle(db.url(), db.path(), db.ceiling)
 	oldHash := hashExistingDatabase(vehicle.Path(), db.ceiling)
 	data, hash, err := vehicle.Read(context.Background(), oldHash)
 	if err != nil {
-		// The vehicle's error carries the request URL, and the reader's own
-		// geox-url can hold a secret in its PATH -- which tier 1 keeps on
-		// purpose, because a path is the producer's business. This is
-		// the producer: the endpoint is named by its address.
 		return nil, false, fmt.Errorf("can't download %s database file: %w", name, err)
 	}
 	if int64(len(data)) > db.ceiling {
@@ -151,11 +106,6 @@ func UpdateMMDB() (err error) {
 		return err
 	}
 
-	// One transaction: staged beside the file, verified before the rename,
-	// the verified reader published after it (component/mmdb/publisher.go).
-	// Nothing here closes the old reader or writes over the old file: the
-	// old path did both -- a nil reader panicked on Close, and
-	// os.WriteFile truncated the inode a lookup was still mmap-reading.
 	if err := mmdb.PublishIP(data); err != nil {
 		return fmt.Errorf("can't save MMDB database file: %w", err)
 	}
@@ -214,17 +164,7 @@ func UpdateGeoSite() (err error) {
 	return nil
 }
 
-// stagedWrite replaces path with data through a temp file beside it: write,
-// fsync, close, chmod to the previous mode, rename, fsync the directory. The
-// .dat files are not mmap-mapped, so they need no reader transaction, but a
-// loader that opens the file while safeWrite's os.WriteFile is truncating it
-// reads a partial file -- and a partial GeoSite is a parse error that fails
-// every rule built from it. The rename is the commit; nothing before it
-// changes what a reader can open.
 func stagedWrite(path string, data []byte) error {
-	// Through a symlink, not over it -- including a dangling one, which is
-	// what a first download looks like (component/mmdb ResolveLink). A link
-	// that cannot be resolved is an error, not something to rename over.
 	path, err := mmdb.ResolveLink(path)
 	if err != nil {
 		return err
@@ -270,8 +210,6 @@ func stagedWrite(path string, data []byte) error {
 	return nil
 }
 
-// updateGeoDatabases is a variable so the gate around it can be tested
-// without downloading anything.
 var updateGeoDatabases = func() error {
 	defer runtime.GC()
 
@@ -301,9 +239,6 @@ var ErrGetDatabaseUpdateSkip = errors.New("GEO database is updating, skip")
 func UpdateGeoDatabases() error {
 	log.Infoln("[GEO] Start updating GEO database")
 
-	// One compare-and-swap, not a load followed by a store: two callers that
-	// both saw false would both run, and two updates of one database racing
-	// is the disorder the publisher's transaction exists to prevent.
 	if !updatingGeo.CompareAndSwap(false, true) {
 		return ErrGetDatabaseUpdateSkip
 	}

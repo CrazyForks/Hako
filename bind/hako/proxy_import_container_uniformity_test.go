@@ -8,10 +8,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// canonicalProxyCorpusForContainerUniformity covers the field families a real
-// subscription carries: plugin options, ws transport, reality plus a client
-// fingerprint, hysteria2 port hopping, and the vmess alterId spelling. Values are
-// synthetic.
 const canonicalProxyCorpusForContainerUniformity = `[
   {"name":"a","type":"ss","server":"a.example","port":443,"cipher":"aes-128-gcm","password":"p1","udp":true,
    "plugin":"obfs","plugin-opts":{"mode":"tls","host":"a.example"}},
@@ -27,10 +23,6 @@ const canonicalProxyCorpusForContainerUniformity = `[
   {"name":"f","type":"anytls","server":"f.example","port":443,"password":"p4","sni":"f.example"}
 ]`
 
-// TestContainerSpellingDoesNotChangeTheImport pins the invariant the 652-node
-// corpus broke: which container a caller wrapped a set of proxies in is a fact
-// about the container, not about the proxies. All four spellings of "here are
-// some mihomo proxies" must therefore import identically.
 func TestContainerSpellingDoesNotChangeTheImport(t *testing.T) {
 	var items []map[string]any
 	if err := json.Unmarshal([]byte(canonicalProxyCorpusForContainerUniformity), &items); err != nil {
@@ -87,7 +79,6 @@ func TestContainerSpellingDoesNotChangeTheImport(t *testing.T) {
 		{`JSON {"proxies": [...]}`, keyedJSON},
 		{"bare YAML sequence", bareYAML},
 		{"YAML proxies: document", keyedYAML},
-		// A subscription that base64s its whole body is the same subscription.
 		{"base64(bare JSON array)", wrap([]byte(canonicalProxyCorpusForContainerUniformity))},
 		{"base64(YAML proxies: document)", wrap(keyedYAML)},
 	}
@@ -100,9 +91,6 @@ func TestContainerSpellingDoesNotChangeTheImport(t *testing.T) {
 	}
 }
 
-// TestDialectObjectsInABareArrayStillReachTheMapping guards the other direction:
-// the canonical route must not swallow documents written in a dialect, whose
-// fields only survive because jsonServerMapping translates them.
 func TestDialectObjectsInABareArrayStillReachTheMapping(t *testing.T) {
 	const dialect = `[{"type":"ss","server":"g.example","server_port":8388,"method":"chacha20-ietf-poly1305",
 	  "password":"p5","remarks":"dialect node"}]`

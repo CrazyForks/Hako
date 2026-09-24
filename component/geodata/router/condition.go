@@ -176,16 +176,6 @@ func NewGeoIPMatcher(cidrList []*CIDR) (IPMatcher, error) {
 	return m, nil
 }
 
-// NewGeoIPMatcherFromCidrSet wraps a set that is already built.
-//
-// NewGeoIPMatcher above takes decoded source records and constructs the set from them,
-// which is the expensive half: on the shipped GeoIP.dat that path peaks at 130 MiB for one
-// country code. A compiled artifact restores the finished set directly, and this is the
-// seam that lets it become a matcher without the decode ever happening.
-//
-// count comes from the artifact rather than the set because it is the number of source
-// records the set was built from, which Merge has already collapsed and the set can no
-// longer report.
 func NewGeoIPMatcherFromCidrSet(set *cidr.IpCidrSet, count int) (IPMatcher, error) {
 	if set == nil {
 		return nil, fmt.Errorf("nil cidr set")
@@ -205,23 +195,11 @@ func NewNotIpMatcherGroup(matcher IPMatcher) IPMatcher {
 	return notIPMatcher{matcher}
 }
 
-// ResidualDomain is a category entry a compact domain set cannot hold.
-//
-// A succinct set answers suffix and exact questions. A category may also carry
-// keyword and regex entries — geosite:private has one regex among 131 entries —
-// and dropping them to make the set writable would quietly change what the
-// category matches. They are small enough to carry alongside verbatim.
 type ResidualDomain struct {
 	Type  Domain_Type
 	Value string
 }
 
-// NewSuccinctMatcherFromParts assembles a matcher from an already-built set and
-// the entries that did not fit in it.
-//
-// The other constructor takes source domains and builds the set, which costs an
-// order of magnitude more memory than the set itself; this one exists so a
-// compiled artifact can be used without paying that again.
 func NewSuccinctMatcherFromParts(
 	set *trie.DomainSet, count int, residual []ResidualDomain,
 ) (DomainMatcher, error) {
@@ -240,14 +218,6 @@ func NewSuccinctMatcherFromParts(
 	return matcher, nil
 }
 
-// CompileDomains splits a category into the part a compact set can hold and the
-// part it cannot, without building a matcher.
-//
-// Compiling is deliberately not "load the matcher and take its set": that route
-// goes through the loader's cache, and a process whose preflight ran as the
-// tunnel would — which is exactly what the App does — has an empty matcher
-// cached for every category it declined to decode. Compiling from that cache
-// produced an artifact holding nothing and reported success.
 func CompileDomains(domains []*Domain) (*trie.DomainSet, int, []ResidualDomain, error) {
 	tree := trie.New[struct{}]()
 	var residual []ResidualDomain
@@ -268,19 +238,6 @@ func CompileDomains(domains []*Domain) (*trie.DomainSet, int, []ResidualDomain, 
 	return tree.NewDomainSet(), len(domains), residual, nil
 }
 
-// A resource this runtime could not build, kept distinct from a resource that is genuinely
-// empty.
-//
-// The distinction is not cosmetic. A degraded matcher that merely returns false gets
-// wrapped by NewNotIpMatcherGroup / NewNotDomainMatcherGroup when the configuration wrote
-// a leading '!', and !false is true for EVERYTHING -- so `GEOIP,!CN,PROXY` with cn
-// unavailable stops being "cn does not match" and becomes "every address matches", killing
-// every rule below it and sending domestic traffic through the proxy. Same shape for
-// dns.fallback-filter.geoip, where the filter computes !Match and would judge every answer
-// polluted.
-//
-// Callers ask Unavailable() before negating, so an unavailable resource stays inert in
-// both spellings.
 type unavailableIPMatcher struct{}
 
 func (unavailableIPMatcher) Match(netip.Addr) bool { return false }
@@ -295,8 +252,6 @@ func (unavailableDomainMatcher) Count() int              { return 0 }
 
 func NewUnavailableDomainMatcher() DomainMatcher { return unavailableDomainMatcher{} }
 
-// Unavailable reports whether a matcher stands for a resource that could not be built, so
-// a caller knows not to negate it.
 func Unavailable(matcher any) bool {
 	switch matcher.(type) {
 	case unavailableIPMatcher, unavailableDomainMatcher:

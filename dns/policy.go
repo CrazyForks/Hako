@@ -7,10 +7,6 @@ import (
 
 type dnsPolicy interface {
 	Match(domain string) []dnsClient
-	// Clients returns every client this policy can hand out, so lifecycle operations
-	// can reach them. Without it Resolver.ResetConnection and ClearCache walked only
-	// main/fallback/default and silently skipped every policy client -- a hole that
-	// cannot be seen from the resolution path, because Match is all resolution needs.
 	Clients() []dnsClient
 }
 
@@ -22,15 +18,6 @@ func (p domainTriePolicy) Clients() []dnsClient {
 	if p.DomainTrie == nil {
 		return nil
 	}
-	// Enumerates every client the trie holds, duplicates included: one insert can occupy
-	// two nodes ("+.example.com" stores its data under both the exact base and the
-	// dot-wildcard child, which the trie's own Foreach test records), and one name server
-	// is commonly shared across several policy entries. Deduplication is not done here,
-	// on purpose: it belongs to the one caller, Resolver.ResetConnection, which dedups by
-	// RAW transport identity across main, fallback and every policy at once -- and which
-	// knows that a client can be an uncomparable wrapper value that must never be a map
-	// key. This function used to key a map[dnsClient] on the values it found and panicked
-	// on the first "#disable-ipv6=true" policy client.
 	var clients []dnsClient
 	p.DomainTrie.Foreach(func(domain string, data []dnsClient) bool {
 		clients = append(clients, data...)

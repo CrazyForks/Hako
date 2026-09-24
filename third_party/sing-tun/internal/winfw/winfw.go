@@ -14,7 +14,6 @@ import (
 	"github.com/go-ole/go-ole/oleutil"
 )
 
-// Firewall related API constants.
 const (
 	NET_FW_IP_PROTOCOL_TCP    = 6
 	NET_FW_IP_PROTOCOL_UDP    = 17
@@ -28,10 +27,6 @@ const (
 	NET_FW_ACTION_BLOCK = 0
 	NET_FW_ACTION_ALLOW = 1
 
-	// NET_FW_PROFILE2_CURRENT is not real API constant, just helper used in FW functions.
-	// It can mean one profile or multiple (even all) profiles. It depends on which profiles
-	// are currently in use. Every active interface can have it's own profile. F.e.: Public for Wifi,
-	// Domain for VPN, and Private for LAN. All at the same time.
 	NET_FW_PROFILE2_CURRENT = 0
 	NET_FW_PROFILE2_DOMAIN  = 1
 	NET_FW_PROFILE2_PRIVATE = 2
@@ -39,48 +34,28 @@ const (
 	NET_FW_PROFILE2_ALL     = 2147483647
 )
 
-// Firewall Rule Groups
-// Use this magical strings instead of group names. It will work on all language Windows versions.
-// You can find more string locations here:
-// https://windows10dll.nirsoft.net/firewallapi_dll.html
 const (
 	NET_FW_FILE_AND_PRINTER_SHARING = "@FirewallAPI.dll,-28502"
 	NET_FW_REMOTE_DESKTOP           = "@FirewallAPI.dll,-28752"
 )
 
-// FWRule represents Firewall Rule.
 type FWRule struct {
 	Name, Description, ApplicationName, ServiceName string
 	LocalPorts, RemotePorts                         string
-	// LocalAddresses, RemoteAddresses are always returned with netmask, f.e.:
-	//   `10.10.1.1/255.255.255.0`
 	LocalAddresses, RemoteAddresses string
-	// ICMPTypesAndCodes is string. You can find define multiple codes separated by ":" (colon).
-	// Types are listed here:
-	// https://www.iana.org/assignments/icmp-parameters/icmp-parameters.xhtml
-	// So to allow ping set it to:
-	//   "0"
 	ICMPTypesAndCodes string
 	Grouping          string
-	// InterfaceTypes can be:
-	//   "LAN", "Wireless", "RemoteAccess", "All"
-	// You can add multiple deviding with comma:
-	//   "LAN, Wireless"
 	InterfaceTypes                        string
 	Protocol, Direction, Action, Profiles int32
 	Enabled, EdgeTraversal                bool
 }
 
-// FirewallRuleAddAdvanced allows to modify almost all available FW Rule parameters.
-// You probably do not want to use this, as function allows to create any rule, even opening all ports
-// in given profile. So use with caution.
 func FirewallRuleAddAdvanced(rule FWRule) (bool, error) {
 	return firewallRuleAdd(rule.Name, rule.Description, rule.Grouping, rule.ApplicationName, rule.ServiceName,
 		rule.LocalPorts, rule.RemotePorts, rule.LocalAddresses, rule.RemoteAddresses, rule.ICMPTypesAndCodes,
 		rule.Protocol, rule.Direction, rule.Action, rule.Profiles, rule.Enabled, rule.EdgeTraversal)
 }
 
-// firewallRuleAdd is universal function to add all kinds of rules.
 func firewallRuleAdd(name, description, group, appPath, serviceName, ports, remotePorts, localAddresses, remoteAddresses, icmpTypes string, protocol, direction, action, profile int32, enabled, edgeTraversal bool) (bool, error) {
 	if name == "" {
 		return false, fmt.Errorf("empty FW Rule name, name is mandatory")
@@ -245,9 +220,6 @@ func FirewallRuleExistsByName(rules *ole.IDispatch, name string) (bool, error) {
 	return false, nil
 }
 
-// firewallAPIInit initialize common fw api.
-// then:
-// dispatch firewallAPIRelease(u, fwp)
 func firewallAPIInit() (*ole.IUnknown, *ole.IDispatch, error) {
 	err := ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED)
 	if err != nil {
@@ -268,7 +240,6 @@ func firewallAPIInit() (*ole.IUnknown, *ole.IDispatch, error) {
 	return unknown, fwPolicy, nil
 }
 
-// firewallAPIRelease cleans memory.
 func firewallAPIRelease(u *ole.IUnknown, fwp *ole.IDispatch) {
 	fwp.Release()
 	u.Release()

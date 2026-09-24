@@ -47,8 +47,6 @@ func AddCertificate(certificate string) error {
 }
 
 func initializeCertPool() {
-	// The starting pool now depends on the selected store (store.go, ported from sing-box's
-	// newBasePool). With no selection this is byte-for-byte the previous behaviour.
 	pool, appendEmbedded := basePool(selectedStore)
 	globalCertPool = pool
 	if appendEmbedded {

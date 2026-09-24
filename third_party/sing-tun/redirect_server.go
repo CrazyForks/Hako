@@ -38,7 +38,6 @@ func newRedirectServer(ctx context.Context, handler Handler, logger logger.Logge
 
 func (s *redirectServer) Start() error {
 	var listenConfig net.ListenConfig
-	// listenConfig.KeepAlive = C.TCPKeepAliveInitial
 	listenConfig.KeepAlive = 10 * time.Minute
 	listener, err := listenConfig.Listen(s.ctx, M.NetworkFromNetAddr("tcp", s.listenAddr), M.SocksaddrFrom(s.listenAddr, 0).String())
 	if err != nil {
@@ -59,8 +58,6 @@ func (s *redirectServer) loopIn() {
 		conn, err := s.listener.AcceptTCP()
 		if err != nil {
 			var netError net.Error
-			//goland:noinspection GoDeprecation
-			//nolint:staticcheck
 			if errors.As(err, &netError) && netError.Temporary() {
 				s.logger.Error(err)
 				continue

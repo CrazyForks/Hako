@@ -10,11 +10,6 @@ import (
 	P "github.com/TokenPLS/Hako/constant/provider"
 )
 
-// Compiled geosite categories claim to be rule sets in the same binary layout,
-// which is only worth claiming if this reader accepts them. Written as a test
-// rather than a comment because the layout lives in two files now, and a field
-// added to one and not the other would otherwise surface as an unreadable cache
-// on a reader's device.
 func TestCompiledGeositeArtifactIsReadableAsARuleSet(t *testing.T) {
 	tree := trie.New[struct{}]()
 	for _, domain := range []string{"+.example.com", "+.qq.com", "full.example.org"} {

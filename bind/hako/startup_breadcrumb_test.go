@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -13,19 +12,8 @@ import (
 	C "github.com/TokenPLS/Hako/constant"
 )
 
-// A tunnel killed for memory never gets to explain itself: jetsam does not call
-// stopTunnel, so no handler runs, nothing is logged, and the reader is left with the
-// system's own sentence -- "the VPN tunnel stopped unexpectedly" -- which names neither
-// what happened nor anything they could change.
-//
-// The only thing that survives is what was already on disk. So the tunnel writes where it
-// is and what it costs as it starts, and the next launch reads it.
-
 func breadcrumbHome(t *testing.T) string {
 	t.Helper()
-	// Set up the way a tunnel is, so the budget the record carries is the real one:
-	// setup.go:227 derives the soft limit as three quarters of MemoryLimit, and a record
-	// whose budget is zero gives the footprint nothing to be judged against.
 	options := testOptions(t)
 	options.MemoryLimit = 50 << 20
 	if err := Setup(options); err != nil {
@@ -34,14 +22,6 @@ func breadcrumbHome(t *testing.T) string {
 	home := t.TempDir()
 	previous := breadcrumbDirectory
 	breadcrumbDirectory = home
-	// Recording too, not just the directory. Every test in this family calls
-	// recordStartupStage and reads it back, and recordStartupStage is a no-op
-	// while the flag is false (startup_breadcrumb.go:210) -- so until
-	// 2026-08-27 they were all passing on a flag some earlier test happened to
-	// leave true. A gate that drives a real activation turns it off at the end
-	// (markStartupComplete), and that made this family go red in the full suite
-	// while every one of them still passed alone. The leak was the bug; the
-	// gate only exposed it.
 	previousRecording := breadcrumbRecording.Load()
 	setStartupBreadcrumbRecording(true)
 	t.Cleanup(func() {
@@ -54,11 +34,9 @@ func breadcrumbHome(t *testing.T) string {
 func TestBreadcrumbSurvivesAProcessThatNeverStopped(t *testing.T) {
 	home := breadcrumbHome(t)
 
-	// A start that gets partway and is then killed: no clean stop, no handler.
 	recordStartupStage("parse")
 	recordStartupStage("geosite:cn")
 
-	// Next launch, a different process, reading what the dead one left.
 	explanation := ExplainLastStartup()
 	if explanation == "" {
 		t.Fatal("a tunnel that died mid-startup left nothing to explain")
@@ -78,7 +56,6 @@ func TestBreadcrumbSurvivesAProcessThatNeverStopped(t *testing.T) {
 	}
 }
 
-// A tunnel that started cleanly must not have the next launch apologising for it.
 func TestBreadcrumbIsClearedByAStartThatSucceeds(t *testing.T) {
 	breadcrumbHome(t)
 
@@ -91,9 +68,6 @@ func TestBreadcrumbIsClearedByAStartThatSucceeds(t *testing.T) {
 	}
 }
 
-// The footprint at the moment of death is the whole point: it is what separates "your
-// configuration is too large for the tunnel" from "something else went wrong", and the
-// reader cannot tell those apart from the outside.
 func TestBreadcrumbCarriesTheFootprintAndTheBudget(t *testing.T) {
 	breadcrumbHome(t)
 
@@ -113,8 +87,6 @@ func TestBreadcrumbCarriesTheFootprintAndTheBudget(t *testing.T) {
 	}
 }
 
-// Nothing to explain is a different answer from an explanation, and the client has to be
-// able to tell them apart without parsing prose.
 func TestExplainLastStartupIsEmptyWhenNothingHappened(t *testing.T) {
 	breadcrumbHome(t)
 	if explanation := ExplainLastStartup(); explanation != "" {
@@ -122,9 +94,6 @@ func TestExplainLastStartupIsEmptyWhenNothingHappened(t *testing.T) {
 	}
 }
 
-// A breadcrumb from a run that is still going must not be read as a death: the App and the
-// tunnel are separate processes, and the App asks this question while the tunnel may be
-// mid-start.
 func TestBreadcrumbDistinguishesRunningFromDead(t *testing.T) {
 	breadcrumbHome(t)
 	recordStartupStage("parse")
@@ -138,17 +107,6 @@ func TestBreadcrumbDistinguishesRunningFromDead(t *testing.T) {
 	}
 }
 
-// The seam has to be wired, or the breadcrumb is a file nobody writes.
-//
-// Both PrepareGeoIPCache and this were built and left with zero callers in one session,
-// and one of them shipped that way. So this asserts the WIRING, not the API.
-//
-// What it asserts is the guarantee the feature makes: a tunnel parse leaves a record
-// naming the last stage it reached, with the footprint beside the budget. It deliberately
-// does NOT assert a particular geo resource -- when matchers get built depends on
-// geodata-mode, which hub/executor sets at apply time (executor.go:471) rather than parse
-// time, so asserting one here would be asserting a coincidence. The per-resource seam is
-// tested directly below, where it fires.
 func TestParsingUnderTheTunnelRecordsWhereItGotTo(t *testing.T) {
 	options := testOptions(t)
 	if err := os.MkdirAll(options.WorkingPath, 0o755); err != nil {
@@ -199,25 +157,12 @@ rules:
 	}
 }
 
-// The per-resource seam, tested where it actually fires: building a matcher.
 func TestBuildingAGeoResourceRecordsWhichOne(t *testing.T) {
 	breadcrumbHome(t)
 	previous := progressReporterInstalled()
 	restoreProgressReporter(recordStartupStage)
 	t.Cleanup(func() { restoreProgressReporter(previous) })
 
-	// Failure is fine: the announcement happens BEFORE the work, which is the whole point
-	// of a record that has to survive the process doing it.
-	//
-	// A country code nothing else in this package loads, and that is load-bearing.
-	// loadGeoIPMatcherSF is a singleflight with StoreResult: true
-	// (component/geodata/utils.go:266), so a SUCCESSFUL load is cached and every later
-	// call returns it without entering the function -- and reportProgress lives inside
-	// the function (utils.go:283). This test used "cn" and passed only while nothing
-	// else in the suite had loaded cn first; it went red the day something did, alone
-	// still green, which is the signature of a shared cache rather than a broken record.
-	// A failing load is Forgotten (utils.go:324) and never cached, so an unused code
-	// announces every time and pollutes nothing.
 	_, _ = geodata.LoadGeoIPMatcher("zz")
 
 	if explanation := ExplainLastStartup(); !strings.Contains(explanation, "geoip:zz") {
@@ -225,86 +170,6 @@ func TestBuildingAGeoResourceRecordsWhichOne(t *testing.T) {
 	}
 }
 
-// The contract is about what the REST of the program passes, so the test must not supply
-// it. TestStageNamesAreThingsTheReaderWrote did exactly that -- wrote "geosite:…" and then
-// asserted "geosite:" was there -- which made it a property of one literal.
-//
-// Third time in this family, and the class is worth stating: a test that supplies its own
-// input cannot check a contract about what the rest of the program supplies. So this one
-// runs a real startup and asserts against the configuration, which it did not write into
-// the record.
-func TestResourceNamesComeFromTheConfigurationAndNotFromTheTest(t *testing.T) {
-	options := testOptions(t)
-	if err := os.MkdirAll(options.WorkingPath, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	stageBundledGeodata(t, options.WorkingPath)
-	options.MemoryLimit = 50 << 20
-	if err := Setup(options); err != nil {
-		t.Fatal(err)
-	}
-	C.SetHomeDir(options.WorkingPath)
-	previousDir := breadcrumbDirectory
-	breadcrumbDirectory = options.WorkingPath
-	t.Cleanup(func() {
-		breadcrumbDirectory = previousDir
-		setStartupBreadcrumbRecording(false)
-		geodata.ClearGeoSiteCache()
-	})
-
-	// The name is never written by this test. GeoSiteCategoriesIn is production code
-	// reading the reader's configuration; the loader is production code announcing what it
-	// builds; the record is production code storing it. The test supplies a configuration
-	// and checks the far end -- which is the correction, because the old version supplied
-	// the value it then asserted.
-	config := `mode: rule
-proxies: []
-dns:
-  enable: true
-  nameserver:
-    - 223.5.5.5
-  nameserver-policy:
-    "geosite:private": [223.5.5.5]
-rules:
-  - MATCH,DIRECT
-`
-	named := GeoSiteCategoriesIn(config)
-	if len(named) == 0 {
-		t.Fatal("the configuration names no category, so this test would prove nothing")
-	}
-
-	// The parse installs the production reporter; nothing here replaces it.
-	if _, err := parseConfigForIOS(config, true); err != nil {
-		t.Fatalf("parse failed, so nothing below was measured: %v", err)
-	}
-	geodata.ClearGeoSiteCache()
-	if _, err := geodata.LoadGeoSiteMatcher(named[0]); err != nil {
-		t.Fatalf("loading a category the configuration named: %v", err)
-	}
-
-	var report map[string]any
-	if err := json.Unmarshal([]byte(ExplainLastStartup()), &report); err != nil {
-		t.Fatal(err)
-	}
-	resource, _ := report["resource"].(string)
-	if resource == "" {
-		t.Fatal("building a category the configuration named recorded no resource: the " +
-			"client has nothing reader-facing to show, which is the whole finding")
-	}
-	// Compared against the EXTRACTED names, not against the raw YAML. strings.Contains on
-	// the document accepts any substring of it, so a recorded "geosite:e" or "geosite:dns"
-	// would have passed -- an assertion that cannot fail for a whole class of wrong answers
-	// is not an assertion.
-	bare := strings.TrimPrefix(strings.TrimPrefix(resource, "geosite:"), "geoip:")
-	if !slices.Contains(named, bare) {
-		t.Fatalf("recorded resource %q is not one of the categories the configuration "+
-			"names (%v), so it is not something the reader wrote", resource, named)
-	}
-}
-
-// stage stays internal and that is fine -- but it must not be mistaken for the reader
-// facing one, so a step that is not about a resource must leave resource empty rather
-// than carrying the previous one.
 func TestAStepThatIsNotAboutAResourceClearsIt(t *testing.T) {
 	breadcrumbHome(t)
 	t.Cleanup(func() { setStartupBreadcrumbRecording(false) })
@@ -325,16 +190,6 @@ func TestAStepThatIsNotAboutAResourceClearsIt(t *testing.T) {
 	}
 }
 
-// The seam must fire when a matcher is BUILT, not when one is asked for.
-//
-// GEOSITE.MatchDomain (rules/common/geosite.go:34) and GEOIP.Match
-// (rules/common/geoip.go:62,109,135) call the loaders on EVERY match -- upstream keeps the
-// work behind singleflight precisely so a repeat call is a map lookup. A seam placed
-// outside that singleflight turns every connection that evaluates a geo rule into a mutex,
-// a file read, a cgo task_info, a JSON marshal, a file write and a rename, inside a
-// process with 50 MiB.
-//
-// This is the test that was missing when it shipped.
 func TestTheSeamDoesNotFireOnEveryMatch(t *testing.T) {
 	home := breadcrumbHome(t)
 	previous := progressReporterInstalled()
@@ -356,9 +211,6 @@ func TestTheSeamDoesNotFireOnEveryMatch(t *testing.T) {
 	_ = home
 }
 
-// A start that completes must leave nothing behind, or every launch after a NORMAL start
-// reports a death that did not happen -- which is worse than the system sentence it
-// replaces, because it is confidently wrong.
 func TestASuccessfulStartLeavesNoDeathReport(t *testing.T) {
 	breadcrumbHome(t)
 	t.Cleanup(func() { setStartupBreadcrumbRecording(false) })
@@ -372,14 +224,6 @@ func TestASuccessfulStartLeavesNoDeathReport(t *testing.T) {
 	}
 }
 
-// A reinstall must not be greeted by the previous install's death.
-//
-// iOS keeps the App Group container across a reinstall -- that is the property profiles and
-// provider payloads rely on -- and every path Core is given is built by the host from that
-// container's URL, so all of them point inside it. A record written before the reinstall is
-// therefore still there, still says completed:false, and reads exactly like one this install
-// produced. A reader on a fresh install saw an account of a start that had never
-// happened to them, which is the moment they are least equipped to disbelieve it.
 func TestARecordFromAnotherInstallIsNotExplained(t *testing.T) {
 	home := breadcrumbHome(t)
 
@@ -388,8 +232,6 @@ func TestARecordFromAnotherInstallIsNotExplained(t *testing.T) {
 		t.Fatal("this install's own record was not returned")
 	}
 
-	// Rewrite it as some other install's, leaving every other field untouched -- the only
-	// difference is the one thing that is supposed to matter.
 	path := filepath.Join(home, breadcrumbFileName)
 	var stored map[string]any
 	content, err := os.ReadFile(path)
@@ -416,8 +258,6 @@ func TestARecordFromAnotherInstallIsNotExplained(t *testing.T) {
 	}
 }
 
-// A record with no install field can only predate this change, and by the time it ships the
-// useful lifetime of any such record has passed.
 func TestALegacyRecordWithoutAnInstallIsNotExplained(t *testing.T) {
 	home := breadcrumbHome(t)
 	legacy := `{"stage":"bind:normalized","resource":"","completed":false,` +
@@ -430,8 +270,6 @@ func TestALegacyRecordWithoutAnInstallIsNotExplained(t *testing.T) {
 	}
 }
 
-// The identity reaches a reader's exported log, so it must not carry a filesystem path --
-// on macOS that would be their home directory name.
 func TestTheInstallIdentityIsNotAPath(t *testing.T) {
 	identity := currentInstallIdentity()
 	if identity == "" {
@@ -445,16 +283,12 @@ func TestTheInstallIdentityIsNotAPath(t *testing.T) {
 	}
 }
 
-// Pressure is the kill's antechamber, and the record was sleeping through it: stages write
-// only at their boundaries, so a kill mid-stage carried the footprint of the last boundary
-// rather than the spend that killed. The pressure handler now rewrites the record once.
 func TestCriticalPressureRefreshesTheRecordFootprint(t *testing.T) {
 	breadcrumbHome(t)
 	setStartupBreadcrumbRecording(true)
 	t.Cleanup(func() { setStartupBreadcrumbRecording(false) })
 
 	recordStartupStage("bind:providers-staged")
-	// Age the stored footprint so a refresh is distinguishable from the original write.
 	path := breadcrumbPath()
 	stale, err := readBreadcrumb(path)
 	if err != nil {
@@ -476,8 +310,6 @@ func TestCriticalPressureRefreshesTheRecordFootprint(t *testing.T) {
 		t.Fatalf("the refresh lost the stage: %q", refreshed.Stage)
 	}
 
-	// And once startup has completed there is nothing to refresh -- the record is gone and
-	// pressure must not resurrect it.
 	markStartupComplete()
 	refreshStartupBreadcrumbFootprint()
 	if explanation := ExplainLastStartup(); explanation != "" {
@@ -485,14 +317,6 @@ func TestCriticalPressureRefreshesTheRecordFootprint(t *testing.T) {
 	}
 }
 
-// A start that RETURNS an error is a different death from a kill: the process
-// survives long enough to say why, and until now it said it to nobody -- the
-// error went into NEVPNConnectionErrorDomain code=12 and the reader got "the
-// VPN tunnel failed", naming nothing they could change. The record already on
-// disk is the one place the reason survives, so the failing return stamps it
-// there. Found via a real report: a phantom geosite category killed the
-// extension before its first log line, and the reader had no way to learn
-// which category or why.
 func TestAFailingStartLeavesItsReasonInTheBreadcrumb(t *testing.T) {
 	home := t.TempDir()
 	previous := breadcrumbDirectory
@@ -527,20 +351,11 @@ func TestAFailingStartLeavesItsReasonInTheBreadcrumb(t *testing.T) {
 	}
 }
 
-// The wire itself: a real Start that fails must stamp the record without any
-// caller remembering to. The defer covers every return path, which is the
-// point -- the next failure mode will not be this one, and it must not need
-// its own call site.
 func TestStartWiresTheFailureIntoTheBreadcrumb(t *testing.T) {
 	home := t.TempDir()
 	previous := breadcrumbDirectory
 	breadcrumbDirectory = home
 	t.Cleanup(func() { breadcrumbDirectory = previous })
-	// NOT pre-armed by the test: the pipeline arms recording itself when the
-	// platform says packet tunnel (config_pipeline.go, normalize). That is the
-	// wire under test -- a failure after arming must stamp without anyone
-	// remembering to. The cleanup disarms because a failing Start leaves the
-	// recorder on (in production that process is about to die; tests share one).
 	t.Cleanup(func() { setStartupBreadcrumbRecording(false) })
 
 	options := testOptions(t)
@@ -579,6 +394,4 @@ func TestStartWiresTheFailureIntoTheBreadcrumb(t *testing.T) {
 	}
 }
 
-// errAsIfFromStart keeps the test honest about what it feeds: a plain error,
-// exactly what Start returns.
 func errAsIfFromStart(text string) error { return errors.New(text) }

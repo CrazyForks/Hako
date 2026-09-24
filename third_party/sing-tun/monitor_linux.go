@@ -37,7 +37,6 @@ func NewNetworkUpdateMonitor(logger logger.Logger) (NetworkUpdateMonitor, error)
 		close:       make(chan struct{}),
 		logger:      logger,
 	}
-	// check is netlink banned by google
 	if runtime.GOOS == "android" {
 		netlinkSocket, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_DGRAM, unix.NETLINK_ROUTE)
 		if err != nil {

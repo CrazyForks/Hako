@@ -326,9 +326,6 @@ rules:
 		t.Fatal("runtime parser rejection did not atomically restore the previous provider")
 	}
 
-	// The error names the provider it could not find (2026-08-21 ruling,
-	// ). It used to be scrubbed of that name, which left "a provider was
-	// rejected" and no way to tell which one.
 	unknownName := "private-provider-name"
 	if err := client.SideUpdateProxyProvider(unknownName, updatedProxy); err == nil || !strings.Contains(err.Error(), unknownName) {
 		t.Fatalf("the error must name the provider it rejected: %v", err)
@@ -355,10 +352,6 @@ rules:
 	if got := tunnel.RuleProviders()["controlled-rule"].Count(); got != 3 {
 		t.Fatalf("reloaded rule provider count = %d, want 3", got)
 	}
-	// The staged directory is persistent now: Reload reuses it instead of
-	// building a sibling and deleting the old one. What must hold is that the
-	// same directory serves both generations and the parent accumulates no
-	// per-start litter.
 	if service.providerRuntime.directory != oldRuntimeDirectory {
 		t.Fatalf("Reload abandoned the staged directory: %q -> %q",
 			oldRuntimeDirectory, service.providerRuntime.directory)
@@ -404,9 +397,6 @@ rules:
 	if err := service.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// Close releases the service's reference and nothing else: the staged
-	// directory surviving Close is the whole point of the persistent cache --
-	// the next start reuses it instead of re-reading fifty-six files.
 	if _, err := os.Stat(runtimeDirectory); err != nil {
 		t.Fatalf("Close deleted the staged runtime cache: %v", err)
 	}
@@ -441,9 +431,6 @@ rules:
 	if service.providerRuntime != nil {
 		t.Fatal("failed Start published a provider runtime")
 	}
-	// The persistent staged directory may exist -- it is the cache root, not
-	// litter -- but a start that failed must publish nothing reusable: no
-	// staged files, no manifest recording products that were never blessed.
 	parent := filepath.Join(options.WorkingPath, providerRuntimeDirectoryName)
 	entries, err := os.ReadDir(parent)
 	if err != nil && !os.IsNotExist(err) {
@@ -485,26 +472,6 @@ func TestProviderSideUpdateRejectsInvalidClientInputs(t *testing.T) {
 	}
 }
 
-// One rule provider whose bytes this core cannot read must not refuse the whole
-// configuration. Upstream loads providers with hub/executor/executor.go:318-338,
-// which calls Initial() and on failure does nothing but
-// `log.Errorln("initial rule provider %s error: %v")` before moving to the next
-// one -- the config starts and that one rule set is empty. Nothing about the
-// failure is platform-relevant either: an unreadable rule set costs no memory,
-// spawns nothing, downloads nothing (it is already a pre-staged file provider)
-// and leaves no sandbox. Both questions answer no.
-//
-// The real report this reproduces (TestFlight user feedback, 2026-08-01): an
-// OpenClash export with 27 rule providers, of which exactly one pointed at a
-// GitHub /blob/ HTML page while declaring format: mrs. The HTML is served 200
-// with 384683 bytes of "<!DOCTYPE html>", so the MRS magic check fired and was
-// RIGHT -- and then took the other 26 rule sets down with it. The same config
-// runs in OpenClash.
-//
-// Note where the parse actually happens, because it is why this is safe:
-// ParseRuleProvider only builds a FileVehicle (rules/provider/parse.go:50) and
-// never reads the file, so staging bad bytes cannot fail ParseRawConfig. The
-// read is Initial()'s, on upstream's non-fatal path.
 func TestOneUnreadableRuleProviderDoesNotRefuseTheConfig(t *testing.T) {
 	options := testOptions(t)
 	if err := Setup(options); err != nil {
@@ -516,8 +483,6 @@ func TestOneUnreadableRuleProviderDoesNotRefuseTheConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A real MRS, written by the kernel's own writer rather than a hand-rolled
-	// byte string, so "good" means what the kernel means by it.
 	var mrs bytes.Buffer
 	if err := ruleprovider.ConvertToMrs([]byte("203.0.113.0/24\n"), P.IPCIDR, P.TextRule, &mrs); err != nil {
 		t.Fatal(err)
@@ -527,7 +492,6 @@ func TestOneUnreadableRuleProviderDoesNotRefuseTheConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The offender, in the exact shape reported: an HTML page declared as MRS.
 	broken := filepath.Join(options.WorkingPath, "broken.mrs")
 	html := append([]byte("<!DOCTYPE html>\n<html><head><title>ios_rule_script</title></head>\n"),
 		bytes.Repeat([]byte("<div>rule</div>\n"), 64)...)
@@ -571,7 +535,6 @@ rules:
 	}
 	t.Cleanup(func() { _ = service.Close() })
 
-	// The intact rule sets are all the way up, not merely staged.
 	providers := tunnel.RuleProviders()
 	for name, want := range map[string]int{"good-classical": 1, "good-mrs": 1} {
 		provider, ok := providers[name]
@@ -584,9 +547,6 @@ rules:
 		}
 	}
 
-	// The offender is still declared -- it is the kernel's job to fail it at
-	// Initial() and log, exactly as upstream does -- and its bytes were staged
-	// verbatim rather than swallowed, so the log names a real cause.
 	entry, staged := service.providerRuntime.entries[providerRuntimeKey("rule", "crypto-domain")]
 	if !staged {
 		t.Fatal("the unreadable provider was dropped from the runtime instead of staged")
@@ -603,16 +563,6 @@ rules:
 	}
 }
 
-// A schema-level defect is not a content-level one, and upstream draws the same
-// line: an unreadable FILE fails at Initial() and is warn-and-continue
-// (hub/executor/executor.go:318-338), but an unparseable behavior/format STRING
-// fails inside ParseRuleProvider (rules/provider/parse.go:34-41) during
-// config.ParseRawConfig, where parseRuleProviders returns the error and the
-// whole load stops (config/config.go:687-690, 1014-1027). Staging must keep
-// that split: tolerating a schema typo here does not make the config start --
-// it just replaces our contextual error with mihomo's bare one, after logging a
-// false "the configuration still starts". The adversarial review reproduced
-// exactly that with `behavior: clasical`.
 func TestRuleProviderSchemaTypoStaysFatalWithContext(t *testing.T) {
 	options := testOptions(t)
 	if err := Setup(options); err != nil {

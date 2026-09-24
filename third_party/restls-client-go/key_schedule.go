@@ -16,8 +16,6 @@ import (
 	"golang.org/x/crypto/hkdf"
 )
 
-// This file contains the functions necessary to compute the TLS 1.3 key
-// schedule. See RFC 8446, Section 7.
 
 const (
 	resumptionBinderLabel         = "res binder"
@@ -31,7 +29,6 @@ const (
 	trafficUpdateLabel            = "traffic upd"
 )
 
-// expandLabel implements HKDF-Expand-Label from RFC 8446, Section 7.1.
 func (c *cipherSuiteTLS13) expandLabel(secret []byte, label string, context []byte, length int) []byte {
 	var hkdfLabel cryptobyte.Builder
 	hkdfLabel.AddUint16(uint16(length))
@@ -44,18 +41,6 @@ func (c *cipherSuiteTLS13) expandLabel(secret []byte, label string, context []by
 	})
 	hkdfLabelBytes, err := hkdfLabel.Bytes()
 	if err != nil {
-		// Rather than calling BytesOrPanic, we explicitly handle this error, in
-		// order to provide a reasonable error message. It should be basically
-		// impossible for this to panic, and routing errors back through the
-		// tree rooted in this function is quite painful. The labels are fixed
-		// size, and the context is either a fixed-length computed hash, or
-		// parsed from a field which has the same length limitation. As such, an
-		// error here is likely to only be caused during development.
-		//
-		// NOTE: another reasonable approach here might be to return a
-		// randomized slice if we encounter an error, which would break the
-		// connection, but avoid panicking. This would perhaps be safer but
-		// significantly more confusing to users.
 		panic(fmt.Errorf("failed to construct HKDF label: %s", err))
 	}
 	out := make([]byte, length)
@@ -66,7 +51,6 @@ func (c *cipherSuiteTLS13) expandLabel(secret []byte, label string, context []by
 	return out
 }
 
-// deriveSecret implements Derive-Secret from RFC 8446, Section 7.1.
 func (c *cipherSuiteTLS13) deriveSecret(secret []byte, label string, transcript hash.Hash) []byte {
 	if transcript == nil {
 		transcript = c.hash.New()
@@ -74,7 +58,6 @@ func (c *cipherSuiteTLS13) deriveSecret(secret []byte, label string, transcript 
 	return c.expandLabel(secret, label, transcript.Sum(nil), c.hash.Size())
 }
 
-// extract implements HKDF-Extract with the cipher suite hash.
 func (c *cipherSuiteTLS13) extract(newSecret, currentSecret []byte) []byte {
 	if newSecret == nil {
 		newSecret = make([]byte, c.hash.Size())
@@ -82,22 +65,16 @@ func (c *cipherSuiteTLS13) extract(newSecret, currentSecret []byte) []byte {
 	return hkdf.Extract(c.hash.New, newSecret, currentSecret)
 }
 
-// nextTrafficSecret generates the next traffic secret, given the current one,
-// according to RFC 8446, Section 7.2.
 func (c *cipherSuiteTLS13) nextTrafficSecret(trafficSecret []byte) []byte {
 	return c.expandLabel(trafficSecret, trafficUpdateLabel, nil, c.hash.Size())
 }
 
-// trafficKey generates traffic keys according to RFC 8446, Section 7.3.
 func (c *cipherSuiteTLS13) trafficKey(trafficSecret []byte) (key, iv []byte) {
 	key = c.expandLabel(trafficSecret, "key", nil, c.keyLen)
 	iv = c.expandLabel(trafficSecret, "iv", nil, aeadNonceLength)
 	return
 }
 
-// finishedHash generates the Finished verify_data or PskBinderEntry according
-// to RFC 8446, Section 4.4.4. See sections 4.4 and 4.2.11.2 for the baseKey
-// selection.
 func (c *cipherSuiteTLS13) finishedHash(baseKey []byte, transcript hash.Hash) []byte {
 	finishedKey := c.expandLabel(baseKey, "finished", nil, c.hash.Size())
 	verifyData := hmac.New(c.hash.New, finishedKey)
@@ -105,8 +82,6 @@ func (c *cipherSuiteTLS13) finishedHash(baseKey []byte, transcript hash.Hash) []
 	return verifyData.Sum(nil)
 }
 
-// exportKeyingMaterial implements RFC5705 exporters for TLS 1.3 according to
-// RFC 8446, Section 7.5.
 func (c *cipherSuiteTLS13) exportKeyingMaterial(masterSecret []byte, transcript hash.Hash) func(string, []byte, int) ([]byte, error) {
 	expMasterSecret := c.deriveSecret(masterSecret, exporterLabel, transcript)
 	return func(label string, context []byte, length int) ([]byte, error) {
@@ -117,8 +92,6 @@ func (c *cipherSuiteTLS13) exportKeyingMaterial(masterSecret []byte, transcript 
 	}
 }
 
-// generateECDHEKey returns a PrivateKey that implements Diffie-Hellman
-// according to RFC 8446, Section 4.2.8.2.
 func generateECDHEKey(rand io.Reader, curveID CurveID) (*ecdh.PrivateKey, error) {
 	curve, ok := curveForCurveID(curveID)
 	if !ok {

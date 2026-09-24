@@ -5,18 +5,6 @@ import (
 	"testing"
 )
 
-// A rule that says its intent is honoured by expansion has to be backed by an expansion.
-//
-// honouredBy is a bit a client draws from -- "your routes are installed even though the core
-// ignores this field" -- and a bit that nothing checks is a sentence by another name. So for
-// every rule carrying it, feed FinalizeForIOS a configuration that names the set with an
-// inline ipcidr provider, and require the prefix to come out in the destination field the
-// rule's own prose names. If someone removes the expansion and leaves the mark, this is the
-// test that reds.
-//
-// The destination is derived from the field name rather than listed, so a third set added
-// upstream with the same convention is covered, and a convention change fails loudly instead
-// of silently skipping.
 func TestEveryHonouredByIsARealWrite(t *testing.T) {
 	honoured := 0
 	for _, rule := range deviationRules {
@@ -74,10 +62,6 @@ func TestEveryHonouredByIsARealWrite(t *testing.T) {
 	}
 }
 
-// The mark must not appear on a rule whose category says the core itself honours the field.
-// "forced" and "stripped" describe what the core did to the value; "honoured by expansion" is
-// specifically the case where the core did nothing and the app did it instead, which is only
-// ever true of an unavailable field.
 func TestHonouredByOnlyMarksUnavailableFields(t *testing.T) {
 	for _, rule := range deviationRules {
 		if rule.honouredBy != "" && rule.category != deviationUnavailable {
@@ -87,9 +71,6 @@ func TestHonouredByOnlyMarksUnavailableFields(t *testing.T) {
 	}
 }
 
-// The row carries honoured as data: the two route-set fields are ignored by the core and
-// expanded by the app, so the routes take effect, and a client must not word them as "does
-// nothing, remove it". Every other unavailable/stripped row stays false.
 func TestHonouredRowsSaySoAsData(t *testing.T) {
 	const document = "tun:\n  route-address-set:\n    - geoip-cn\n  route-exclude-address-set:\n    - lan\n  auto-redirect: true\nrules:\n  - UID,501,DIRECT\n  - MATCH,DIRECT\nproxies: []\n"
 	rows, err := collectConfigDeviations(document, runtimePolicyFor(runtimeProfileIOSPacketTunnel, true))

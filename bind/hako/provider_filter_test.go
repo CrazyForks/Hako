@@ -10,10 +10,6 @@ import (
 	"github.com/TokenPLS/Hako/tunnel"
 )
 
-// A proxy node this pinned core cannot parse. yaml.Unmarshal accepts any mapping
-// into ProxySchema.Proxies; adapter.ParseProxy rejects the unknown type. mihomo
-// applies the provider filter before ParseProxy, so a filtered-out node like this is
-// never parsed, and a filter-passing parse error is non-fatal at load.
 const unparsableProxyType = "hako-nonexistent-proto"
 
 func proxyPayload(nodes ...string) []byte {
@@ -27,10 +23,6 @@ func proxyPayload(nodes ...string) []byte {
 	return buffer.Bytes()
 }
 
-// Runtime staging (parseNodes=false) does NOT parse nodes: it defers parseability
-// and the provider filter to mihomo, so a node this core cannot parse never fails
-// staging. This is the over-constraint fix -- a pinned core lagging a subscription's
-// newest proxy type no longer rejects the whole provider.
 func TestSanitizeProxyProviderRuntimeDefersParseToMihomo(t *testing.T) {
 	payload := proxyPayload(
 		"{name: Good, type: direct}",
@@ -48,8 +40,6 @@ func TestSanitizeProxyProviderRuntimeDefersParseToMihomo(t *testing.T) {
 	}
 }
 
-// The standalone client pre-fetch check (parseNodes=true) still parses every node,
-// so a malformed subscription is rejected before the App stores it.
 func TestSanitizeProxyProviderStandaloneParseValidates(t *testing.T) {
 	payload := proxyPayload(
 		"{name: Good, type: direct}",
@@ -60,9 +50,6 @@ func TestSanitizeProxyProviderStandaloneParseValidates(t *testing.T) {
 	}
 }
 
-// The mandatory NE egress strip covers EVERY node even in runtime mode, because
-// mihomo -- not Hako -- decides which nodes the filter keeps, so any node left in the
-// copy could become the live node and must already be egress-safe.
 func TestSanitizeProxyProviderRuntimeStripsEgressOnEveryNode(t *testing.T) {
 	payload := proxyPayload(
 		"{name: A, type: direct}",
@@ -80,8 +67,6 @@ func TestSanitizeProxyProviderRuntimeStripsEgressOnEveryNode(t *testing.T) {
 	}
 }
 
-// A clean payload passes through byte-for-byte in runtime mode so staging can
-// hard-link the published revision instead of copying it.
 func TestSanitizeProxyProviderRuntimeCleanPassthrough(t *testing.T) {
 	payload := proxyPayload("{name: A, type: direct}", "{name: B, type: direct}")
 	prepared, stripped, err := sanitizeProxyProviderPayloadForIOS("", payload, false)
@@ -96,9 +81,6 @@ func TestSanitizeProxyProviderRuntimeCleanPassthrough(t *testing.T) {
 	}
 }
 
-// End-to-end: a file proxy-provider whose filter excludes a node this core cannot
-// parse must let Start succeed, with the surviving node loaded. mihomo applies
-// '^Good$' before ParseProxy, so the excluded node is never parsed.
 func TestProxyProviderFilterExcludesUnparsableNodeStarts(t *testing.T) {
 	options := testOptions(t)
 	if err := Setup(options); err != nil {
@@ -141,9 +123,6 @@ rules:
 	}
 }
 
-// End-to-end: a filter-PASSING node this core cannot parse is non-fatal, matching
-// upstream (hub/executor loadProvider logs the Initial() error and keeps running).
-// Start succeeds; the provider loads empty and the group falls back to DIRECT.
 func TestProxyProviderUnparsableNodeIsNonFatalAtStart(t *testing.T) {
 	options := testOptions(t)
 	if err := Setup(options); err != nil {

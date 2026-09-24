@@ -9,24 +9,7 @@ import (
 	"testing"
 )
 
-// The consuming lane selects which core log lines to show a user by the "[Apple" prefix. It
-// used to select by the word "stripped", and this batch added three notice families that do
-// not contain it -- kept owner-metadata rules, unguarded controllers, and the unauthenticated
-// LAN listener. That last one says "any device on any network this one joins can use it as a
-// proxy": the user configured an open proxy, the core warned, and the app dropped the warning
-// because the wording had changed.
-//
-// The lesson is not "always write [Apple". It is that the selection key was the wording, and
-// wording moves. So the prefix is the key now, and this gate keeps the key stable: it does not
-// judge what a prefix means, it just refuses to let a NEW one arrive unnoticed. A reader-facing
-// family that invents its own tag would otherwise reach nobody, silently, exactly as before.
 func TestNoNewLogPrefixArrivesUnnoticed(t *testing.T) {
-	// Prefix AND level, because the prefix alone is not enough to say "reader-facing" -- the
-	// consuming lane learned that by widening its selector to the prefix and pulling
-	// "[Apple] default path -> en0 (index=6 expensive=false)" into a user-visible screen. That
-	// line carries the marker and is instrumentation. Their selector is now prefix AND
-	// not-info, so a real notice written with Infoln would be dropped silently, and a gate
-	// that only recorded prefixes would stay green through it.
 	type usage struct {
 		levels string
 		note   string
@@ -52,10 +35,6 @@ func TestNoNewLogPrefixArrivesUnnoticed(t *testing.T) {
 			"selected by the app -- if a line here ever needs to reach a user, give it an " +
 			"[Apple prefix rather than widening the app's selector"},
 		"iOS|Errorln": {"Errorln", "developer-facing: staging and lifecycle failures"},
-		// No [iOS] Infoln left: the provider lines moved to [Apple] on 2026-08-22, after a
-		// tvOS run showed the core telling an Apple TV it was an iPhone. The Warnln and
-		// Errorln entries above stay because lifecycle and controller internals still carry
-		// the old prefix -- same falsehood, different files, not this change's scope.
 	}
 
 	prefix := regexp.MustCompile(`log\.(Warnln|Errorln|Infoln)\("\[([^\]]+)\]`)
@@ -99,16 +78,6 @@ func TestNoNewLogPrefixArrivesUnnoticed(t *testing.T) {
 	}
 }
 
-// Every reader-facing notice family, named individually.
-//
-// This is the half the enumeration gate above cannot do. That one catches a NEW prefix/level
-// pair; it cannot catch an existing notice being downgraded from Warnln to Infoln, because
-// "Apple|Infoln" is a legitimate pair already -- the physical-path trace and the geo summaries
-// use it. Mutation proved that directly: downgrading publishDeviations to Infoln left the
-// enumeration gate green, and the consuming lane would have dropped every deviation silently.
-//
-// So the families are listed by name and by emitting file. A family that stops emitting at
-// Warnln fails here with its own name.
 func TestEveryReaderFacingNoticeFamilyStaysAtWarnLevel(t *testing.T) {
 	for family, site := range map[string]struct{ file, needle string }{
 		"published deviations": {"config_deviations.go", "range deviations"},
@@ -145,11 +114,6 @@ func TestEveryReaderFacingNoticeFamilyStaysAtWarnLevel(t *testing.T) {
 		"unguarded controller":         "unguardedControllerNotices",
 		"unauthenticated LAN listener": "unauthenticatedLANListenerNotices",
 	} {
-		// The emitting loop, not a byte window around the name. A window wide enough to hold
-		// the loop is also wide enough to hold the NEIGHBOURING family's marker: when this was
-		// first written as index +/- 400 chars, removing the marker from this family still
-		// passed, because the family declared just above it still had one. Found by mutation,
-		// which is the only reason it is not still that way.
 		lines := strings.Split(body, "\n")
 		emitted := false
 		for lineIndex, line := range lines {

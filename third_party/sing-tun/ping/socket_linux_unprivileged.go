@@ -142,7 +142,6 @@ func (c *UnprivilegedConn) fetchResponse(conn *net.UDPConn, identifier uint16) {
 		} else {
 			icmpHdr := header.ICMPv6(buffer.Bytes())
 			icmpHdr.SetIdent(identifier)
-			// offload checksum here since we don't have source address here
 		}
 		select {
 		case c.receiveChan <- &unprivilegedResponse{

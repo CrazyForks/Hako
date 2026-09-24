@@ -30,12 +30,6 @@ func serveTrafficSnapshot(writer http.ResponseWriter, _ *http.Request) {
 }
 
 func serveMemorySnapshot(writer http.ResponseWriter, _ *http.Request) {
-	// `inuse` is upstream's shape: gopsutil RSS. On iOS that number carries
-	// shared and unreturned pages, so it neither matches what jetsam counts
-	// nor falls when the collector catches up -- the App's memory sentinel
-	// lost two device rounds to exactly that. `footprint` is the kernel's
-	// phys_footprint (task_info), the number the ~50 MiB wall is enforced
-	// against; it is additive, and absent where the platform reports none.
 	footprint := MemoryFootprint()
 	if footprint > 0 {
 		writeSnapshotJSON(writer, struct {

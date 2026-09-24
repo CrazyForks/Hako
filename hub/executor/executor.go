@@ -82,27 +82,10 @@ func ParseWithBytes(buf []byte) (*config.Config, error) {
 }
 
 // ApplyConfig dispatch configure to all parts without ExternalController
-// WaitBeforeTunAttach, when set, is called once per ApplyConfig, after the
-// providers have loaded and immediately before the listeners and the tun
-// attach. The iOS Network Extension uses it to join an OpenTun it dispatched
-// concurrently at config-finalized: Apple's setTunnelNetworkSettings costs
-// ~316ms during which this goroutine used to sit idle, so the provider loads
-// now run under it and this is where the file descriptor lands in cfg. Nil
-// everywhere else. The callback may panic to abort the apply; ApplyConfig's
-// caller owns the recovery.
 var WaitBeforeTunAttach func(cfg *config.Config)
 
-// StartupProbe mirrors config.StartupProbe for the apply side: nil except in
-// the iOS Network Extension while a Start is on the clock, where each step of
-// ApplyConfig reports its completion so a startup budget can be itemised.
 var StartupProbe func(step string)
 
-// SerializeProviderLoads makes loadProvider run providers one at a time instead of
-// concurrently. Nil-guarded like StartupProbe and set by the same owner: attribution by
-// footprint delta is only honest when nothing else allocates in the window, so the
-// per-provider probe lines below are worthless under concurrency -- each would carry its
-// neighbours' spend. The 94ms the concurrency buys is the price of a bill that
-// is actually itemized, and only paid while a bill is being collected.
 var SerializeProviderLoads func() bool
 
 func applyProbe(step string) {
@@ -146,13 +129,6 @@ func ApplyConfig(cfg *config.Config, force bool) {
 
 	tunnel.OnInnerLoading()
 
-	// Providers load before the listeners and the tun attach, not after. The
-	// loads touch only local files and the proxies/rules updated above; the
-	// attach is the one step that needs the platform's file descriptor. On
-	// iOS that descriptor is the product of setTunnelNetworkSettings, which
-	// runs concurrently with this stretch and is joined just below -- the
-	// 2026-08-05 trace had 94ms of provider loads queueing behind a 316ms
-	// system call neither needed the other for.
 	initInnerTcp()
 	applyProbe("inner-tcp")
 	loadProvider(cfg.Providers)
@@ -384,13 +360,6 @@ func loadProvider[T P.Provider](providers map[string]T) {
 			log.Infoln("Start initial provider %s", name)
 		}
 
-		// Named before it is built, because Initial is where a provider can end the
-		// process. A 4.7 MB domain rule-set was measured taking an iOS extension from
-		// 25 MiB to its 50 MiB ceiling inside this call -- the raw file, a pointer trie,
-		// a full copy of its domains and the succinct set are all live at once in there
-		// -- and the probe that used to be the only one fired after the return this
-		// never reaches. The pair also brackets the build for the memory bill: the
-		// delta between these two lines is this provider and nothing else.
 		switch pv.Type() {
 		case P.Proxy:
 			applyProbe("proxy-provider-begin:" + name)
@@ -400,8 +369,6 @@ func loadProvider[T P.Provider](providers map[string]T) {
 
 		if err := pv.Initial(); err != nil {
 			if errors.Is(err, resource.ErrRemoteFetchDeferred) {
-				// Not a failure: the Apple binding starts a remote provider with no
-				// local copy empty and downloads it in the background.
 				log.Infoln("initial %s provider %s deferred: it starts empty and loads in the background", pv.Type(), name)
 			} else {
 				switch pv.Type() {
@@ -412,11 +379,6 @@ func loadProvider[T P.Provider](providers map[string]T) {
 				}
 			}
 		}
-		// One line per provider, carrying its NAME: the aggregate probes above these
-		// (proxy-providers-loaded / rule-providers-loaded) attribute a 28-provider spend
-		// to one anonymous step, which is how +9.7 MiB got blamed on nodes that cost
-		// 0.27 MiB. Emitted after Initial so the delta from the previous line is this
-		// provider's build.
 		switch pv.Type() {
 		case P.Proxy:
 			applyProbe("proxy-provider:" + name)
@@ -425,8 +387,6 @@ func loadProvider[T P.Provider](providers map[string]T) {
 		}
 	}
 
-	// One at a time while a memory bill is being collected, so the probe line that
-	// follows each provider names that provider's spend and nobody else's.
 	loadConcurrency := concurrentCount
 	if SerializeProviderLoads != nil && SerializeProviderLoads() {
 		loadConcurrency = 1

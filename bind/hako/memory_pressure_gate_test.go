@@ -6,44 +6,7 @@ import (
 	"github.com/TokenPLS/Hako/tunnel/statistic"
 )
 
-// A memory-pressure NOTIFICATION must never close a tracked connection.
-//
-// The scope of that claim is the point. Upstream sheds too, just not from here -- see the
-// correction below.
-//
-// A critical pressure event is device-wide: it is raised by whatever the machine is doing,
-// most often another application, and XNU re-notifies roughly every 25 seconds for as long as
-// the episode lasts. handleMemoryPressure answered every one by closing every tracked
-// connection, killing every app's live session through the tunnel at once. At a typical
-// Extension footprint of ~18 MiB against a ~50 MiB budget that shed almost nothing, and each
-// app-side recovery then paid a fresh TCP connect and a full TLS handshake -- on Apple
-// platforms every handshake is an XPC round trip to trustd, so the teardown was a volume
-// multiplier on a separate defect.
-//
-// That was first narrowed to fire only when this task's own footprint was near its configured
-// budget, then removed entirely.
-//
-// CORRECTION to what this comment used to claim. sing-box's darwin pressure callback logs,
-// writes a throttled OOM draft, and notifies a timer -- it does not shed, and that is what
-// these tests pin. But sing-box DOES shed from a different trigger: its adaptive timer polls
-// memory itself, runs a three-state hysteresis machine, and on crossing into the triggered
-// state calls NetworkManager.ResetNetwork, whose first statement is connectionManager.CloseAll
-// (route/network.go). So "sing-box never closes connections" was wrong; it never closes them
-// in response to the OS notification.
-//
-// These tests therefore assert something narrower and still true: the NOTIFICATION path does
-// not shed. The threshold machine that would shed on measured evidence does not exist here
-// yet -- in MACOS-UPSTREAM-PARITY-TODO.md.
-//
-// These tests assert the ABSENCE of an action, which is worth nothing unless the probe would
-// actually observe that action. So the probe is registered with the real
-// statistic.DefaultManager -- the same registry the removed teardown walked -- and
-// TestTheProbeWouldSeeATeardown closes it through that registry to prove the observation
-// works.
 
-// pressureProbe is a statistic.Tracker that records whether it was closed. Only Close and ID
-// are reached by the registry walk; the embedded interface supplies the rest and would panic
-// if anything else were called, which is the desired outcome for an unexpected call.
 type pressureProbe struct {
 	statistic.Tracker
 	id     string
@@ -66,9 +29,6 @@ func newPressureProbe(t *testing.T, id string) *pressureProbe {
 }
 
 func TestMemoryPressureNeverClosesConnections(t *testing.T) {
-	// This gate pins the NOTIFICATION path alone. Shedding is the threshold
-	// machine's job and its default now; park the machine on an idle mode so
-	// the pokes below cannot reach a live one armed by an earlier test.
 	startPressureThresholdMonitor(0, pressureThresholdShedEnabled.Load())
 	cases := []struct {
 		name      string
@@ -113,7 +73,6 @@ func TestMemoryPressureNeverClosesConnections(t *testing.T) {
 			probe := newPressureProbe(t, "pressure-"+testCase.name)
 
 			before := memoryPressureEventCount.Load()
-			// Repeated notifications, because XNU re-notifies for the duration of the episode.
 			for i := 0; i < 4; i++ {
 				handleMemoryPressureWith(testCase.footprint, testCase.softLimit)
 			}
@@ -130,9 +89,6 @@ func TestMemoryPressureNeverClosesConnections(t *testing.T) {
 	}
 }
 
-// TestTheProbeWouldSeeATeardown keeps the tests above from going vacuous. If a future change
-// made the probe unreachable from statistic.DefaultManager -- a different registry, a Join
-// that silently drops it -- every no-teardown assertion would pass while proving nothing.
 func TestTheProbeWouldSeeATeardown(t *testing.T) {
 	probe := newPressureProbe(t, "pressure-observability")
 
@@ -155,9 +111,6 @@ func TestTheProbeWouldSeeATeardown(t *testing.T) {
 	}
 }
 
-// TestPressureHandlingSurvivesAnEvidenceWriteFailure: releasing pages is the one thing
-// pressure handling must always do, and it happens after the evidence write. A write that
-// fails -- unwritable container, full disk, or simply no Setup yet -- must not skip it.
 func TestPressureHandlingSurvivesAnEvidenceWriteFailure(t *testing.T) {
 	if err := RecordMemoryPressureEvidence(); err == nil {
 		t.Skip("evidence recording succeeds in this process, so there is no failure to arrange")

@@ -13,13 +13,6 @@ import (
 	C "github.com/TokenPLS/Hako/constant"
 )
 
-// A .dat download replaces the file only when a whole, in-bounds body arrives
-// behind a successful status.
-//
-// Upstream copied the response straight into the destination, checking neither
-// the status nor the length: a 502 with an HTML page became GeoSite.dat, an
-// endless body filled the disk, and because the open carried no O_TRUNC a
-// shorter file left the tail of the previous one behind.
 func TestADatDownloadOnlyReplacesTheFileOnAWholeGoodBody(t *testing.T) {
 	previous := []byte("the .dat that is already here, and is longer than what follows")
 
@@ -44,11 +37,6 @@ func TestADatDownloadOnlyReplacesTheFileOnAWholeGoodBody(t *testing.T) {
 	})
 
 	t.Run("a body that never ends leaves the file alone", func(t *testing.T) {
-		// Endless on purpose. A body that merely overshoots would be caught
-		// by the length check after the copy, which is not the thing being
-		// asserted: the READ has to stop, or an endpoint fills the disk for
-		// as long as the context allows. Against this handler a copy with no
-		// ceiling never returns.
 		const chunk = 1 << 20
 		block := make([]byte, chunk)
 		done := make(chan struct{})
@@ -95,8 +83,6 @@ func TestADatDownloadOnlyReplacesTheFileOnAWholeGoodBody(t *testing.T) {
 		if err := downloadToPath(server.URL, path); err != nil {
 			t.Fatal(err)
 		}
-		// Whole, not overlaid: the previous file was longer, and none of it
-		// may survive past the new contents.
 		got, err := os.ReadFile(path)
 		if err != nil || string(got) != string(fresh) {
 			t.Fatalf("read back %q, want %q (%v)", got, fresh, err)
@@ -117,8 +103,6 @@ func assertUnchanged(t *testing.T, path string, want []byte) {
 	}
 }
 
-// Nothing is left beside the destination: the staging file is removed on every
-// path that does not reach the rename.
 func assertNoLeftovers(t *testing.T, dir, expected string) {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -132,14 +116,9 @@ func assertNoLeftovers(t *testing.T, dir, expected string) {
 	}
 }
 
-// A loader that answers from the file's contents, so a test can decide what
-// counts as a valid .dat without pulling in component/geodata/standard --
-// which imports this package, so an in-package test cannot have it.
 type contentsLoader struct{}
 
 func (contentsLoader) LoadSiteByPath(filename, list string) ([]*router.Domain, error) {
-	// The name arrives as the asset's name, not a path -- the same way the
-	// standard loader receives it, and it resolves it against the home dir.
 	if filename == C.GeositeName {
 		filename = C.Path.GeoSite()
 	}
@@ -165,13 +144,6 @@ func (contentsLoader) LoadIPByBytes(geoipBytes []byte, country string) ([]*route
 	return nil, fmt.Errorf("not used")
 }
 
-// What arrives the second time is checked before it counts as initialised.
-//
-// Upstream removed an invalid GeoSite.dat, downloaded again, and set the flag
-// without looking at what came back. An endpoint serving the same bad file
-// twice therefore left a file marked good: the configuration failed later,
-// where its matcher loads, and no retry in the process could repair it,
-// because the flag suppressed the check that would have caught it.
 func TestASecondDownloadIsVerifiedBeforeItCountsAsInitialised(t *testing.T) {
 	previousLoader := geoLoaderName
 	previousURL := GeoSiteUrl()
@@ -205,8 +177,6 @@ func TestASecondDownloadIsVerifiedBeforeItCountsAsInitialised(t *testing.T) {
 		t.Fatal("a file that does not load must not be marked initialised")
 	}
 
-	// The other direction: a file that loads initialises, so this cannot pass
-	// by refusing everything.
 	body = "GOOD geosite"
 	C.SetHomeDir(t.TempDir())
 	initGeoSite = false
@@ -219,13 +189,6 @@ func TestASecondDownloadIsVerifiedBeforeItCountsAsInitialised(t *testing.T) {
 	}
 }
 
-// A .dat download goes THROUGH a symlink, not over it.
-//
-// A .dat is as likely as an MMDB to be a link into a shared directory, and
-// staging beside the link and renaming onto it would replace the link with a
-// regular file and leave the shared target where it was. A dangling link is
-// the case that hides it: nothing is at the link's own path, so a download
-// that ignores the link looks like it worked.
 func TestADatDownloadFollowsASymlinkToItsTarget(t *testing.T) {
 	fresh := []byte("GOOD geosite")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -257,15 +220,6 @@ func TestADatDownloadFollowsASymlinkToItsTarget(t *testing.T) {
 	assertNoLeftovers(t, home, "GeoSite.dat")
 }
 
-// Replacing an invalid .dat keeps the symlink too.
-//
-// Verify follows the link and fails on the target's contents; the recovery
-// then has to replace what the link POINTS AT. Upstream removed the
-// configured path first -- which leaves the downloader nothing to resolve, so
-// the replacement lands as a regular file at the link's own path while the
-// shared target stays corrupt for everyone still reading it. This goes
-// through InitGeoSite rather than calling the downloader, because the removal
-// was there and not in the downloader.
 func TestReplacingAnInvalidDatKeepsTheSymlink(t *testing.T) {
 	previousLoader := geoLoaderName
 	previousURL := GeoSiteUrl()

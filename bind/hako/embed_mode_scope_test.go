@@ -7,25 +7,6 @@ import (
 	"time"
 )
 
-// embedMode removes routes from the controller this binding serves, and the removals were
-// written as three `if !embedMode` blocks whose comments give one reason each. The reasons are
-// not interchangeable, and at least one block covered a route its reason does not describe:
-//
-//	configs.go:28   PUT /configs        bypasses the immutable revision pipeline   -- holds
-//	                POST /configs/geo   downloads inside the extension             -- holds
-//	                PATCH /configs      neither                                    -- did not hold
-//
-// A dashboard switching between rule/global/direct sends PATCH /configs, so the most ordinary
-// action a Clash panel has was answered 405 by a condition written about two other routes. The
-// consuming lane found it when a user tried to switch modes on a device.
-//
-// The shape is the night's most productive one: ONE CONDITION COVERING SEVERAL THINGS WITH
-// DIFFERENT REASONS. It is the same as disposition=apple buying exemption from two gates at
-// once, and the same as one family note describing tun.mtu and tun.stack in a single sentence.
-//
-// So this test enumerates the surface rather than trusting the blocks: every route that stays
-// closed is listed with the reason it stays closed, and every route that is open is listed too.
-// Adding a route to either list is then a deliberate act.
 func TestEmbedModeClosesOnlyWhatItsReasonsCover(t *testing.T) {
 	port := freeLoopbackPort(t)
 	addr := "127.0.0.1:" + port
@@ -53,8 +34,6 @@ func TestEmbedModeClosesOnlyWhatItsReasonsCover(t *testing.T) {
 		return response.StatusCode
 	}
 
-	// Positive control first: if the controller is not actually serving, every route below
-	// would "fail closed" and this test would pass by measuring nothing.
 	if status := call(http.MethodGet, "/configs"); status != http.StatusOK {
 		t.Fatalf("GET /configs = %d; the controller is not serving, so nothing below is measured", status)
 	}
@@ -74,7 +53,6 @@ func TestEmbedModeClosesOnlyWhatItsReasonsCover(t *testing.T) {
 		}
 	}
 
-	// Open, and each for a reason of its own rather than by omission.
 	open := map[string]string{
 		"PATCH /configs":       "runtime switches -- mode, sniffing, log level. Writes no file and downloads nothing",
 		"PATCH /rules/disable": "flips SetDisabled in memory on already-parsed rules; the configuration on disk is untouched",
@@ -83,20 +61,11 @@ func TestEmbedModeClosesOnlyWhatItsReasonsCover(t *testing.T) {
 	for route, reason := range open {
 		method, target, _ := strings.Cut(route, " ")
 		status := call(method, target)
-		// 404/405 is the only thing that means "not routed". An open route is free to fail on
-		// its own terms -- /upgrade/ui really does try to download and will report 500 without a
-		// dashboard to fetch -- and treating that as closed would make this test enforce success
-		// rather than reachability.
 		if status == http.StatusNotFound || status == http.StatusMethodNotAllowed {
 			t.Errorf("%s is answered %d but nothing justifies closing it: %s", route, status, reason)
 		}
 	}
 
-	// Routes whose handler has a real side effect are proved routed WITHOUT being invoked: a
-	// method the path does not accept answers 405 when the path exists and 404 when it does not.
-	// POST /upgrade/ui really downloads a dashboard, so calling it here made the suite reach the
-	// network and time out -- a test that goes online to prove a route is registered is a test
-	// that fails for reasons having nothing to do with the code.
 	routedButNotInvoked := map[string]string{
 		"GET /upgrade/ui": "the same u.downloadUI() the start path already calls unprompted via " +
 			"AutoDownloadUI, only on demand instead of during startup",

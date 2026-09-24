@@ -6,11 +6,6 @@ import (
 	"testing"
 )
 
-// configFixture is a miniature RawConfig schema exercising each shape the
-// collector must handle: scalar leaf, external-typed leaf, nested struct,
-// doubly-nested struct, pointer-to-generic leaf, map/slice leaves, an untagged
-// field and a yaml:"-" field (both excluded). It also carries the fields the
-// enforcement fixtures below write/read (external-controller, tun.route-address-set).
 const configFixture = `package config
 type RawConfig struct {
 	Port               int                                 ` + "`yaml:\"port\"`" + `
@@ -65,8 +60,6 @@ func repairMacOSPacketTunnelDNS(raw *config.RawConfig) {
 }
 `
 
-// validateFixture proves reject extraction is scoped to the reject function: the
-// read in somethingElse must NOT surface as a reject.
 const validateFixture = `package hako
 func validateRawNetworkExtensionIntentForApple(raw *config.RawConfig, policy appleRuntimePolicy) error {
 	if len(raw.Tun.RouteAddressSet) > 0 {
@@ -146,7 +139,6 @@ func TestCollectFlattensDottedPathsAndSkipsNonSurface(t *testing.T) {
 
 func TestAssignEvidenceOverrideAndPipeline(t *testing.T) {
 	gen, dir := newFixture(t)
-	// override.go: processed *config.Config, wrappers flattened.
 	ov, err := gen.assignEvidence(filepath.Join(dir, "override.go"), "cfg", true, nil)
 	if err != nil {
 		t.Fatalf("assignEvidence override: %v", err)
@@ -155,15 +147,14 @@ func TestAssignEvidenceOverrideAndPipeline(t *testing.T) {
 		path, kind string
 		resolved   bool
 	}{
-		"General.GeoAutoUpdate": {"geo-auto-update", "cleared", true}, // wrapper flattened
+		"General.GeoAutoUpdate": {"geo-auto-update", "cleared", true},
 		"General.Interface":     {"interface-name", "cleared", true},
-		"General.GeodataLoader": {"geodata-loader", "forced", true}, // non-zero literal
-		"DNS.Listen":            {"dns.listen", "cleared", true},    // nested sub-struct
+		"General.GeodataLoader": {"geodata-loader", "forced", true},
+		"DNS.Listen":            {"dns.listen", "cleared", true},
 		"Listeners":             {"listeners", "cleared", true},
-		"Controller":            {"", "cleared", false}, // not a RawConfig member
+		"Controller":            {"", "cleared", false},
 	})
 
-	// config_pipeline.go: *config.RawConfig directly, no wrapper flattening.
 	cp, err := gen.assignEvidence(filepath.Join(dir, "config_pipeline.go"), "raw", false, nil, "repairMacOSPacketTunnelDNS")
 	if err != nil {
 		t.Fatalf("assignEvidence pipeline: %v", err)
@@ -175,7 +166,7 @@ func TestAssignEvidenceOverrideAndPipeline(t *testing.T) {
 		"Port":               {"port", "cleared", true},
 		"ExternalController": {"external-controller", "cleared", true},
 		"GeodataLoader":      {"geodata-loader", "forced", true},
-		"Rule":               {"rules", "normalized", true}, // filter(raw.Rule): kept, entries stripped
+		"Rule":               {"rules", "normalized", true},
 	})
 }
 

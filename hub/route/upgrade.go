@@ -14,22 +14,9 @@ import (
 
 func upgradeRouter() http.Handler {
 	r := chi.NewRouter()
-	// /ui is deliberately outside the gate, and the reason the gate gave for it was disproved by
-	// this build's own behaviour. "No network acquisition inside the extension" is true of
-	// upgradeCore and updateGeoDatabases. It is NOT true of the dashboard, because
-	// hub/executor/executor.go:457 calls AutoDownloadUI on the start path, and
-	// component/updater/update_ui.go:83 and :94 route both AutoDownloadUI and DownloadUI into
-	// the same u.downloadUI(). The automatic one is the more dangerous of the two: it runs
-	// synchronously during startup and was measured adding six seconds to a first connection.
-	//
-	// So the route asks for nothing this core is not already doing unprompted, on a worse
-	// schedule. Refusing it was refusing the safer half of a thing we do anyway.
 	if !embedMode {
-		r.Post("/", upgradeCore) // replaces the binary: code signing forbids it on Apple
+		r.Post("/", upgradeCore)
 	}
-	// The geo updater is gated on its own measurement rather than on embedMode: 17 MB of GeoIP
-	// fetched and unpacked does not fit an iOS packet tunnel measured dying at 49.5 MiB, and a
-	// macOS app extension has no such ceiling (measured living at 62.4 MiB, no limit set).
 	if !embedMode || geoUpdaterAllowed {
 		r.Post("/geo", updateGeoDatabases)
 	}

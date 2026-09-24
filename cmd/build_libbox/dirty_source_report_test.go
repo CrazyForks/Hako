@@ -5,15 +5,6 @@ import (
 	"testing"
 )
 
-// sourceDirty used to be a bool with nothing behind it, and a whole round of builds carried
-// sourceDirty=true because a DerivedData directory sat at the repo root. Nobody could tell:
-// the flag named nothing, and package_release.sh refuses a formal SDK on it, so whether a
-// release could be packaged came down to whether somebody had happened to delete a temporary
-// directory.
-//
-// The strictness is not what is being tested here -- untracked files SHOULD count, because an
-// untracked .go file compiles into the artifact. What is tested is that the answer carries the
-// paths, so a person reading the build output learns in one line what took a round to notice.
 func TestDirtySourceEntriesNamesEveryPathGitReported(t *testing.T) {
 	for name, testCase := range map[string]struct {
 		status string
@@ -45,7 +36,6 @@ func TestDirtySourceEntriesNamesEveryPathGitReported(t *testing.T) {
 	}
 }
 
-// The bool has to keep agreeing with the list, or the report describes a build the flag does not.
 func TestDirtyFlagAndReportCannotDisagree(t *testing.T) {
 	for _, status := range []string{"", "\n", "?? .derived/\n", " M a.go\n?? b.go\n"} {
 		entries := dirtySourceEntries([]byte(status))

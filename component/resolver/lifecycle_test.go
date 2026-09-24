@@ -11,12 +11,6 @@ import (
 	"github.com/miekg/dns"
 )
 
-// The package-level ClearCache and ResetConnection covered DefaultResolver and
-// SystemResolver only. ProxyServerHostResolver and DirectHostResolver -- populated
-// whenever proxy-server-nameserver or direct-nameserver is configured -- were skipped, so
-// a path change left their caches and their upstream sockets scoped to the previous
-// network. Same class of hole as Resolver.ResetConnection skipping its policy clients:
-// invisible from the resolution path, because resolution only ever calls LookupIP.
 
 type lifecycleRecorder struct {
 	clears atomic.Int64
@@ -49,8 +43,6 @@ func (r *lifecycleRecorder) ClearCache() { r.clears.Add(1) }
 
 func (r *lifecycleRecorder) ResetConnection() { r.resets.Add(1) }
 
-// waitFor polls until condition holds or the deadline passes. The package-level helpers
-// dispatch to goroutines, so the assertions cannot read the counters synchronously.
 func waitFor(t *testing.T, what string, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -110,9 +102,6 @@ func TestResetConnectionReachesEveryConfiguredResolver(t *testing.T) {
 	waitFor(t, "DirectHostResolver reset", func() bool { return directHost.resets.Load() == 1 })
 }
 
-// TestLifecycleHelpersToleratePartialConfiguration: the two host resolvers are nil unless
-// the corresponding nameserver option is configured, which is the common case, so the
-// helpers must not panic on a network change in a default setup.
 func TestLifecycleHelpersToleratePartialConfiguration(t *testing.T) {
 	defaultResolver, _, _, system := withRecorders(t)
 	ProxyServerHostResolver = nil
@@ -129,13 +118,6 @@ func TestLifecycleHelpersToleratePartialConfiguration(t *testing.T) {
 	})
 }
 
-// TestLifecycleHelpersDoNotVisitTheSameResolverTwice: the four package variables are not four
-// distinct objects. DefaultResolver holds the whole dns.Resolvers aggregate, and
-// ProxyServerHostResolver and DirectHostResolver hold that aggregate's own ProxyResolver and
-// DirectResolver -- which the aggregate's own ClearCache and ResetConnection already fan out
-// to. Walking all four blindly clears and resets the same resolver twice. Both operations are
-// idempotent, so this is waste rather than breakage, but gating these calls at all is about
-// not doing them when they are not needed.
 func TestLifecycleHelpersDoNotVisitTheSameResolverTwice(t *testing.T) {
 	shared := &lifecycleRecorder{}
 	system := &lifecycleRecorder{}
@@ -171,14 +153,6 @@ func TestLifecycleHelpersDoNotVisitTheSameResolverTwice(t *testing.T) {
 	}
 }
 
-// The test above points all three variables at ONE object, which is not the shape updateDNS
-// builds. It registers the dns.Resolvers AGGREGATE as DefaultResolver and that aggregate's
-// own ProxyResolver / DirectResolver -- distinct pointers -- as ProxyServerHostResolver and
-// DirectHostResolver. Identity cannot see that a member is already covered by the aggregate's
-// fan-out, so each member was reset once by the aggregate and once more on its own, in
-// separate goroutines; under v1.19.30's shared DNS transports the second reset can close a
-// connection the first one's caller had already rebuilt. An aggregate has to say what it
-// contains, and the helpers have to ask.
 type lifecycleAggregate struct {
 	lifecycleRecorder
 	members []Resolver
@@ -222,7 +196,7 @@ func TestLifecycleHelpersDoNotVisitAMemberOfTheRegisteredAggregateTwice(t *testi
 		lifecycleTestMu.Unlock()
 	})
 	DefaultResolver = aggregate
-	ProxyServerHostResolver = proxyMember // as updateDNS does: the aggregate's own member
+	ProxyServerHostResolver = proxyMember
 	DirectHostResolver = directMember
 	SystemResolver = system
 
@@ -235,7 +209,7 @@ func TestLifecycleHelpersDoNotVisitAMemberOfTheRegisteredAggregateTwice(t *testi
 	waitFor(t, "SystemResolver to be cleared and reset", func() bool {
 		return system.clears.Load() == 1 && system.resets.Load() == 1
 	})
-	time.Sleep(50 * time.Millisecond) // a duplicate visit would already be in flight
+	time.Sleep(50 * time.Millisecond)
 
 	for name, m := range map[string]*lifecycleRecorder{"ProxyServerHostResolver": proxyMember, "DirectHostResolver": directMember} {
 		if got := m.clears.Load(); got != 1 {

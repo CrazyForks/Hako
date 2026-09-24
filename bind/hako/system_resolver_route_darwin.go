@@ -12,9 +12,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// routeInterfaceIndex asks the routing socket where a packet to addr leaves right now
-// (RTM_GET, what `route -n get` does) and returns that interface's index. An address the
-// table cannot route answers errNoRoute.
 func routeInterfaceIndex(addr netip.Addr) (int, error) {
 	fd, err := unix.Socket(unix.AF_ROUTE, unix.SOCK_RAW, 0)
 	if err != nil {
@@ -23,7 +20,7 @@ func routeInterfaceIndex(addr netip.Addr) (int, error) {
 	defer func() { _ = unix.Close(fd) }()
 	_ = unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &unix.Timeval{Sec: 1})
 
-	const seq = 0x4841 // "HA"
+	const seq = 0x4841
 	message := route.RouteMessage{
 		Version: unix.RTM_VERSION,
 		Type:    unix.RTM_GET,
@@ -77,9 +74,6 @@ func zoneIndex(addr netip.Addr) uint32 {
 	return 0
 }
 
-// defaultRouteInterfaceIndex is the interface of the unscoped default route -- the
-// physical path before this product's tunnel is up -- preferring IPv4's, falling back to
-// IPv6's when IPv4 has none.
 func defaultRouteInterfaceIndex() (int, error) {
 	for _, family := range []int{unix.AF_INET, unix.AF_INET6} {
 		table, err := route.FetchRIB(family, route.RIBTypeRoute, 0)

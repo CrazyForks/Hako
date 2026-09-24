@@ -7,23 +7,6 @@ import (
 	"github.com/TokenPLS/Hako/config"
 )
 
-// The correction to, held from both sides.
-//
-// deleted seventeen outbound value checks under one sentence: "not one of
-// them was a check upstream makes." For seven that sentence was false, and the
-// mistake is visible in what upstream actually does with a bad value -- it
-// REFUSES what it cannot parse and CLAMPS what parses but sits out of range.
-// adapter/outbound/hysteria2.go:280-291 does both within six lines. Deleting
-// the clamped half was the point; deleting the refused half made the
-// plan promise a start that mihomo then refused.
-//
-// So one test per direction, and neither can be satisfied by tightening or
-// loosening alone:
-//
-//   - what upstream refuses, the plan refuses -- and mihomo is asked, not
-//     assumed, so a case cannot rot into testing our imagination.
-//   - what upstream clamps, the plan tolerates -- the guard against fixing the
-// first direction by restoring the ranges was right to remove.
 
 func mihomoVerdict(t *testing.T, configYAML string) error {
 	t.Helper()
@@ -75,9 +58,6 @@ proxies:
 `, wants: "sc-max-each-post-bytes"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			// Upstream first. A case that mihomo accepts does not belong in
-			// this list, and saying so here stops the list from drifting into
-			// bounds we invented.
 			if err := mihomoVerdict(t, tc.yaml); err == nil {
 				t.Fatalf("mihomo ACCEPTS this input, so refusing it would be stricter than upstream, "+
 					"which is the whole point of this comparison:\n%s", tc.yaml)
@@ -96,26 +76,18 @@ proxies:
 
 func TestPlanStillToleratesWhatUpstreamOnlyClamps(t *testing.T) {
 	for name, configYAML := range map[string]string{
-		// hysteria2.go:285-288 raises a hop interval below minHopInterval to
-		// it rather than refusing.
 		"hysteria2 hop-interval below the minimum": `
 proxies:
   - {name: h, type: hysteria2, server: e.com, port: 443, password: p, ports: 1000-2000, hop-interval: "1"}
 `,
-		// quic-go clamps a receive window past its maximum (config.go:36-37).
 		"quic receive window past the maximum": `
 proxies:
   - {name: h, type: hysteria2, server: e.com, port: 443, password: p, initial-stream-receive-window: 999999999999999999}
 `,
-		// hysteria2.go:227 substitutes a default for a zero MTU.
 		"hysteria2 udp-mtu zero": `
 proxies:
   - {name: h, type: hysteria2, server: e.com, port: 443, password: p, udp-mtu: 0}
 `,
-		// Three xhttp ranges parse through the same ParseRange as the two
-		// this tree refuses, and are still accepted by mihomo because nothing
-		// calls their parser during parse. They were in the refusal list until
-		// TestPlanRefusesExactlyWhatUpstreamRefuses asked mihomo first.
 		"xhttp x-padding-bytes will not parse": `
 proxies:
   - name: v
@@ -136,7 +108,6 @@ proxies:
     network: xhttp
     xhttp-opts: {sc-max-buffered-posts: bad-range}
 `,
-		// A bare int on upstream's own option struct, read as given.
 		"negative tuic max datagram size": `
 proxies:
   - {name: t, type: tuic, server: e.com, port: 443, uuid: u, password: p, max-udp-relay-packet-size: -1}
@@ -151,9 +122,6 @@ proxies:
 	}
 }
 
-// The registry claims upstream PANICS on this, which is a stronger claim than
-// "refuses" and deserves to be held up rather than cited. If a future mihomo
-// compiles the filter safely, this goes red and the refusal loses its ground.
 func TestParseConfigForIOSRejectsInvalidProxyGroupRegex(t *testing.T) {
 	y := "proxies:\n  - {name: n, type: ss, server: e.com, port: 8388, cipher: aes-128-gcm, password: p}\n" +
 		"proxy-groups:\n  - {name: G, type: select, filter: \"([unclosed\", proxies: [n]}\n"
@@ -173,7 +141,6 @@ func TestParseConfigForIOSRejectsInvalidProxyGroupRegex(t *testing.T) {
 		_, _ = config.ParseRawConfig(raw)
 	}()
 
-	// And this tree refuses it before the panic can happen.
 	setupConfigPipelineTest(t)
 	if _, err := parseConfigForIOS(y, true); err == nil ||
 		!strings.Contains(err.Error(), "not a valid regular expression") {
@@ -181,10 +148,6 @@ func TestParseConfigForIOSRejectsInvalidProxyGroupRegex(t *testing.T) {
 	}
 }
 
-// The registry records this one as reachability-unknown. Upstream accepts a dns
-// section with no nameserver, and repairApplePacketTunnelDNS refills it before
-// validation on the packet-tunnel path -- so the refusal should never fire
-// there. This pins the half that is measurable: the packet tunnel starts.
 func TestValidateRequiresExplicitNameserverOnlyWhenTheRepairDidNotRun(t *testing.T) {
 	y := "proxies:\n  - {name: n, type: ss, server: e.com, port: 8388, cipher: aes-128-gcm, password: p}\n" +
 		"dns:\n  enable: true\n  enhanced-mode: fake-ip\n"

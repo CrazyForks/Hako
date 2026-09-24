@@ -17,20 +17,10 @@ import (
 const maximumExpandedRoutePrefixes = 65_536
 
 type resourceMap struct {
-	// ProviderPaths are keyed by schema-v2 "proxy:<name>" / "rule:<name>".
-	// A bare name remains accepted only when it is unambiguous across the two
-	// provider namespaces.
 	ProviderPaths map[string]string `json:"providerPaths"`
-	// ProviderReadPaths point at unpublished candidate files that Finalize may
-	// inspect while expanding route-address-set. They are never serialized into
-	// the resulting YAML. Older clients may omit this field.
 	ProviderReadPaths map[string]string `json:"providerReadPaths"`
 }
 
-// FinalizeForIOS rewrites materialized http providers to type:file and expands
-// route-address-set references into literal route-address CIDR lists read from
-// the local provider files. Unsupported route intent is deliberately preserved
-// so the subsequent iOS preflight rejects it instead of silently changing it.
 func FinalizeForIOS(mergedYAML string, resourceMapJSON string) (*StringBox, error) {
 	if err := validateConfigurationInput(mergedYAML); err != nil {
 		return nil, bridgeSafeError(err)
@@ -48,10 +38,6 @@ func FinalizeForIOS(mergedYAML string, resourceMapJSON string) (*StringBox, erro
 	if err := yaml.Unmarshal([]byte(mergedYAML), &root); err != nil {
 		return nil, bridgeSafeError(err)
 	}
-	// Upstream matches definition keys case-insensitively; every reader below
-	// spells them lowercase. Canonicalize before any of them looks, or a
-	// `Type: http` provider walks past the http→file rewrite and reaches the
-	// published revision still remote.
 	canonicalizeProviderDefinitionKeysInDocument(root)
 	routeProviders := routeProviderSpecs(root)
 	platformRouteProviders := map[string]bool{}
@@ -82,9 +68,6 @@ func FinalizeForIOS(mergedYAML string, resourceMapJSON string) (*StringBox, erro
 	if err != nil {
 		return nil, bridgeSafeError(err)
 	}
-	// This runs on every activation, with or without an override, so without this line every
-	// profile reaches the core with its mappings alphabetised -- including the one the DNS
-	// resolver walks in order. See restoreSourceKeyOrder.
 	finalized := restoreSourceKeyOrder(mergedYAML, string(out))
 	if err := validateConfigurationResult(finalized); err != nil {
 		return nil, bridgeSafeError(err)
@@ -105,8 +88,6 @@ func routeSetProviderNames(tun map[string]any) map[string]bool {
 	return result
 }
 
-// The marker is consumed and removed by parseConfigForIOSInternal before
-// upstream parsing. Absence is deliberately fail-closed for old revisions.
 func annotateRuleProviderSideUpdateSafety(root map[string]any, platformRouteProviders map[string]bool) {
 	providers, _ := root["rule-providers"].(map[string]any)
 	for name, raw := range providers {
@@ -115,8 +96,6 @@ func annotateRuleProviderSideUpdateSafety(root map[string]any, platformRouteProv
 		if typeName != "file" && typeName != "http" {
 			continue
 		}
-		// expandRouteSet ignores non-ipcidr strategies, as upstream updateRule
-		// does. An inert reference must not disable ordinary rule side-updates.
 		behavior, _ := definition["behavior"].(string)
 		changesPlatformRoutes := platformRouteProviders[name] && strings.EqualFold(behavior, "ipcidr")
 		definition[providerSideUpdateSafeField] = !changesPlatformRoutes
@@ -222,21 +201,6 @@ func rewriteProviders(root map[string]any, key, kind string, paths map[string]st
 		if t, _ := def["type"].(string); !strings.EqualFold(t, "http") {
 			continue
 		}
-		// A provider whose url this build cannot use was never put in the
-		// download plan, so demanding that it be materialized would refuse the
-		// configuration for a provider nobody was ever asked to fetch -- and
-		// the message would be about our plumbing ("was not materialized")
-		// rather than about the url the user typed. Both layers ask the same
-		// question with the same predicate; the definition is then left alone
-		// and reaches the kernel, which fails its download and rides empty
-		// (hub/executor/executor.go:400), exactly as upstream does.
-		// No `rawURL != ""` guard: an absent url is exactly a url this build
-		// cannot fetch, and skipping the question for it sent an http provider
-		// with no url down the "was not materialized" path -- a message about
-		// our plumbing, for a provider the app was never asked to fetch.
-		// Upstream declares url as omitempty, never checks it, and accepts the
-		// document. Same predicate as validate.go's unfetchableProviderNames
-		// and config_pipeline.go's raw check; three layers, one question.
 		if rawURL, _ := def["url"].(string); true {
 			if _, err := normalizeResourceURL(rawURL, "provider"); err != nil {
 				continue
@@ -247,12 +211,6 @@ func rewriteProviders(root map[string]any, key, kind string, paths map[string]st
 			return err
 		}
 		if !found {
-			// The app has no copy of this one (offline at activation, or a host it
-			// could not reach). The definition stays a remote provider with every
-			// field it was written with; the core starts it empty and downloads it
-			// in the background (DeferRemoteInitialFetch), storing it under the
-			// path the profile names or upstream's default
-			// <home>/<proxies|rules>/<hash(url)>.
 			continue
 		}
 		def["type"] = "file"
@@ -276,26 +234,6 @@ func expandRouteSet(tun map[string]any, setKey, destKey string, paths map[string
 	seen := map[string]struct{}{}
 	for _, item := range list {
 		name, _ := item.(string)
-		// Both of these used to refuse the whole configuration, and upstream
-		// refuses neither. listener/sing_tun/server.go:565-593 switches on the
-		// provider's behavior and falls to `default: return`, so a set that is
-		// not ipcidr contributes no routes and the tunnel starts; an undefined
-		// name is equally inert. Driving mihomo over both confirms it accepts
-		// each one, which is what settled this rather than reading the switch.
-		//
-		// So they are skipped here too. The set contributes nothing, exactly as
-		// upstream, instead of costing the user every other line of their
-		// configuration. Twice before this was changed in the plan layer alone
-		// and reverted, because THIS function refused a second time further
-		// down and the tunnel still would not start -- that is the whole reason
-		// TestEveryToleratedInputSurvivesActivation now drives
-		// parseConfigForIOSRuntime instead of stopping at Finalize.
-		//
-		// Registered as PlanResources.routeAddressSet, whose upstream verdict
-		// this corrects: it read "rejects" while its own evidence said upstream
-		// "would tolerate", and its platformForced named app-side expansion --
-		// this product's architecture, not a NetworkExtension limit. Found by
-		// Codex 2026-08-27.
 		spec, defined := providers[name]
 		if !defined {
 			skipped = append(skipped, name+" (no such provider)")
@@ -315,19 +253,6 @@ func expandRouteSet(tun map[string]any, setKey, destKey string, paths map[string
 				return pathErr
 			}
 			if !found {
-				// The App has no bytes for this set on this side: it switched while the
-				// set's host was unreachable, and since phase two it then leaves no
-				// file and no path (the provider stays remote and the core loads its
-				// fail-closed", written when the App still pre-downloaded every set;
-				// with the reader's OpenClash template it refused the whole profile on
-				// every switch in a walled network. Upstream reads a route set from the
-				// loaded provider and one that has not loaded contributes nothing while
-				// the tun comes up (listener/sing_tun/server.go), so the set is inert
-				// here too. The consequence is stated in the log line below: the tunnel
-				// starts WITHOUT these routes; the App's first-load retry republishes the
-				// revision with them expanded once it has the bytes, and a running tunnel
-				// gains them at its next start (a side-update of a route set is refused by
-				// design, provider_runtime.go sideUpdateSafe)..
 				skipped = append(skipped, name+" (no local copy yet: the tunnel starts without its routes and gains them at its next start, once the App's first-load retry has the bytes)")
 				continue
 			}
@@ -365,7 +290,6 @@ func expandRouteSet(tun map[string]any, setKey, destKey string, paths map[string
 	return nil
 }
 
-// readCIDRs reads the exact ipcidr provider format declared in the profile.
 func readCIDRs(path, format string) ([]string, error) {
 	data, err := readBoundedRegularFile(path, int64(maximumProviderResourceBytes), "route-set provider")
 	if err != nil {

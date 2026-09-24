@@ -7,15 +7,6 @@ import (
 	"github.com/TokenPLS/Hako/config"
 )
 
-// A logic rule is a container, not a condition. Stripping it because ONE branch
-// names metadata this platform cannot resolve throws away every other branch
-// with it -- and those branches are ordinary, executable conditions.
-//
-// The fixture below is the smallest shape that shows the loss: an OR whose
-// second branch is a plain DOMAIN-SUFFIX. Upstream's rules/logic/logic.go
-// evaluates OR branch by branch and short-circuits, so the unresolvable branch
-// costs nothing there. Here the whole rule disappears and bank.example falls
-// through to MATCH,DIRECT -- a REJECT silently became a DIRECT.
 func TestLogicRuleKeepsExecutableBranches(t *testing.T) {
 	const document = `
 proxies: []
@@ -43,9 +34,6 @@ rules:
 	}
 }
 
-// A SUB-RULE dispatch line carrying an unresolvable branch takes its entire
-// target group down with it: the group's own rules stay in the config and
-// become unreachable, which no reader can see by looking at the group.
 func TestSubRuleDispatchSurvivesUnresolvableBranch(t *testing.T) {
 	const document = `
 proxies: []
@@ -66,24 +54,10 @@ sub-rules:
 	}
 }
 
-// The three shapes below evaluate to TRUE against empty owner metadata, so
-// keeping them is what upstream itself does when it cannot resolve a process:
-//
-//   - PROCESS-NAME-REGEX,.*   regexp ".*" matches ""
-//   - PROCESS-NAME-WILDCARD,* wildcard "*" matches ""
-//   - UID,0                   component/process/process_darwin.go returns uid 0
-//     on EVERY path, including success -- so this is
-//     upstream's own darwin behaviour, not our artifact
-//
-// says one yardstick: inherit upstream's behaviour even where it is a
-// bug. These must parse and be kept, exactly like any other rule.
 func TestAlwaysTrueOwnerMetadataShapesAreKeptLikeUpstream(t *testing.T) {
 	for name, rule := range map[string]string{
 		"process name regex":    `PROCESS-NAME-REGEX,.*,REJECT`,
 		"process name wildcard": `PROCESS-NAME-WILDCARD,*,REJECT`,
-		// UID is deliberately absent: unlike these two it cannot be constructed on GOOS=ios at
-		// all, so keeping it fails the configuration instead of matching everything. Its own
-		// behaviour is pinned in uid_construction_gate_test.go.
 	} {
 		t.Run(name, func(t *testing.T) {
 			document := "proxies: []\nproxy-groups: []\nrules:\n  - " + rule + "\n  - MATCH,DIRECT\n"
@@ -95,9 +69,6 @@ func TestAlwaysTrueOwnerMetadataShapesAreKeptLikeUpstream(t *testing.T) {
 	}
 }
 
-// Whatever this core decides about an unresolvable branch, the user has to be
-// able to find out. A config carrying one plain PROCESS rule must not swallow
-// the report for a second, different occurrence.
 func TestEveryOccurrenceIsReportedNotDedupedByKind(t *testing.T) {
 	const document = `
 proxies: []

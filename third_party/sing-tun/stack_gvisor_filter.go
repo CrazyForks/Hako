@@ -19,10 +19,6 @@ type LinkEndpointFilter struct {
 }
 
 func (w *LinkEndpointFilter) Attach(dispatcher stack.NetworkDispatcher) {
-	// A nil dispatcher is the gVisor detach signal. Wrapping nil in a non-nil
-	// networkDispatcherFilter prevents the Darwin fd endpoint from stopping its
-	// read dispatchers; rapid Network Extension restarts then reuse the same fd
-	// number and leak one reader/processor set per cycle.
 	if dispatcher == nil {
 		w.LinkEndpoint.Attach(nil)
 		return

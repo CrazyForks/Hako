@@ -86,10 +86,6 @@ import "sync"
 
 var memoryPressureOnce sync.Once
 
-// startMemoryPressureMonitor arms a GCD DISPATCH_SOURCE_TYPE_MEMORYPRESSURE
-// source at the CRITICAL level. Inside the NE there are no UIKit memory
-// warnings, so this dispatch source is the only reliable pre-jetsam signal
-// . Idempotent.
 func startMemoryPressureMonitor() {
 	memoryPressureOnce.Do(func() {
 		C.hakoStartMemoryPressureMonitor()
@@ -101,22 +97,10 @@ func hakoMemoryPressureCallback(_ C.ulong) {
 	handleMemoryPressure()
 }
 
-// physFootprint returns the task's phys_footprint in bytes (-1 on failure).
 func physFootprint() int64 {
 	return int64(C.hako_phys_footprint())
 }
 
-// availableMemory returns Apple's current dirty-memory headroom in bytes.
-// The result is deliberately never cached. It is -1 outside iOS and may be 0
-// when the OS cannot provide a usable app-process limit.
-// availableMemory returns this process's remaining memory headroom in bytes, or a
-// non-positive value when there is none to report.
-//
-// ZERO IS NOT "no memory left". os_proc_available_memory() returns 0 for a process that has no
-// memory limit, which is every ordinary macOS process -- the symbol resolves there, it just has
-// nothing to say. Treating that 0 as a reading would make the threshold machine compare 0 against
-// a 32 MiB trigger and fire permanently, and with shedding enabled it would close every
-// connection on a loop. Callers must therefore test for > 0, not >= 0.
 func availableMemory() int64 {
 	return int64(C.hako_available_memory())
 }

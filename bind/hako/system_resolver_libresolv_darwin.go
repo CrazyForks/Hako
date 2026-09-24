@@ -56,11 +56,6 @@ import (
 	"unsafe"
 )
 
-// libresolvResolvers asks the platform resolver library for the resolvers in force right
-// now. On iOS there is no /etc/resolv.conf at all (measured 2026-09-06 on an iPhone 17 Pro
-// Max: ENOENT from both the App and the extension), so this is the only source there; on
-// macOS it answers the same list the file mirrors. Each entry comes back as `ip` or
-// `ip:port` when the port is not 53, already in the shape SystemDNSServerLines accepts.
 func libresolvResolvers() ([]string, error) {
 	const width = C.INET6_ADDRSTRLEN
 	text := make([]byte, C.MAXNS*width)

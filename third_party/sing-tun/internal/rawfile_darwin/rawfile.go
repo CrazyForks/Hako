@@ -7,16 +7,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// SizeofIovec is the size of a unix.Iovec in bytes.
 const SizeofIovec = unsafe.Sizeof(unix.Iovec{})
 
-// MaxIovs is UIO_MAXIOV, the maximum number of iovecs that may be passed to a
-// host system call in a single array.
 const MaxIovs = 1024
 
-// IovecFromBytes returns a unix.Iovec representing bs.
-//
-// Preconditions: len(bs) > 0.
 func IovecFromBytes(bs []byte) unix.Iovec {
 	iov := unix.Iovec{
 		Base: &bs[0],
@@ -33,12 +27,6 @@ func bytesFromIovec(iov unix.Iovec) (bs []byte) {
 	return
 }
 
-// AppendIovecFromBytes returns append(iovs, IovecFromBytes(bs)). If len(bs) ==
-// 0, AppendIovecFromBytes returns iovs without modification. If len(iovs) >=
-// max, AppendIovecFromBytes replaces the final iovec in iovs with one that
-// also includes the contents of bs. Note that this implies that
-// AppendIovecFromBytes is only usable when the returned iovec slice is used as
-// the source of a write.
 func AppendIovecFromBytes(iovs []unix.Iovec, bs []byte, max int) []unix.Iovec {
 	if len(bs) == 0 {
 		return iovs
@@ -62,8 +50,6 @@ func NonBlockingSendMMsg(fd int, msgHdrs []MsgHdrX) (int, unix.Errno) {
 
 const SizeofMsgHdrX = unsafe.Sizeof(MsgHdrX{})
 
-// NonBlockingWriteIovec writes iovec to a file descriptor in a single unix.
-// It fails if partial data is written.
 func NonBlockingWriteIovec(fd int, iovec []unix.Iovec) unix.Errno {
 	iovecLen := uintptr(len(iovec))
 	_, _, e := unix.RawSyscall(unix.SYS_WRITEV, uintptr(fd), uintptr(unsafe.Pointer(&iovec[0])), iovecLen)
@@ -90,11 +76,6 @@ func BlockingReadvUntilStopped(efd int, fd int, iovecs []unix.Iovec) (int, unix.
 	}
 }
 
-// BlockingReadvUntilStoppedPolled is BlockingReadvUntilStopped with the caller's
-// persistent Poller instead of a kqueue per would-block cycle. See poller.go for why
-// that matters: the per-call form spends a file descriptor on every poll, and an EMFILE
-// there is reported as a dispatch error, which dispatchLoop treats as terminal and so
-// ends tun ingress permanently.
 func BlockingReadvUntilStoppedPolled(poller *Poller, fd int, iovecs []unix.Iovec) (int, unix.Errno) {
 	for {
 		n, _, e := unix.RawSyscall(unix.SYS_READV, uintptr(fd), uintptr(unsafe.Pointer(&iovecs[0])), uintptr(len(iovecs)))
@@ -115,8 +96,6 @@ func BlockingReadvUntilStoppedPolled(poller *Poller, fd int, iovecs []unix.Iovec
 	}
 }
 
-// BlockingRecvMMsgUntilStoppedPolled is the recvmmsg counterpart. Both dispatchers reach
-// the same poll, so both need the persistent form.
 func BlockingRecvMMsgUntilStoppedPolled(poller *Poller, fd int, msgHdrs []MsgHdrX) (int, unix.Errno) {
 	for {
 		n, _, e := unix.RawSyscall6(unix.SYS_RECVMSG_X, uintptr(fd), uintptr(unsafe.Pointer(&msgHdrs[0])), uintptr(len(msgHdrs)), unix.MSG_DONTWAIT, 0, 0)
@@ -160,25 +139,20 @@ func BlockingRecvMMsgUntilStopped(efd int, fd int, msgHdrs []MsgHdrX) (int, unix
 }
 
 func BlockingPollUntilStopped(efd int, fd int, events int16) (bool, unix.Errno) {
-	// Create kqueue
 	kq, err := unix.Kqueue()
 	if err != nil {
 		return false, unix.Errno(err.(unix.Errno))
 	}
 	defer unix.Close(kq)
 
-	// Prepare kevents for registration
 	var kevents []unix.Kevent_t
 
-	// Always monitor efd for read events
 	kevents = append(kevents, unix.Kevent_t{
 		Ident:  uint64(efd),
 		Filter: unix.EVFILT_READ,
 		Flags:  unix.EV_ADD | unix.EV_ENABLE,
 	})
 
-	// Monitor fd based on requested events
-	// Convert poll events to kqueue filters
 	if events&unix.POLLIN != 0 {
 		kevents = append(kevents, unix.Kevent_t{
 			Ident:  uint64(fd),
@@ -194,20 +168,17 @@ func BlockingPollUntilStopped(efd int, fd int, events int16) (bool, unix.Errno) 
 		})
 	}
 
-	// Register events
 	_, err = unix.Kevent(kq, kevents, nil, nil)
 	if err != nil {
 		return false, unix.Errno(err.(unix.Errno))
 	}
 
-	// Wait for events (blocking)
 	revents := make([]unix.Kevent_t, len(kevents))
 	n, err := unix.Kevent(kq, nil, revents, nil)
 	if err != nil {
 		return false, unix.Errno(err.(unix.Errno))
 	}
 
-	// Check results
 	var efdHasData bool
 	var errno unix.Errno
 
@@ -219,11 +190,9 @@ func BlockingPollUntilStopped(efd int, fd int, events int16) (bool, unix.Errno) 
 		}
 
 		if int(ev.Ident) == fd {
-			// Check for errors or EOF
 			if ev.Flags&unix.EV_EOF != 0 {
 				errno = unix.ECONNRESET
 			} else if ev.Flags&unix.EV_ERROR != 0 {
-				// Extract error from Data field
 				if ev.Data != 0 {
 					errno = unix.Errno(ev.Data)
 				} else {

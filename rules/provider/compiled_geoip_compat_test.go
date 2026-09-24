@@ -11,18 +11,6 @@ import (
 	P "github.com/TokenPLS/Hako/constant/provider"
 )
 
-// Compiled country codes claim to be rule sets of behavior ipcidr in the same binary
-// layout, and that claim is only worth making if THIS reader accepts them.
-//
-// The round-trip test in component/geodata/compiled reads the artifact with the writer's
-// own reader, so it proves the two agree with each other and nothing else. The layout
-// lives in two files -- mrs_converter.go writes it for rule sets, ipcidr.go writes it for
-// compiled countries -- and a field added to one and not the other surfaces as an
-// unreadable cache on a reader's device rather than as a failing test.
-//
-// The geosite half of this has had such a test since the artifacts existed. The GeoIP half
-// shipped without one, which is the same defect class this repository keeps finding: a
-// fixture that agrees with the code instead of with what the other side actually reads.
 func TestCompiledGeoIPArtifactIsReadableAsARuleSet(t *testing.T) {
 	set := cidr.NewIpCidrSet()
 	for _, prefix := range []string{"1.1.1.0/24", "8.8.8.0/24", "2001:db8::/32"} {

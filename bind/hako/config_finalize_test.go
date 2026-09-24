@@ -134,17 +134,8 @@ rule-providers:
 	}
 }
 
-// a provider with a fetch proxy is never pre-downloaded, at any budget, so the app never
-// has a path to hand FinalizeForIOS for it. This is the other half of that decision, proven
-// rather than assumed: this function needed NO new code for it. rewriteProviders' existing
-// !found branch already left a provider's WHOLE definition untouched whenever the resourceMap
-// has no path for it (the app has no copy at activation, or a host it could not reach) --
-// 's pre-existing reason for that branch to exist -- and a provider the app has decided not
-// to attempt is indistinguishable from one it merely failed to reach. `proxy` survives for the
-// same reason `url` does: nothing here special-cases it.
 func TestFinalizeLeavesAProxyBoundProviderRemoteForTheCoreToFetch(t *testing.T) {
 	y := "proxy-providers:\n  air:\n    type: http\n    url: https://example.com/air.yaml\n    proxy: HK\n    interval: 3600\n"
-	// No entry for "air" in providerPaths: the app decided not to fetch this one.
 	out, err := FinalizeForIOS(y, `{"providerPaths":{}}`)
 	if err != nil {
 		t.Fatal(err)
@@ -280,17 +271,6 @@ func TestFinalizeReadsCandidateButWritesPublishedProviderPath(t *testing.T) {
 	}
 }
 
-// Both renamed from ...Rejects... on 2026-08-27. Upstream refuses neither:
-// listener/sing_tun/server.go:565-593 falls to `default: return` for a set
-// whose behavior is not ipcidr, and mihomo accepts both shapes when driven
-// (measured, not read). The set contributes no routes either way -- the
-// question was only whether the user loses the rest of their configuration
-// with it.
-//
-// A route set that expands to nothing is still worth saying out loud, so
-// expandRouteSet logs which names were skipped. These pin the tolerance; the
-// notice is not asserted here because the log is not this function's return
-// value.
 func TestFinalizeSkipsMissingRouteSetCandidate(t *testing.T) {
 	y := "tun:\n  route-address-set:\n    - missing\n"
 	out, err := FinalizeForIOS(y, `{}`)
@@ -302,13 +282,6 @@ func TestFinalizeSkipsMissingRouteSetCandidate(t *testing.T) {
 	}
 }
 
-// The reader's OpenClash template (2026-09-06): tun.route-exclude-address-set names an http
-// ipcidr set, and since phase two a switch that cannot fetch it leaves no file and no
-// path. Upstream reads a route set from the loaded provider and a provider that has not loaded
-// contributes nothing while the tun comes up (listener/sing_tun/server.go), so a set the App
-// has no bytes for is inert here too -- the tunnel starts without its routes, the provider
-// stays remote for the core's own first load, and the App's first-load retry republishes with
-// the routes expanded once it has the bytes.
 func TestFinalizeSkipsARouteSetTheAppHasNoBytesFor(t *testing.T) {
 	y := `
 rule-providers:
@@ -335,8 +308,6 @@ tun:
 	}
 }
 
-// 's real cases stay refused: a path the App did map but that is not a readable regular
-// file is the App's bug (it wrote no such file), and must fail loud rather than go inert.
 func TestFinalizeStillRefusesAMappedRouteSetFileThatIsNotThere(t *testing.T) {
 	y := `
 rule-providers:

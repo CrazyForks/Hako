@@ -108,7 +108,6 @@ func (ssr *ShadowSocksR) ProxyInfo() C.ProxyInfo {
 
 func NewShadowSocksR(option ShadowSocksROption) (*ShadowSocksR, error) {
 	// SSR protocol compatibility
-	// https://github.com/TokenPLS/Hako/pull/2056
 	if option.Cipher == "none" {
 		option.Cipher = "dummy"
 	}

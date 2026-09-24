@@ -16,9 +16,6 @@ import (
 	"github.com/metacubex/tls"
 )
 
-// TestNewHttpArmsSessionCache: a TLS HTTP proxy arms a client session cache so
-// its per-connection TLS dials can resume; a plaintext HTTP proxy has no TLS
-// config to touch.
 func TestNewHttpArmsSessionCache(t *testing.T) {
 	h, err := NewHttp(HttpOption{Name: "tls", Server: "127.0.0.1", Port: 8080, TLS: true, SkipCertVerify: true})
 	if err != nil {
@@ -36,10 +33,6 @@ func TestNewHttpArmsSessionCache(t *testing.T) {
 	}
 }
 
-// TestNewHttpTLSConfigResumes proves the armed cache actually resumes on the
-// proxy's own TLS config: the second dial is an abbreviated handshake that does
-// not re-send (and so does not re-verify) the server certificate -- exactly the
-// per-connection SecTrustEvaluate/trustd cost the storm was paying.
 func TestNewHttpTLSConfigResumes(t *testing.T) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -58,7 +51,7 @@ func TestNewHttpTLSConfigResumes(t *testing.T) {
 	}
 	serverCfg := &tls.Config{
 		Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: priv}},
-		MaxVersion:   tls.VersionTLS12, // the ticket arrives in-handshake, simplest to assert
+		MaxVersion:   tls.VersionTLS12,
 	}
 	listener, err := tls.Listen("tcp", "127.0.0.1:0", serverCfg)
 	if err != nil {
@@ -90,8 +83,6 @@ func TestNewHttpTLSConfigResumes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Clone shares the proxy's ClientSessionCache; pin TLS 1.2 for a deterministic
-	// in-handshake ticket without altering the cache under test.
 	clientCfg := h.tlsConfig.Clone()
 	clientCfg.MaxVersion = tls.VersionTLS12
 

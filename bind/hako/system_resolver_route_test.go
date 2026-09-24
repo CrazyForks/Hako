@@ -23,9 +23,6 @@ func stubRoutes(t *testing.T, primary int, primaryErr error, routes map[string]i
 	t.Cleanup(func() { resolverRouteInterface, primaryRouteInterface = previousResolver, previousPrimary })
 }
 
-// The reader's Mac, 2026-09-06: resolv.conf listed Tailscale's MagicDNS pair, routed
-// through utun9 only, while the default route was en0. A tunnel bound to en0 cannot reach
-// them, so they must not become the substitutes for `system`.
 func TestResolversRoutedOffThePrimaryInterfaceAreDropped(t *testing.T) {
 	const en0, utun9, lo0 = 11, 24, 1
 	stubRoutes(t, en0, nil,
@@ -39,15 +36,11 @@ func TestResolversRoutedOffThePrimaryInterfaceAreDropped(t *testing.T) {
 }
 
 func TestAnUnansweredRouteQuestionDropsNothing(t *testing.T) {
-	// The platform cannot ask (non-darwin, or a sandbox that refuses the routing socket):
-	// the filter must not be stricter than what it knows.
 	stubRoutes(t, 0, errRouteLookupUnsupported, nil, map[string]error{"100.100.100.100": errRouteLookupUnsupported})
 	in := []string{"100.100.100.100", "192.168.1.1"}
 	if got := reachableFromThePhysicalPath(in); !reflect.DeepEqual(got, []string{"100.100.100.100"}) && !reflect.DeepEqual(got, in) {
 		t.Fatalf("kept %v; an unanswered lookup must keep the address", got)
 	}
-	// Primary unknown but per-address lookups answered: still keep everything, because
-	// "not the primary" cannot be judged.
 	stubRoutes(t, 0, errors.New("no default route"), map[string]int{"100.100.100.100": 24, "192.168.1.1": 11}, nil)
 	if got := reachableFromThePhysicalPath(in); !reflect.DeepEqual(got, in) {
 		t.Fatalf("kept %v, want %v when the primary interface is unknown", got, in)

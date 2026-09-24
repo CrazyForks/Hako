@@ -1,8 +1,3 @@
-// Command build_libbox drives `gomobile bind` to produce Hako.xcframework
-// from the bind/hako nested module.
-//
-// Flag organization mirrors sing-box cmd/internal/build_libbox. Single source
-// of truth for the bind flag set.
 package main
 
 import (
@@ -23,9 +18,6 @@ import (
 var sdkTagPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+-hako\.[1-9][0-9]*$`)
 var sourceRevisionPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
-// coreVersionPattern validates the mihomo core version after the leading "v"
-// and any "-hako.N" suffix are stripped, so a stray non-semver tag cannot be
-// injected into constant.Version.
 var coreVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 
 var (
@@ -51,9 +43,6 @@ const (
 	macosVersion                = "13.0"
 	tvosVersion                 = "17.0"
 
-	// Base tags apply to every slice; with_low_memory is added via
-	// -tags-not-macos so the macOS slice keeps full-size buffers (spec
-	// `-tags-not-macos=with_low_memory`, fork build.go:323).
 	baseTags       = "with_gvisor,cmfa,with_quic"
 	baseTagsNoQUIC = "with_gvisor,cmfa"
 	notMacosTags   = "with_low_memory"
@@ -129,9 +118,6 @@ func main() {
 		fatal(err)
 	}
 
-	// Declared here, above both branches: the overlay's cleanup prints the injection
-	// count and removes the shim, and fatal() exits without running defers, so every
-	// fatal after the shim exists calls it by hand -- including the slice verdict below.
 	overlayCleanup := func() {}
 	if target == "apple" {
 		if err := buildAppleSerial(root, outPath, buildInfo); err != nil {
@@ -166,9 +152,6 @@ func main() {
 			if err != nil {
 				fatal(err)
 			}
-			// Kept in a variable as well as deferred: fatal() exits the process, so the
-			// deferred call never runs on the paths where the injection count is the
-			// evidence that explains the failure.
 			defer cleanup()
 			overlayCleanup = cleanup
 			cmd.Env = env
@@ -196,8 +179,6 @@ func main() {
 	for _, s := range slices {
 		fmt.Fprintf(os.Stderr, "  %s\n", filepath.Base(s))
 	}
-	// The cpu overlay is keyed by file path and go build ignores a key that names
-	// nothing; only the linked slice can say whether it was compiled in.
 	if target == "apple" || isAppleBindTarget(bindTarget) {
 		if err := verifyAppleCPUOverlayInXCFramework(outPath); err != nil {
 			overlayCleanup()
@@ -216,16 +197,6 @@ func appleSerialBuildPlan() []appleSlicePlan {
 	}
 }
 
-// buildAppleSerial prevents the sagernet gomobile fork from launching one
-// gobind and one Go archive build per Apple platform/architecture in parallel.
-// Each child invocation receives exactly one platform/architecture. Frameworks
-// for the same simulator/macOS variant are checked and lipo-merged only after
-// both thin builds have completed.
-// appleSliceGroups lets a caller ask for a platform instead of spelling out its slices.
-// iOS and macOS have to be independently packageable: their Core capabilities now differ
-// (PROCESS-NAME/-PATH rules execute on a macOS Packet Tunnel and are stripped on iOS), and
-// each consuming app pins the SDK through its own lock file, so the two platforms are
-// versioned and rolled forward separately.
 func appleSliceGroups() map[string][]string {
 	return map[string][]string{
 		"ios":   {"ios-device", "ios-simulator"},
@@ -253,11 +224,6 @@ func appleSliceGroupNames() []string {
 	return names
 }
 
-// selectAppleSlices resolves the -slices request against the build plan.
-//
-// Fail-closed on an unknown name rather than skipping it: a typo would otherwise produce an
-// xcframework silently missing a platform, which is far worse than a build error because the
-// artifact still looks valid and only breaks at the consumer.
 func selectAppleSlices(request string, plans []appleSlicePlan) ([]appleSlicePlan, error) {
 	request = strings.TrimSpace(request)
 	if request == "" {
@@ -292,8 +258,6 @@ func selectAppleSlices(request string, plans []appleSlicePlan) ([]appleSlicePlan
 	if len(wanted) == 0 {
 		return nil, fmt.Errorf("-slices %q selected nothing", request)
 	}
-	// Plan order is preserved so a partial artifact assembles its slices in the same order
-	// as the full one.
 	selected := make([]appleSlicePlan, 0, len(wanted))
 	for _, plan := range plans {
 		if wanted[plan.name] {
@@ -425,11 +389,6 @@ func buildAppleSerial(root, outPath string, expectedBuildInfo []byte) error {
 	return nil
 }
 
-// canonicalizeXCFrameworkPlist rewrites the XCFramework's root Info.plist with AvailableLibraries
-// sorted by LibraryIdentifier. xcodebuild -create-xcframework emits them in an order that is
-// neither the argument order nor stable across runs, so two builds of the same revision could
-// differ in this one file after every archive inside them matched. plistlib writes dictionary
-// keys sorted, so the result is a canonical form: running it twice is a byte-level no-op.
 func canonicalizeXCFrameworkPlist(artifact string) error {
 	plist := filepath.Join(artifact, "Info.plist")
 	script := `import plistlib, sys
@@ -516,10 +475,6 @@ func frameworkMetadata(root string) (map[string]string, error) {
 	return metadata, nil
 }
 
-// verifyAppleBuildInfo requires one build-info resource per slice the build was ASKED for,
-// not one per slice in the full plan. Comparing against the full plan would fail every
-// partial artifact; comparing against "at least one" would let a slice go missing silently,
-// which is the failure this whole check exists to prevent.
 func verifyAppleBuildInfo(artifact string, expected []byte, wantSlices int) error {
 	paths, err := filepath.Glob(filepath.Join(
 		artifact,
@@ -548,11 +503,6 @@ func verifyAppleBuildInfo(artifact string, expected []byte, wantSlices int) erro
 	return nil
 }
 
-// finalizeXCFramework adds the Apple distribution metadata that gomobile does
-// not generate and tightens two constructor annotations that are known to be
-// non-nil. The latter removes a clang conflict with NSObject's nonnull init
-// without changing the conservative nullability of the exported C functions
-// that existing Swift clients already consume as optionals.
 func finalizeXCFramework(root, artifact string, buildInfo []byte) error {
 	manifest, err := os.ReadFile(filepath.Join(root, privacyManifestRelativePath))
 	if err != nil {
@@ -596,14 +546,6 @@ func finalizeXCFramework(root, artifact string, buildInfo []byte) error {
 	return nil
 }
 
-// appleBuildInfo is the provenance record every slice carries, identical across slices.
-//
-// Schema 2 adds the two facts schema 1 left out of "the exact build mode": the tags the
-// non-macOS slices are compiled with beyond the base set (gomobile's -tags-not-macos, so the
-// iOS/tvOS slices carry with_low_memory and the macOS slice does not -- one record, both
-// facts, still identical in every slice), and the Go toolchain that built it, which is the
-// standard library the binary links and the version a vulnerability scan of the artifact has
-// to be pinned to.
 type appleBuildInfo struct {
 	Schema              int      `json:"schema"`
 	SourceRevision      string   `json:"sourceRevision"`
@@ -618,7 +560,6 @@ type appleBuildInfo struct {
 	HTTP3NetworkQuality bool     `json:"http3NetworkQuality"`
 }
 
-// goVersionPattern is what `go env GOVERSION` answers for a release toolchain.
 var goVersionPattern = regexp.MustCompile(`^go[0-9]+\.[0-9]+(\.[0-9]+)?([a-z]+[0-9]+)?$`)
 
 func splitBuildTags(tags string) []string {
@@ -679,9 +620,6 @@ func encodeAppleBuildInfo(
 	return append(encoded, '\n'), nil
 }
 
-// goToolchainVersion is the Go that builds the bind module: `go env GOVERSION` asked from inside
-// that module, so a toolchain line in its go.mod is honoured the way gomobile's own go build
-// honours it. Asked from anywhere else it would answer with whatever go is on PATH.
 func goToolchainVersion(root string) (string, error) {
 	command := exec.Command("go", "env", "GOVERSION")
 	command.Dir = filepath.Join(root, bindModuleDir)
@@ -715,16 +653,6 @@ func gitSourceState(root string) (string, bool, error) {
 		return "", false, fmt.Errorf("read source status: %w", err)
 	}
 	entries := dirtySourceEntries(statusOutput)
-	// Untracked files count, and that is deliberate: an untracked .go file in this tree is
-	// compiled into the artifact, so a build made over one is genuinely not reproducible from
-	// the revision alone. What was NOT deliberate is that the answer was a bare bool. A whole
-	// round of builds recorded sourceDirty=true because a DerivedData directory sat at the repo
-	// root, and nobody could tell, because "dirty" named nothing. package_release.sh refuses a
-	// formal SDK on that flag, so whether a release could be packaged came down to whether
-	// somebody had happened to delete a temporary directory.
-	//
-	// The flag stays exactly as strict. It just says what it saw now, which is the difference
-	// between a build you fix in ten seconds and one you find out about a round later.
 	if len(entries) > 0 {
 		fmt.Fprintf(os.Stderr, "build_libbox: source tree is dirty, so this artifact records sourceDirty=true\n")
 		fmt.Fprintf(os.Stderr, "build_libbox: a formal SDK cannot be packaged from it (scripts/package_release.sh)\n")
@@ -735,8 +663,6 @@ func gitSourceState(root string) (string, bool, error) {
 	return revision, len(entries) != 0, nil
 }
 
-// dirtySourceEntries splits git's porcelain output into one line per path, dropping blank ones.
-// Returned rather than counted so the caller can name them.
 func dirtySourceEntries(statusOutput []byte) []string {
 	trimmed := bytes.TrimSpace(statusOutput)
 	if len(trimmed) == 0 {
@@ -764,11 +690,6 @@ func effectiveBaseTags(internal bool, includeQUIC bool) string {
 	return tags
 }
 
-// coreVersion is the mihomo core version injected into constant.Version, so
-// HakoVersion() always reports the upstream core (e.g. "1.19.28") — NOT the
-// SDK release. It is the latest tag minus the leading "v" and any "-hako.N"
-// SDK suffix: a release cut from tag "v1.19.28-hako.3" still reports
-// "1.19.28".
 func coreVersion(root string) (string, error) {
 	cmd := exec.Command("git", "describe", "--tags", "--abbrev=0", "--match", "v*")
 	cmd.Dir = root
@@ -779,9 +700,6 @@ func coreVersion(root string) (string, error) {
 	return parseCoreVersion(string(out))
 }
 
-// parseCoreVersion strips the leading "v" and any "-hako.N" SDK suffix from a
-// git tag, then validates the remainder is a plain semver — rejecting a nearest
-// non-semver tag rather than injecting it as the core version.
 func parseCoreVersion(describeOut string) (string, error) {
 	v := stripHakoSuffix(strings.TrimPrefix(strings.TrimSpace(describeOut), "v"))
 	if !coreVersionPattern.MatchString(v) {
@@ -790,8 +708,6 @@ func parseCoreVersion(describeOut string) (string, error) {
 	return v, nil
 }
 
-// stripHakoSuffix removes the SDK-release "-hako.N" suffix, leaving the core
-// mihomo version.
 func stripHakoSuffix(tag string) string {
 	if i := strings.Index(tag, "-hako"); i >= 0 {
 		return tag[:i]
@@ -799,13 +715,10 @@ func stripHakoSuffix(tag string) string {
 	return tag
 }
 
-// sdkVersion is an exact SDK tag at HEAD, never the nearest ancestor tag.
-// Non-release builds are labeled with their commit rather than impersonating
-// an older release.
 func sdkVersion(root string) (string, error) {
 	tagCmd := exec.Command("git", "tag", "--points-at", "HEAD")
 	tagCmd.Dir = root
-	tagOut, _ := tagCmd.Output() // empty on error -> dev fallback in selectSDKVersion
+	tagOut, _ := tagCmd.Output()
 
 	short := exec.Command("git", "rev-parse", "--short", "HEAD")
 	short.Dir = root
@@ -814,9 +727,6 @@ func sdkVersion(root string) (string, error) {
 	return selectSDKVersion(string(tagOut), strings.TrimSpace(string(shortOut)))
 }
 
-// selectSDKVersion returns the single SDK release tag at HEAD, a dev-<sha> label
-// when none is present, or an error when more than one release tag points at
-// HEAD — enforcing the exactly-one-tag release rule.
 func selectSDKVersion(tagOutput, shortSHA string) (string, error) {
 	var matches []string
 	for _, tag := range strings.Fields(tagOutput) {
@@ -837,7 +747,6 @@ func selectSDKVersion(tagOutput, shortSHA string) (string, error) {
 	}
 }
 
-// findTool locates gomobile/gobind, preferring PATH then GOPATH/bin.
 func findTool(name string) (string, error) {
 	if p, err := exec.LookPath(name); err == nil {
 		return p, nil
@@ -852,8 +761,6 @@ func findTool(name string) (string, error) {
 	return "", fmt.Errorf("%s not found in PATH or GOPATH/bin (install gomobile)", name)
 }
 
-// buildEnv augments the environment so the build works on machines where
-// xcode-select points at CommandLineTools and gobind is only in GOPATH/bin.
 func buildEnv() []string {
 	env := os.Environ()
 	if os.Getenv("DEVELOPER_DIR") == "" {
@@ -869,11 +776,6 @@ func buildEnv() []string {
 		gobin := filepath.Join(strings.TrimSpace(string(gopath)), "bin")
 		env = append(env, "PATH="+gobin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
-	// Apple's ar/ranlib/libtool stamp the archive symbol table (`__.SYMDEF SORTED`) with the
-	// current time, and cctools honour this variable to write zero instead. The Go linker
-	// already zeroes the object members it hands to ar, so this is the one remaining source
-	// of checksum drift between two clean builds of the same revision (measured: identical
-	// members, differing archives, until this was set). lipo and xcodebuild ignore it.
 	env = append(env, "ZERO_AR_DATE=1")
 	return env
 }

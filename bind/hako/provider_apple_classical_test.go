@@ -7,12 +7,6 @@ import (
 	P "github.com/TokenPLS/Hako/constant/provider"
 )
 
-// A macOS Transparent Proxy profile trusts process metadata, so PROCESS rules are
-// KEPT rather than stripped -- but an entry this pinned core cannot parse or
-// support must still be SKIPPED, not fail the whole provider. Before this the
-// trusted path ran a strict validator that rejected the provider outright, so a
-// single RULE-SET line failed Start on macOS while the iOS path (and upstream
-// classicalStrategy.Insert) skipped it and loaded the rest.
 func TestSanitizeClassicalProviderForAppleTrustedSkipsUnsupportedKeepsProcess(t *testing.T) {
 	payload := []byte("payload:\n  - DOMAIN,keep.example\n  - RULE-SET,unsupported\n  - PROCESS-NAME,curl\n  - DOMAIN-SUFFIX,also.example\n")
 	prepared, count, stripped, err := sanitizeClassicalProviderPayloadForApple(payload, P.YamlRule, appleProcessMetadataCapability{processPath: true, socketUser: true, inboundUser: true, codeSignature: true})
@@ -38,9 +32,6 @@ func TestSanitizeClassicalProviderForAppleTrustedSkipsUnsupportedKeepsProcess(t 
 	}
 }
 
-// Untrusted (iOS/NE) keeps the established behavior: the metadata rule is
-// stripped because the packet tunnel has no process input, and the unsupported
-// entry is skipped.
 func TestSanitizeClassicalProviderForAppleUntrustedStripsProcess(t *testing.T) {
 	payload := []byte("payload:\n  - DOMAIN,keep.example\n  - RULE-SET,unsupported\n  - PROCESS-NAME,curl\n")
 	prepared, count, stripped, err := sanitizeClassicalProviderPayloadForApple(payload, P.YamlRule, appleProcessMetadataCapability{})
@@ -58,19 +49,6 @@ func TestSanitizeClassicalProviderForAppleUntrustedStripsProcess(t *testing.T) {
 	}
 }
 
-// Staging and counting want different things from the same bytes, and only one
-// of them needs the expensive answer.
-//
-// Counting is a display figure the App shows at import: "this rule set holds N
-// rules" has to mean rules the core will actually execute, so it parses every
-// entry. Staging only has to remove what the platform cannot evaluate --
-// PROCESS/UID/SOURCE-APP metadata, which is a prefix test. It used to parse
-// every entry too, building each rule to learn whether it would build and then
-// discarding it: 253ms of a 413ms staging pass over twenty-one rule sets, for
-// an answer upstream computes again at load. classicalStrategy.Insert
-// (rules/provider/classical_strategy.go:41) warn-skips an entry it cannot
-// parse and keeps the rest, so an entry left in the staged bytes matches
-// exactly what a removed one matched: nothing.
 
 func TestStagingStripsMetadataRulesWithoutBuildingEveryRule(t *testing.T) {
 	payload := []byte("payload:\n" +
@@ -95,9 +73,6 @@ func TestStagingStripsMetadataRulesWithoutBuildingEveryRule(t *testing.T) {
 	}
 }
 
-// The entry upstream would skip stays in the staged bytes. Removing it cost a
-// full rule construction and changed nothing a reader can observe: upstream
-// skips it at load either way, and its own warning names the line.
 func TestStagingLeavesAnUnparseableEntryForUpstreamToSkip(t *testing.T) {
 	payload := []byte("payload:\n" +
 		"  - DOMAIN,keep.example\n" +
@@ -115,9 +90,6 @@ func TestStagingLeavesAnUnparseableEntryForUpstreamToSkip(t *testing.T) {
 	}
 }
 
-// Nothing to strip has to mean the exact original bytes: the staged copy is a
-// hard link to the published revision when it is unchanged, and re-encoding
-// would break that and copy every rule set instead.
 func TestStagingPassesThroughWhenThereIsNothingToStrip(t *testing.T) {
 	payload := []byte("payload:\n  - DOMAIN,keep.example\n  - IP-CIDR,10.0.0.0/8\n")
 	prepared, stripped, err := stageClassicalProviderPayloadForApple(
@@ -130,8 +102,6 @@ func TestStagingPassesThroughWhenThereIsNothingToStrip(t *testing.T) {
 	}
 }
 
-// Counting keeps the expensive answer, because "N rules" must mean rules that
-// will run. The unparseable one is not among them.
 func TestCountingStillReportsOnlyExecutableEntries(t *testing.T) {
 	payload := []byte("payload:\n" +
 		"  - DOMAIN,keep.example\n" +
@@ -145,8 +115,6 @@ func TestCountingStillReportsOnlyExecutableEntries(t *testing.T) {
 	}
 }
 
-// A profile that resolves process identity keeps those rules through staging,
-// exactly as it does through counting.
 func TestStagingKeepsProcessRulesWhereTheProfileCanResolveThem(t *testing.T) {
 	payload := []byte("payload:\n  - PROCESS-NAME,Mail\n  - DOMAIN,keep.example\n")
 	prepared, stripped, err := stageClassicalProviderPayloadForApple(

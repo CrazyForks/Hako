@@ -35,14 +35,9 @@ func (l countingIPLoader) LoadIPByBytes([]byte, string) ([]*router.CIDR, error) 
 	return nil, fmt.Errorf("not used")
 }
 
-// stageCountingIPLoader installs a loader that reports how many times source material was
-// decoded, which is the only way to tell "the artifact was used" from "the artifact was
-// read and then the decode ran anyway".
 func stageCountingIPLoader(t *testing.T, name string) *int {
 	t.Helper()
 	reads := 0
-	// 203.0.113.0/24 is TES: distinct from anything a compiled fixture holds, so a
-	// match proves WHICH path produced the matcher.
 	list := []*router.CIDR{{Ip: netip.MustParseAddr("203.0.113.0").AsSlice(), Prefix: 24}}
 	RegisterGeoDataLoaderImplementationCreator(name, func() LoaderImplementation {
 		return countingIPLoader{reads: &reads, list: list}
@@ -90,8 +85,6 @@ func writeCompiledCountry(t *testing.T, directory, country string, prefixes ...s
 	}
 }
 
-// The artifact has to WIN, or the saving is theoretical: the decode it replaces peaks at
-// 130 MiB for one country code on the shipped file.
 func TestCompiledCountryIsPreferredOverSource(t *testing.T) {
 	directory := stageCompiledGeoIPHome(t)
 	reads := stageCountingIPLoader(t, "compiled-geoip-preference-probe")
@@ -107,15 +100,11 @@ func TestCompiledCountryIsPreferredOverSource(t *testing.T) {
 	if !matcher.Match(netip.MustParseAddr("1.1.1.1")) {
 		t.Fatal("the compiled country does not answer for what it holds")
 	}
-	// The source loader would have produced 203.0.113.0/24 instead. If that matches, the
-	// decode ran and the artifact did not.
 	if matcher.Match(netip.MustParseAddr("203.0.113.1")) {
 		t.Fatal("the matcher holds the source loader's addresses, so the artifact lost")
 	}
 }
 
-// The rule a reader lives by, carried over from geosite: a country this process cannot
-// afford to build is a country that matches nothing, not a tunnel that refuses to start.
 func TestCompiledOnlyGeoIPDegradesInsteadOfDecoding(t *testing.T) {
 	stageCompiledGeoIPHome(t)
 	reads := stageCountingIPLoader(t, "compiled-geoip-degrade-probe")
@@ -136,8 +125,6 @@ func TestCompiledOnlyGeoIPDegradesInsteadOfDecoding(t *testing.T) {
 	}
 }
 
-// With the policy off -- the containing App -- the decode must still happen, or compiling
-// could never produce an artifact in the first place.
 func TestGeoIPStillDecodesWhereItIsAffordable(t *testing.T) {
 	stageCompiledGeoIPHome(t)
 	reads := stageCountingIPLoader(t, "compiled-geoip-app-probe")
@@ -155,8 +142,6 @@ func TestGeoIPStillDecodesWhereItIsAffordable(t *testing.T) {
 	}
 }
 
-// Negation is applied to the matcher after loading, so it has to survive the artifact path
-// as well as the decode path. !cn must match everything the artifact does NOT hold.
 func TestCompiledCountryHonoursNegation(t *testing.T) {
 	directory := stageCompiledGeoIPHome(t)
 	stageCountingIPLoader(t, "compiled-geoip-negation-probe")
@@ -174,8 +159,6 @@ func TestCompiledCountryHonoursNegation(t *testing.T) {
 	}
 }
 
-// An artifact that is present but unreadable must not take the process down, and must not
-// be silently treated as an empty country either where a decode is affordable.
 func TestCorruptCompiledCountryFallsBackToSource(t *testing.T) {
 	directory := stageCompiledGeoIPHome(t)
 	reads := stageCountingIPLoader(t, "compiled-geoip-corrupt-probe")
@@ -204,15 +187,6 @@ func TestCorruptCompiledCountryFallsBackToSource(t *testing.T) {
 	}
 }
 
-// The degradation must stay inert under negation, and this is the property that makes it
-// safe rather than catastrophic.
-//
-// A matcher that merely returns false gets wrapped by NewNotIpMatcherGroup when the
-// configuration wrote a leading '!', and !false is true for EVERYTHING. So
-// `GEOIP,!CN,PROXY` with cn uncompiled stopped being "cn does not match" and became "every
-// address matches", killing every rule below it and routing domestic traffic through the
-// proxy. dns.fallback-filter.geoip computes !Match too, so every answer would be judged
-// polluted and forced onto the fallback nameservers.
 func TestAnUnavailableCountryStaysInertUnderNegation(t *testing.T) {
 	stageCompiledGeoIPHome(t)
 	stageCountingIPLoader(t, "compiled-geoip-negation-inert-probe")
@@ -230,7 +204,6 @@ func TestAnUnavailableCountryStaysInertUnderNegation(t *testing.T) {
 	}
 }
 
-// The same for geosite, where the identical wrapper exists.
 func TestAnUnavailableCategoryStaysInertUnderNegation(t *testing.T) {
 	stageCompiledGeoIPHome(t)
 	previous := CompiledGeoSiteOnly()
@@ -250,13 +223,6 @@ func TestAnUnavailableCategoryStaysInertUnderNegation(t *testing.T) {
 	}
 }
 
-// A reload happens while the old rule set is still forwarding traffic, and rules/common
-// reaches these loaders on every match. So the policy flags and the progress seam are
-// written by one goroutine while others read them -- which the repository's tests never
-// exercised, because none of them reloads concurrently with matching.
-//
-// A func value is two words. An unsynchronised write is not merely a stale read: a reader
-// can see half of one function and half of another and jump into nothing.
 func TestReloadingWhileMatchingIsNotARace(t *testing.T) {
 	stageCompiledGeoIPHome(t)
 	stageCountingIPLoader(t, "compiled-geoip-race-probe")
@@ -265,7 +231,6 @@ func TestReloadingWhileMatchingIsNotARace(t *testing.T) {
 	done := make(chan struct{})
 	var writers, readers sync.WaitGroup
 
-	// The reload side: what normalizeRawConfigForApple does on every config change.
 	writers.Add(1)
 	go func() {
 		defer writers.Done()
@@ -286,7 +251,6 @@ func TestReloadingWhileMatchingIsNotARace(t *testing.T) {
 		}
 	}()
 
-	// The traffic side: what a connection does for every GEOIP rule it evaluates.
 	for worker := 0; worker < 4; worker++ {
 		readers.Add(1)
 		go func() {

@@ -30,35 +30,22 @@ import (
 	"time"
 )
 
-// Config is used to tune the Smux session
 type Config struct {
-	// SMUX Protocol version, support 1,2
 	Version int
 
-	// Disabled keepalive
 	KeepAliveDisabled bool
 
-	// KeepAliveInterval is how often to send a NOP command to the remote
 	KeepAliveInterval time.Duration
 
-	// KeepAliveTimeout is how long the session
-	// will be closed if no data has arrived
 	KeepAliveTimeout time.Duration
 
-	// MaxFrameSize is used to control the maximum
-	// frame size to sent to the remote
 	MaxFrameSize int
 
-	// MaxReceiveBuffer is used to control the maximum
-	// number of data in the buffer pool
 	MaxReceiveBuffer int
 
-	// MaxStreamBuffer is used to control the maximum
-	// number of data per stream
 	MaxStreamBuffer int
 }
 
-// DefaultConfig is used to return a default configuration
 func DefaultConfig() *Config {
 	return &Config{
 		Version:           1,
@@ -70,7 +57,6 @@ func DefaultConfig() *Config {
 	}
 }
 
-// VerifyConfig is used to verify the sanity of configuration
 func VerifyConfig(config *Config) error {
 	if !(config.Version == 1 || config.Version == 2) {
 		return errors.New("unsupported protocol version")
@@ -107,7 +93,6 @@ func VerifyConfig(config *Config) error {
 	return nil
 }
 
-// Server is used to initialize a new server-side connection.
 func Server(conn io.ReadWriteCloser, config *Config) (*Session, error) {
 	if config == nil {
 		config = DefaultConfig()
@@ -118,7 +103,6 @@ func Server(conn io.ReadWriteCloser, config *Config) (*Session, error) {
 	return newSession(config, conn, false), nil
 }
 
-// Client is used to initialize a new client-side connection.
 func Client(conn io.ReadWriteCloser, config *Config) (*Session, error) {
 	if config == nil {
 		config = DefaultConfig()

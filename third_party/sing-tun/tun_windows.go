@@ -250,19 +250,6 @@ func (t *NativeTun) configure() error {
 			return os.NewSyscallError("FwpmFilterAdd0", err)
 		}
 
-		/*if len(t.options.Inet4Address) == 0 {
-			blockFilter := winsys.FWPM_FILTER0{}
-			blockFilter.DisplayData = winsys.CreateDisplayData(TunnelType, "block ipv4")
-			blockFilter.SubLayerKey = subLayerKey
-			blockFilter.LayerKey = winsys.FWPM_LAYER_ALE_AUTH_CONNECT_V4
-			blockFilter.Action.Type = winsys.FWP_ACTION_BLOCK
-			blockFilter.Weight.Type = winsys.FWP_UINT8
-			blockFilter.Weight.Value = uintptr(12)
-			err = winsys.FwpmFilterAdd0(engine, &blockFilter, 0, &filterId)
-			if err != nil {
-				return os.NewSyscallError("FwpmFilterAdd0", err)
-			}
-		}*/
 
 		if len(t.options.Inet6Address) == 0 {
 			blockFilter := winsys.FWPM_FILTER0{}
@@ -494,7 +481,7 @@ func (t *NativeTun) Write(p []byte) (n int, err error) {
 	case windows.ERROR_HANDLE_EOF:
 		return 0, os.ErrClosed
 	case windows.ERROR_BUFFER_OVERFLOW:
-		return 0, nil // Dropping when ring is full.
+		return 0, nil
 	}
 	return 0, fmt.Errorf("write failed: %w", err)
 }
@@ -523,7 +510,7 @@ func (t *NativeTun) write(packetElementList [][]byte) (n int, err error) {
 	case windows.ERROR_HANDLE_EOF:
 		return 0, os.ErrClosed
 	case windows.ERROR_BUFFER_OVERFLOW:
-		return 0, nil // Dropping when ring is full.
+		return 0, nil
 	}
 	return 0, fmt.Errorf("write failed: %w", err)
 }
@@ -584,6 +571,6 @@ func (rate *rateJuggler) update(packetLen uint64) {
 
 const (
 	rateMeasurementGranularity = uint64((time.Second / 2) / time.Nanosecond)
-	spinloopRateThreshold      = 800000000 / 8                                   // 800mbps
-	spinloopDuration           = uint64(time.Millisecond / 80 / time.Nanosecond) // ~1gbit/s
+	spinloopRateThreshold      = 800000000 / 8
+	spinloopDuration           = uint64(time.Millisecond / 80 / time.Nanosecond)
 )

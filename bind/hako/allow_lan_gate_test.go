@@ -5,32 +5,6 @@ import (
 	"testing"
 )
 
-// allow-lan is the one field in the local-proxy group that changes who can reach the device.
-// genAddr (listener/listener.go:709-718) binds ":port" -- every interface -- when it is true,
-// and 127.0.0.1 when it is not. The other ten fields configure a listener; this one decides
-// whether the listener is on the network the device happens to have joined.
-//
-// Honouring it straight from an imported subscription would have changed the security posture
-// of already-shipped users without anybody pressing anything: same config, same device, new
-// kernel, open proxy.
-//
-// The precedent does not cover that. Two shipped apps establish that Apple does not object to
-// the capability itself:
-//
-//   - Shadowrocket's Mac App Store packet tunnel declares
-//     NSLocalNetworkUsageDescription = "Use local networking to provice local proxy service."
-//     (sic), imports _listen/_bind/_accept/_socket, and carries app-sandbox with
-//     network.server. Re-verified on this machine; the commands are in
-//     CORE-FIDELITY-FINDINGS-AND-ROADMAP.md.
-//   - Stash's own wiki: "Stash iOS, Stash tvOS, and Stash Mac all support providing proxy for
-//     local area network devices", HTTP and SOCKS on port 7890.
-//
-// Both reach users the way ours must: behind a switch somebody turns on -- Stash calls it
-// "Allow LAN connections". The precedent is for the capability, never for opening it unasked.
-//
-// So the kernel honours it only when the containing app says so, and the ruling put one hard
-// constraint on the shape: the safe state must not depend on the app remembering to ask for
-// it. Go's zero value carries that -- a build that never calls the setter never exposes.
 func TestAllowLanIsNotHonouredUntilTheAppPermitsIt(t *testing.T) {
 	const document = `
 mixed-port: 7890
@@ -40,7 +14,6 @@ proxy-groups: []
 rules:
   - MATCH,DIRECT
 `
-	// No setter call anywhere in this test: this is the state a client that does nothing gets.
 	t.Cleanup(func() { SetAllowLanPermitted(false) })
 
 	_, ours := parseBoth(t, document)
@@ -74,8 +47,6 @@ rules:
 	}
 }
 
-// Revoking has to take effect. An app-level switch that only ever turns on would leave a user
-// who changed their mind exposed until the next process launch.
 func TestRevokingThePermissionTakesEffectOnTheNextParse(t *testing.T) {
 	const document = `
 mixed-port: 7890
@@ -98,7 +69,6 @@ rules:
 	}
 }
 
-// Gating it silently would be the same failure this batch exists to end, one layer over.
 func TestGatingAllowLanIsReportedWithSomewhereToGo(t *testing.T) {
 	const document = `
 mixed-port: 7890
@@ -125,7 +95,6 @@ rules:
 		if !strings.Contains(deviation.Source, "listener.go") {
 			t.Errorf("source = %q, want the line that shows what allow-lan actually binds", deviation.Source)
 		}
-		// And once permitted it is not a deviation at all.
 		SetAllowLanPermitted(true)
 		after, _ := collectConfigDeviations(document, runtimePolicyFor(runtimeProfileIOSPacketTunnel, true))
 		for _, d := range after {
@@ -138,14 +107,6 @@ rules:
 	t.Error("allow-lan was gated and nothing was reported")
 }
 
-// The permission is a ceiling, not a request. Two different people say yes in two different
-// places before anything is exposed: the person holding the device grants the permission in
-// the app, and the configuration asks for it with allow-lan. Exposure is the conjunction.
-//
-// This pins the half that is easiest to lose later, because losing it looks like a
-// simplification: "the user turned local-network sharing on, so turn allow-lan on". That would
-// make an app-level switch reach into every configuration the user ever imports, including the
-// ones whose authors never asked for it.
 func TestPermissionAloneExposesNothingWithoutTheConfigurationAsking(t *testing.T) {
 	const silentAboutLan = `
 mixed-port: 7890

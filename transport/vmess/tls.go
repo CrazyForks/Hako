@@ -49,11 +49,6 @@ func (cfg *TLSConfig) ToStdConfig() (*tls.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	// No session cache here on purpose. ToStdConfig is NOT TCP-only: TrustTunnel's QUIC
-	// round-tripper and the VLESS XHTTP/3 path both build their quic-go TLS config from
-	// it, and quic-go manages its own session tickets -- the same reason forbids
-	// arming one inside ca.GetTLSConfig. The cache is attached in StreamTLSConn, on the
-	// one branch that actually performs a TCP TLS handshake with this config.
 	return tlsConfig, nil
 }
 
@@ -145,13 +140,6 @@ func StreamTLSConn(ctx context.Context, conn net.Conn, cfg *TLSConfig) (net.Conn
 		return nil, err
 	}
 
-	// This is the only branch that hands a metacubex/tls config to a TCP handshake, so it
-	// is the only place a ClientSessionCache belongs. Everything above either returned
-	// already (shadow-tls, restls, jls, tlsmirror) or converts to uTLS, whose UConfig does
-	// not carry ClientSessionCache across -- so arming it earlier reached QUIC callers that
-	// must not have it while doing nothing for the paths it appeared to cover.
-	//
-	// Attached after ECH.ClientHandle so it cannot be overwritten by that step.
 	if tlsConfig.ClientSessionCache == nil {
 		tlsConfig.ClientSessionCache = sessionCacheFor(cfg)
 	}

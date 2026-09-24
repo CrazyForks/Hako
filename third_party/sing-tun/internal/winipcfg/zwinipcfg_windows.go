@@ -11,8 +11,6 @@ import (
 
 var _ unsafe.Pointer
 
-// Do the interface allocations only once for common
-// Errno values.
 const (
 	errnoERROR_IO_PENDING = 997
 )
@@ -22,8 +20,6 @@ var (
 	errERROR_EINVAL     error = syscall.EINVAL
 )
 
-// errnoErr returns common boxed Errno values, to prevent
-// allocations at runtime.
 func errnoErr(e syscall.Errno) error {
 	switch e {
 	case 0:
@@ -31,9 +27,6 @@ func errnoErr(e syscall.Errno) error {
 	case errnoERROR_IO_PENDING:
 		return errERROR_IO_PENDING
 	}
-	// TODO: add more here, after collecting data on the common
-	// error values see on Windows. (perhaps when running
-	// all.bat?)
 	return e
 }
 

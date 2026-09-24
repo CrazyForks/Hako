@@ -7,9 +7,6 @@ import (
 	"github.com/TokenPLS/Hako/component/geodata/router"
 )
 
-// Counts how many times a list is decoded, so "the cache was dropped" is
-// observed as a second read rather than inferred from a heap number that
-// moves with unrelated allocation.
 type countingLoader struct {
 	reads *int
 	list  []*router.Domain
@@ -57,14 +54,7 @@ func stageCountingLoader(t *testing.T, name string) *int {
 	return &reads
 }
 
-// The list a matcher is built from is scaffolding, and singleflight's
-// StoreResult keeps it for the life of the process. Under memconservative —
-// the mode the packet tunnel runs in, where the reader has said they would
-// rather re-read the file than hold it — that retention is what put startup
-// over the 50 MiB jetsam ceiling while parsing a configuration whose DNS
-// nameserver-policy names geosite:cn.
 func TestMemConservativeDoesNotRetainTheDecodedList(t *testing.T) {
-	// Registered under the real mode name: the branch under test keys off it.
 	reads := stageCountingLoader(t, "memconservative")
 
 	if _, err := LoadGeoSiteMatcher("retention-cn"); err != nil {
@@ -73,8 +63,6 @@ func TestMemConservativeDoesNotRetainTheDecodedList(t *testing.T) {
 	if *reads != 1 {
 		t.Fatalf("first build read the list %d times, want 1", *reads)
 	}
-	// A different matcher over the same list: with the list still cached this
-	// costs nothing, which is exactly the retention being paid for.
 	if _, err := LoadGeoSiteMatcher("retention-cn@ads"); err != nil {
 		t.Fatal(err)
 	}
@@ -83,9 +71,6 @@ func TestMemConservativeDoesNotRetainTheDecodedList(t *testing.T) {
 	}
 }
 
-// The other half of the trade, so the gate cannot be satisfied by dropping the
-// cache everywhere: with a heap to spare, holding the list is the right call
-// and upstream's behaviour stands.
 func TestStandardLoaderKeepsTheDecodedList(t *testing.T) {
 	reads := stageCountingLoader(t, "standard-retention-probe")
 

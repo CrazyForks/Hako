@@ -18,8 +18,6 @@ type decodedProxyImportReport struct {
 	Format  string           `json:"format"`
 	Context string           `json:"context"`
 	Proxies []map[string]any `json:"proxies"`
-	// One field, because the report has one outcome for "did not become a node".
-	// The two it replaced were concatenated by every consumer that read them.
 	Skipped     []decodedProxyImportIssue `json:"skipped"`
 	NotHonoured []decodedProxyImportIssue `json:"notHonoured"`
 }
@@ -110,8 +108,6 @@ func TestProxyImportCapabilitiesForIOSOwnsTheCompleteSchemeRegistry(t *testing.T
 		"ssocks", "ssocks5", "lua", "ssr", "sub", "trojan", "trojan-go",
 		"ss", "gp", "snell", "vless", "relay", "hysteria", "hy",
 		"hysteria2", "hy2",
-		// Upstream builds proxies from the +realm spellings; the registry follows the
-		// core it feeds rather than only what one exporter emits.
 		"hysteria2+realm", "hy2+realm",
 		"tuic", "juicity", "wireguard", "wg", "masque",
 		"ssh", "anytls", "openconnect", "tt", "mierus", "mieru", "brook",
@@ -120,22 +116,12 @@ func TestProxyImportCapabilitiesForIOSOwnsTheCompleteSchemeRegistry(t *testing.T
 		t.Fatalf("schemes = %#v, want %#v", got, want)
 	}
 	wantStatuses := map[string]string{
-		// Adjudicated against the exporter's own output rather than the scheme
-		// name: trojan-go and ssocks5 are input aliases it normalises away
-		// -- it re-exports them as trojan:// and ssocks:// -- while relay:// turned
-		// out to be a single node whose authority is base64(host:port), not the
-		// multi-hop both lanes read into the name. http2 and http3 keep their own
-		// scheme and mihomo has no HTTP/2 or HTTP/3 CONNECT outbound to build.
 		"http2": "coreUnsupported", "http3": "coreUnsupported",
 		"ssocks": "supported", "ssocks5": "supported",
-		// Upstream's converter lists socks5h alongside socks and socks5
-		// (common/convert/converter.go); this registry simply never carried it.
 		"socks5h":   "supported",
 		"trojan-go": "supported", "relay": "coreUnsupported",
 		"lua": "coreUnsupported", "gp": "coreUnsupported", "juicity": "coreUnsupported",
 		"openconnect": "coreUnsupported", "brook": "coreUnsupported", "sub": "wrapper",
-		// mieru:// is the standard format upstream also accepts; it carries a whole
-		// multi-profile client config, so it is named and refused, not constructed.
 		"mieru": "coreUnsupported",
 	}
 	for _, item := range capabilities.Schemes {
@@ -210,13 +196,8 @@ func TestEverySupportedImportSchemeHasAConstructibleFixture(t *testing.T) {
 		"anytls": "anytls://secret@example.invalid:443#anytls",
 		"tt":     "tt://?" + base64.RawURLEncoding.EncodeToString(trustTunnelPayload),
 		"mierus": "mierus://user:secret@example.invalid:443?proto=TCP&profile=profile#mieru",
-		// The +realm spellings are upstream's own (converter.go switches on the
-		// suffix); the shape is upstream's test input with a documentation host.
 		"hysteria2+realm": "hysteria2+realm://tok3n@example.invalid:8443/rid42?auth=letmein&stun=stun1.example.invalid:3478&sni=example.invalid#realm",
 		"hy2+realm":       "hy2+realm://tok3n@example.invalid:8443/rid42?auth=letmein&stun=stun1.example.invalid:3478&sni=example.invalid#realm",
-		// The exporter's own shapes: ssocks carries a base64 authority and states
-		// TLS in the scheme, trojan-go spells its websocket transport through the
-		// Shadowrocket obfs plugin.
 		"ssocks":    "ssocks://dXNlcjpzZWNyZXRAZXhhbXBsZS5pbnZhbGlkOjQ0Mw?remarks=ssocks",
 		"ssocks5":   "ssocks5://dXNlcjpzZWNyZXRAZXhhbXBsZS5pbnZhbGlkOjQ0Mw?remarks=ssocks5",
 		"trojan-go": "trojan-go://secret@example.invalid:443?peer=sni.example.invalid&plugin=obfs-local;obfs%3Dwebsocket;obfs-host%3Dsni.example.invalid;path%3D/go",
@@ -342,21 +323,6 @@ func TestImportsEveryRealShadowrocketExportFromOneBase64SubscriptionBundle(t *te
 	}
 }
 
-// Fields an exporter writes that mihomo has nowhere to put arrive as notices,
-// and the node arrives with them.
-//
-// This gate asserted the opposite until 2026-08-28: each of these refused the
-// whole node, and the two cases removed from the list below -- a WireGuard link
-// carrying sni, an AnyTLS link carrying keepalive -- were refused for naming a
-// layer their outbound does not have. The reader's ruling that day was that
-// there is no "recognized but unsupported" outcome: parse what can be parsed,
-// skip what cannot, and count what was skipped. A field with nowhere to go is
-// not a reason to throw away a node that would have connected.
-//
-// What stays here is the other shape: a field that changes the bytes on the
-// wire. A snell link naming a plugin we cannot build, a trojan obfs mode that
-// is not websocket -- drop those and the node still looks like a node but no
-// longer talks to that server. Those are skipped, with the reason.
 func TestFieldsThatChangeTheWireAreSkippedAndOthersArrive(t *testing.T) {
 	const masquePublic = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEr%2BS%2B1lurxAxUbuPi4RhUv%2FaZ5CVG%2FBr79BRi0b%2BQX%2B7oBc5Yx2eQ7OMYFGQ6%2BlqPLWkEr1pl1nZg%2BRoEzg1Jqg%3D%3D"
 	const masquePrivate = "MHcCAQEEIIDzwMdDFdFe3jj4vanTuI2sdBFaUjjPnV%2F68XaVWfwfoAoGCCqGSM49AwEHoUQDQgAEr%2BS%2B1lurxAxUbuPi4RhUv%2FaZ5CVG%2FBr79BRi0b%2BQX%2B7oBc5Yx2eQ7OMYFGQ6%2BlqPLWkEr1pl1nZg%2BRoEzg1Jqg%3D%3D"
@@ -389,14 +355,6 @@ func TestFieldsThatChangeTheWireAreSkippedAndOthersArrive(t *testing.T) {
 	}
 }
 
-// The second half of this test asserted a refusal until 2026-09-02: a body key
-// this build did not list threw the node away. That is the day a person's
-// subscription arrived with `"class": 0` on every node and none of them
-// imported, while upstream -- which decodes the same body and reads only the
-// keys it knows -- built all seven. The reader's ruling: the same rule as the
-// query keys, for every JSON body this importer reads. The node arrives; the
-// key is named as not honoured, under the node's name, so it is louder than
-// upstream and no longer stricter.
 func TestVMessBase64JSONConsumesDeepFieldsAndReportsUnknownChildren(t *testing.T) {
 	const pin = "65b3acd7db555768304a16abb6f4366c1a0c0bb5cec81429617f0150d7d66726"
 	jsonFixture := `{"v":"2","ps":"vmess-json-deep","add":"example.invalid","port":"443",` +
@@ -438,8 +396,6 @@ func TestVMessBase64JSONConsumesDeepFieldsAndReportsUnknownChildren(t *testing.T
 		report.NotHonoured[0].Proxy != "vmess-json-deep" || report.NotHonoured[0].Code != "fieldNotHonoured" {
 		t.Fatalf("the key must be named as not honoured, under the node's name: %#v", report.NotHonoured)
 	}
-	// The node that arrived is the node the known keys describe; the unknown
-	// key changed nothing on it.
 	for path, expected := range want {
 		got, exists := nestedProxyValue(report.Proxies[0], path)
 		if !exists || !reflect.DeepEqual(got, expected) {
@@ -690,18 +646,6 @@ func TestEveryCanonicalImportProtocolPreservesItsDeepConnectionFields(t *testing
 	}
 }
 
-// Every canonical protocol names a field it could not consume, and imports the
-// node anyway.
-//
-// This asserted the refusal until 2026-08-28, across all seventeen protocols,
-// which is why the defect it encoded was seventeen protocols wide: an exporter
-// inventing one key cost the node on every one of them. The reader's ruling is
-// that there is no such outcome -- parse what parses, and say what was left
-// behind.
-//
-// Naming it is still required, and is the half that must not be lost. A field
-// dropped in silence produces a node that looks right and behaves differently,
-// and the person has nothing to connect the behaviour back to.
 func TestEveryCanonicalImportProtocolNamesAnUnconsumedSemanticField(t *testing.T) {
 	privateKey := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	publicKeyBytes := make([]byte, 32)
@@ -728,9 +672,6 @@ func TestEveryCanonicalImportProtocolNamesAnUnconsumedSemanticField(t *testing.T
 		"tuic":      "tuic://00000000-0000-0000-0000-000000000001:secret@example.invalid:443?hako_unknown_semantic=1#tuic",
 		"wireguard": "wireguard://example.invalid:51820?publicKey=" + urlQueryEscape(publicKey) +
 			"&privateKey=" + urlQueryEscape(privateKey) + "&ip=10.0.0.2%2F32&hako_unknown_semantic=1#wireguard",
-		// The keys are real ones. They were `unused` until 2026-08-28 and that
-		// went unnoticed for as long as the unknown-field refusal fired first:
-		// the record never reached the kernel, so nothing ever decoded them.
 		"masque": "masque://example.invalid:443?privateKey=" + urlQueryEscape(masqueValidPrivate) +
 			"&publicKey=" + urlQueryEscape(masqueValidPublic) + "&ip=10.0.0.2%2F32" +
 			"&hako_unknown_semantic=1#masque",
@@ -859,13 +800,6 @@ func TestNestedTLSContainersPreserveRealityAndNameUnknownChildren(t *testing.T) 
 		})
 	}
 
-	// A TLS child this build does not map. Until 2026-09-02 these two were in
-	// the list below and refused the outbound, on the argument that a TLS
-	// child we cannot read describes security we cannot provide. The reader's
-	// ruling that day put them with the query keys instead: the node arrives
-	// with the TLS it did ask for, and the key it also asked for is named as
-	// not honoured -- said, not silently dropped, and not a reason to lose a
-	// node whose every other field this build reads.
 	unknownChildren := []struct {
 		payload string
 		notice  string
@@ -899,9 +833,6 @@ func TestNestedTLSContainersPreserveRealityAndNameUnknownChildren(t *testing.T) 
 		})
 	}
 
-	// A child that is not the shape the dialect defines, or that names a
-	// layer the outbound does not have. There is no reading of these that
-	// builds the node the file describes.
 	unreadableChildren := []string{
 		`{"outbounds":[{"type":"vless","tag":"Sing","server":"sing.example.invalid","server_port":443,"uuid":"b831381d-6324-4d53-ad4f-8cda48b30811","tls":true}]}`,
 		`{"outbounds":[{"type":"vless","tag":"Sing","server":"sing.example.invalid","server_port":443,"uuid":"b831381d-6324-4d53-ad4f-8cda48b30811","tls":{"enabled":true,"utls":{"enabled":false,"fingerprint":"chrome"}}}]}`,
@@ -909,18 +840,6 @@ func TestNestedTLSContainersPreserveRealityAndNameUnknownChildren(t *testing.T) 
 		`{"outbounds":[{"tag":"V2Ray","protocol":"vless","settings":{"vnext":[{"address":"v2ray.example.invalid","port":443,"users":[{"id":"b831381d-6324-4d53-ad4f-8cda48b30811"}]}]},"streamSettings":true}]}`,
 		`{"outbounds":[{"tag":"V2Ray SS","protocol":"shadowsocks","settings":{"servers":[{"address":"ss.example.invalid","port":8388,"method":"aes-128-gcm","password":"secret"}]},"streamSettings":{"network":"tcp","security":"reality","realitySettings":{"publicKey":"ppQ9FwLrLIa0AOrp1WvcyiaQ37vg2WSy_CD4bIdiTUw"}}}]}`,
 	}
-	// What each of these must never do is become a node. `"tls": true` where an
-	// object goes, a headers string, uTLS children under a disabled uTLS, Reality
-	// on a shadowsocks outbound: importing the outbound without them hands the
-	// person a node whose protection differs from the document they were given
-	// -- quietly, and in the direction that costs them.
-	//
-	// The outcome changed shape on 2026-08-28 and the invariant did not. These
-	// used to fail the whole payload; a container-format record that cannot be
-	// read is now skipped with its reason, so the assertion is that the record
-	// produced no node and said why. Checking only for an error would have
-	// started passing against an importer that dropped the child and imported
-	// the node, as long as something else in the payload failed.
 	for index, payload := range unreadableChildren {
 		t.Run("reject unreadable child "+strconv.Itoa(index), func(t *testing.T) {
 			box, err := InspectProxyPayloadForIOS([]byte(payload), "subscriptionBody")
@@ -989,10 +908,6 @@ func TestInspectProxyPayloadForIOSReportsEveryRecordInsteadOfDroppingIt(t *testi
 	if len(report.Proxies) != 1 || report.Proxies[0]["name"] != "accepted" {
 		t.Fatalf("proxies = %#v", report.Proxies)
 	}
-	// Three records did not become nodes, for three different reasons, and they
-	// arrive in one array in the order they appeared. The reason is carried by
-	// the code; it used to be carried by which of two arrays the entry was in,
-	// which is what the client had to undo before it could show them in order.
 	if len(report.Skipped) != 3 {
 		t.Fatalf("skipped = %#v", report.Skipped)
 	}
@@ -1011,12 +926,6 @@ func TestInspectProxyPayloadForIOSReportsEveryRecordInsteadOfDroppingIt(t *testi
 }
 
 func TestInspectProxyPayloadForIOSExtractsLinksFromHumanTextWithoutSwallowingProse(t *testing.T) {
-	// The bracket is paired, because that is what makes it prose. An unpaired
-	// closing bracket is what an airport writes at the end of a node's name --
-	// `(hy2)`, `(IEPL)` -- and stripping those renamed the person's nodes
-	// without telling them. The trim now asks whether an opener is waiting on
-	// the same line before the link; the companion case below is the name that
-	// must survive.
 	payload := []byte("请导入（hysteria2://secret@example.invalid:443#accepted）。\n" +
 		"这是一行说明，不是节点。\n" +
 		"hysteria2://second@example.invalid:443#second | " +
@@ -1032,8 +941,6 @@ func TestInspectProxyPayloadForIOSExtractsLinksFromHumanTextWithoutSwallowingPro
 	if got := report.Proxies[0]["name"]; got != "accepted" {
 		t.Fatalf("first name = %#v, want accepted", got)
 	}
-	// The other direction, from a real airport link the macOS lane pasted: the
-	// brackets belong to the name and no prose opened them.
 	kept, err := InspectProxyPayloadForIOS(
 		[]byte("hysteria2://secret@example.invalid:443#\U0001F1EE\U0001F1F314印度-移动/南方联通(hy2)"), "singleNode")
 	if err != nil {
@@ -1055,7 +962,6 @@ func TestInspectProxyPayloadForIOSExtractsLinksFromHumanTextWithoutSwallowingPro
 }
 
 func TestInspectProxyPayloadForIOSDecodesABase64BundleAndNormalizesAliases(t *testing.T) {
-	// base64("hy://auth@example.invalid:443?peer=sni.example.invalid&upmbps=10&downmbps=20#one")
 	payload := []byte("aHk6Ly9hdXRoQGV4YW1wbGUuaW52YWxpZDo0NDM/cGVlcj1zbmkuZXhhbXBsZS5pbnZhbGlkJnVwbWJwcz0xMCZkb3dubWJwcz0yMCNvbmU=")
 	box, err := InspectProxyPayloadForIOS(payload, "subscriptionBody")
 	if err != nil {
@@ -1139,7 +1045,6 @@ func TestInspectProxyPayloadForIOSMapsShadowrocketDialectsWithoutLosingConnectio
 		},
 		{
 			name: "encoded https authority",
-			// base64("user:secret@example.invalid:443")
 			link: "https://dXNlcjpzZWNyZXRAZXhhbXBsZS5pbnZhbGlkOjQ0Mw#encoded-https",
 			want: map[string]any{
 				"type": "http", "server": "example.invalid", "port": "443",
@@ -1201,7 +1106,6 @@ func TestInspectProxyPayloadForIOSReparsesLegacyVMessAuthority(t *testing.T) {
 }
 
 func TestInspectProxyPayloadForIOSReparsesLegacyVlessIPv6Authority(t *testing.T) {
-	// base64("none:b831381d-6324-4d53-ad4f-8cda48b30811@[2001:db8::1]:443")
 	link := "vless://bm9uZTpiODMxMzgxZC02MzI0LTRkNTMtYWQ0Zi04Y2RhNDhiMzA4MTFAWzIwMDE6ZGI4OjoxXTo0NDM" +
 		"?type=tcp#IPv6"
 	box, err := InspectProxyPayloadForIOS([]byte(link), "singleNode")
@@ -1505,18 +1409,6 @@ func TestSubscriptionContainerDetectorsFailClosedOnMalformedAuthoritativeSignatu
 		})
 	}
 
-	// The surge row moved out of the list above on 2026-08-28 and is asserted
-	// here instead, because what it was guarding and what it was checking came
-	// apart. This test exists so that a payload which announces one format and
-	// then fails to parse as it does not quietly get handed to a different
-	// detector -- the json rows are the point, where falling through would scan
-	// a document nobody understood for embedded links and import whatever it
-	// found.
-	//
-	// `[Proxy]` followed by an unreadable line is not that. The document is
-	// surge, it is read as surge, and one line of it cannot be read. It now
-	// comes back as a report saying so, which is the outcome the reader asked
-	// for; falling through is still refused, and that is what is checked.
 	t.Run("a surge document with an unreadable line stays a surge document", func(t *testing.T) {
 		box, err := InspectProxyPayloadForIOS([]byte("[Proxy]\nbroken\n"), "subscriptionBody")
 		if err != nil {
@@ -1550,10 +1442,6 @@ func TestTranslatedSubscriptionContainersRejectUnknownSemanticChildren(t *testin
 			name:    "surge bare option",
 			payload: "[Proxy]\nSurge = trojan, surge.example.invalid, 443, password=secret, hako-unknown-semantic\n",
 		},
-		// The sip008 and SSD server rows left this table on 2026-09-02: a JSON
-		// server child nobody maps is named under the node now, and the node
-		// arrives. They live in
-		// TestTranslatedJSONServerContainersNameUnknownSemanticChildren.
 		{
 			name: "wireguard interface child",
 			payload: "[Interface]\nPrivateKey = " + privateKey + "\nAddress = 10.0.0.2/32\n" +
@@ -1563,12 +1451,6 @@ func TestTranslatedSubscriptionContainersRejectUnknownSemanticChildren(t *testin
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			// The field must be named, and the record must not become a node.
-			// Where that answer is delivered changed on 2026-08-28: a
-			// container-format record that cannot be read is skipped with its
-			// reason rather than failing the document, so the surge rows arrive
-			// as a report and the rest still arrive as an error. Both are
-			// checked against the same two things.
 			box, err := InspectProxyPayloadForIOS([]byte(test.payload), "subscriptionBody")
 			if err != nil {
 				if !strings.Contains(strings.ToLower(err.Error()), "hako") {
@@ -1587,10 +1469,6 @@ func TestTranslatedSubscriptionContainersRejectUnknownSemanticChildren(t *testin
 	}
 }
 
-// TestTranslatedJSONServerContainersNameUnknownSemanticChildren is the other
-// half of the table above, after 2026-09-02: for the JSON server dialects an
-// unknown child is named, under the node, and the node arrives -- the same
-// answer an unmapped query key has had since 2026-08-28.
 func TestTranslatedJSONServerContainersNameUnknownSemanticChildren(t *testing.T) {
 	ssd := `{"airport":"Example","port":8388,"encryption":"aes-128-gcm","password":"secret",` +
 		`"servers":[{"server":"ssd.example.invalid","remarks":"SSD","hako_unknown_semantic":true}]}`
@@ -1633,8 +1511,6 @@ func TestTranslatedJSONServerContainersNameUnknownSemanticChildren(t *testing.T)
 }
 
 func TestProxyImportRejectsEmptyOversizedAndUnknownPayloads(t *testing.T) {
-	// A refusal says which of the two happened, and the oversize one carries the
-	// numbers: "invalid" told the reader nothing they could act on.
 	for name, testCase := range map[string]struct {
 		payload []byte
 		want    string
@@ -1668,9 +1544,6 @@ func urlQueryEscape(value string) string {
 	return replacer.Replace(value)
 }
 
-// The three cases this gate used to hold, from the other side: each now brings
-// the node back with the field named. Removing them from the list above without
-// asserting the new outcome would have left the change untested.
 func TestFieldsWithNowhereToGoStillBringTheNode(t *testing.T) {
 	const masquePublic = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEr%2BS%2B1lurxAxUbuPi4RhUv%2FaZ5CVG%2FBr79BRi0b%2BQX%2B7oBc5Yx2eQ7OMYFGQ6%2BlqPLWkEr1pl1nZg%2BRoEzg1Jqg%3D%3D"
 	const masquePrivate = "MHcCAQEEIIDzwMdDFdFe3jj4vanTuI2sdBFaUjjPnV%2F68XaVWfwfoAoGCCqGSM49AwEHoUQDQgAEr%2BS%2B1lurxAxUbuPi4RhUv%2FaZ5CVG%2FBr79BRi0b%2BQX%2B7oBc5Yx2eQ7OMYFGQ6%2BlqPLWkEr1pl1nZg%2BRoEzg1Jqg%3D%3D"
@@ -1719,26 +1592,11 @@ func TestFieldsWithNowhereToGoStillBringTheNode(t *testing.T) {
 	}
 }
 
-// A context this build does not know costs a notice, not the payload.
-//
-// It used to cost the payload: `unknown proxy import context "x"` came back
-// instead of a report, and everything that parsed cleanly went with it. The
-// parameter asks the call site to declare something only the content knows, so
-// a wrong declaration is a question of when, not whether.
-//
-// All three exits are exercised, because the notice is attached at each of them
-// separately and two of them were missed on the first pass: a container, a
-// base64-wrapped container, and a plain list of links. The known-context rows
-// are the negative control -- if the notice appeared there, this test would be
-// asserting nothing.
 func TestAnUnknownImportContextCostsANoticeNotThePayload(t *testing.T) {
 	const link = "ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpwd2Q@198.51.100.1:1080#N"
 	container := "proxies:\n  - {name: N, type: ss, server: 198.51.100.1, port: 1080, cipher: chacha20-ietf-poly1305, password: pw}\n"
 	for _, shape := range []struct {
 		name, payload string
-		// `configuration` is only a legal context for a container; a list of
-		// links under it is refused for being the wrong shape, which is a
-		// separate and correct behaviour this test is not about.
 		knownContext string
 	}{
 		{"a plain list of links", link, "nodeBundle"},

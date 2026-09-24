@@ -8,20 +8,6 @@ import (
 	"github.com/TokenPLS/Hako/hub/executor"
 )
 
-// What the killed tunnel is found at has to be the step that spent the memory.
-//
-// The breadcrumb is the only account that survives jetsam, and the client branches on
-// its stage to tell the reader what to change. Both halves existed and neither was
-// wired to the other: the probes Start installs reported to the phase log -- a
-// developer's file, written only when a bill is being collected -- while the breadcrumb
-// heard only the six bind:* steps of the parse. Every stage the client's explanation
-// names (apply:profile, apply:proxy-providers*, parse:dns, parse:rules, apply:rules)
-// therefore could not occur in the field, and a reader killed at 50 MiB got a card with
-// no way out on it.
-//
-// These tests drive armStartupProbes, which is what a tunnel installs. The earlier
-// tests of this reporting called recordStartupStage directly and asserted on the name
-// they had just passed it, so they stayed green through the whole defect.
 
 func armedProbeBreadcrumb(t *testing.T) string {
 	t.Helper()
@@ -35,7 +21,6 @@ func armedProbeBreadcrumb(t *testing.T) string {
 func TestApplyStepsReachTheBreadcrumbAndNotOnlyThePhaseLog(t *testing.T) {
 	path := armedProbeBreadcrumb(t)
 
-	// The last step ApplyConfig reports before it walks the rule providers.
 	executor.StartupProbe("profile")
 
 	record, err := readBreadcrumb(path)
@@ -61,9 +46,6 @@ func TestParseSectionsReachTheBreadcrumbToo(t *testing.T) {
 	}
 }
 
-// A kill inside Initial has to name the provider it was building. The pair of probes
-// around Initial exists for exactly this: the second one cannot be reached by a process
-// that dies in between.
 func TestTheProviderBeingBuiltIsNamedBeforeItIsBuilt(t *testing.T) {
 	path := armedProbeBreadcrumb(t)
 
@@ -81,13 +63,6 @@ func TestTheProviderBeingBuiltIsNamedBeforeItIsBuilt(t *testing.T) {
 	}
 }
 
-// What routing the apply steps into the breadcrumb costs the reader.
-//
-// Every step now writes the record, and the record is read before it is written, so the
-// price is a small read-modify-write per step on the path a reader waits on. A start
-// walks roughly twenty apply steps and a dozen parse sections, plus two per provider.
-// Measured rather than assumed, because the same startup path had 94ms of provider
-// loads argued over.
 func BenchmarkAnApplyStepThroughTheBreadcrumb(b *testing.B) {
 	home := b.TempDir()
 	previous := breadcrumbDirectory
@@ -101,8 +76,6 @@ func BenchmarkAnApplyStepThroughTheBreadcrumb(b *testing.B) {
 	}
 }
 
-// The app process runs the same parse for its editor preflight and must not write the
-// tunnel's telemetry. Disarming is what separates them, so it is worth an assertion.
 func TestDisarmingStopsTheProbesFromWritingAnything(t *testing.T) {
 	home := breadcrumbHome(t)
 	setStartupBreadcrumbRecording(true)

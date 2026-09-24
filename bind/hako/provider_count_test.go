@@ -14,13 +14,6 @@ import (
 	ruleprovider "github.com/TokenPLS/Hako/rules/provider"
 )
 
-// The rules page shows how many entries each rule set holds. With the tunnel up the
-// figure comes from the running core; with the tunnel down the only thing on disk that
-// knows is the staging manifest, because staging is the one pass that already reads
-// every set. So each rule entry in the manifest carries the count of what was staged --
-// the compiled MRS's header for a compiled set, the entries of a source MRS, the kept
-// entries of a set that rides as text. Proxy entries carry nothing: a proxy provider's
-// entries are nodes, and the proxies page already has them.
 
 func stagedManifestForCountTest(t *testing.T, home string) (*stagedProviderManifest, map[string]any) {
 	t.Helper()
@@ -46,7 +39,6 @@ func TestStagedManifestCarriesTheRuleSetCount(t *testing.T) {
 	home := options.WorkingPath
 	C.SetHomeDir(home)
 
-	// Three shapes a rule set arrives in, plus a proxy provider that must stay silent.
 	domainPath := filepath.Join(home, "domains.yaml")
 	if err := os.WriteFile(domainPath, []byte("payload:\n  - example.com\n  - '+.example.org'\n  - example.net\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -83,8 +75,6 @@ func TestStagedManifestCarriesTheRuleSetCount(t *testing.T) {
 	}
 	manifest, entries := stagedManifestForCountTest(t, home)
 
-	// PROCESS-NAME is stripped on iOS before the set is staged, so the count is what the
-	// core will load, not what the file says.
 	for name, want := range map[string]int{"domains": 3, "classical": 3, "cidrs": 2} {
 		record, ok := manifest.Entries[providerRuntimeKey("rule", name)]
 		if !ok {
@@ -110,8 +100,6 @@ func TestStagedManifestCarriesTheRuleSetCount(t *testing.T) {
 	}
 }
 
-// The extension's own staging (no compile) counts the same way, so a manifest it
-// rewrites after a source change says the same thing the app's publish would.
 func TestExtensionStagingCountsTheSameRuleSet(t *testing.T) {
 	options := testOptions(t)
 	if err := Setup(options); err != nil {
@@ -141,9 +129,6 @@ func TestExtensionStagingCountsTheSameRuleSet(t *testing.T) {
 	}
 }
 
-// A manifest written before counts existed must not be served as one that has them:
-// the hit path carries records verbatim, so the only way every served entry carries a
-// count is for the staging logic version to have moved.
 func TestManifestsFromBeforeCountsAreRestaged(t *testing.T) {
 	if providerStagingLogicVersion < 6 {
 		t.Fatalf("providerStagingLogicVersion is %d; counts joined the record at 6, and a manifest from 5 has none", providerStagingLogicVersion)

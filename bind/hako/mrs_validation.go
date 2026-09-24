@@ -97,25 +97,6 @@ func inspectMRSForIOS(payload []byte, expectedBehavior P.RuleBehavior) (int, err
 	if err != nil {
 		return 0, err
 	}
-	// The header count is not validated here. `rulesMrsParse` reads it and passes
-	// it to FromMrs (rules/provider/mrs_reader.go:43-67), where both strategies
-	// store it and expose it only through Count(); nothing on the READ path
-	// branches on it, and the upper bound this replaces was dimensionally wrong
-	// anyway -- a rule count compared against a byte limit.
-	//
-	// Not "upstream never treats it as data", which an earlier version of this
-	// comment claimed and which is false: ConvertToMrs refuses Count() == 0
-	// (rules/provider/mrs_converter.go:21-23), and config_finalize.go runs
-	// validateMRSForIOS and ConvertToMrs back to back when expanding a
-	// route-address-set. A header count of 0 therefore still fails there, one
-	// line later, as "decode mrs: empty rule". Same outcome, different message --
-	// worth knowing before someone assumes this field can never stop a load.
-	//
-	// Consequence to keep in view: inspectMRSForIOS returns this number verbatim,
-	// so ProviderEntryCountForIOS can hand the App a negative or absurd tally from
-	// a corrupt file. No caller sizes anything on it (traced to the status string
-	// in ProvidersView), which is why that is acceptable rather than merely
-	// unnoticed.
 	extraLength, err := cursor.int64("extra length")
 	if err != nil {
 		return 0, err
@@ -136,20 +117,6 @@ func inspectMRSForIOS(payload []byte, expectedBehavior P.RuleBehavior) (int, err
 	default:
 		return 0, fmt.Errorf("MRS format is unsupported for provider behavior %s", expectedBehavior.String())
 	}
-	// No trailing-data rejection. Upstream reads MRS from a stream
-	// (rules/provider/mrs_reader.go:67 hands the zstd reader to FromMrs, which
-	// consumes exactly the domain-set or IP-CIDR-set structures and returns) and
-	// nothing on that path ever looks at what follows. The bytes are physically
-	// reachable -- the reader wraps a bytes.Reader -- so the accurate statement is
-	// that upstream never reads them, not that it cannot.
-	//
-	// An earlier version of this comment also argued the format "reserves room to
-	// grow" there, citing the header's "extra (reserved for future using)" field.
-	// That field is read BEFORE the body (mrs_reader.go:50-65), so if anything it
-	// is evidence the format grows in the header rather than after the body. The
-	// deletion does not need that argument and no longer makes it: refusing bytes
-	// no reader reads is a rule with no counterpart upstream, and the 16 MiB
-	// decoded cap above is what actually bounds the payload.
 	return int(count), nil
 }
 
@@ -214,14 +181,6 @@ func validateDomainMRSBody(cursor *mrsCursor) error {
 		bitPosition++
 		levelRemaining--
 		if levelRemaining == 0 && node+1 < nodes {
-			// No depth cap. This trie is a succinct character trie over the
-			// reversed name, so one level is one character -- a 253-level bound
-			// was really "no rule here may name a domain longer than 253
-			// characters", and one such entry rejected the whole file. mihomo
-			// writes those names without complaint and its reader has no depth
-			// notion at all (ReadDomainSetBin reads three arrays and calls
-			// init()). The walk stays finite without it: node is bounded by
-			// len(labels)+1 and bitPosition by the bitmap length.
 			if nextLevel == 0 {
 				return fmt.Errorf("MRS domain tree is disconnected")
 			}
@@ -232,13 +191,6 @@ func validateDomainMRSBody(cursor *mrsCursor) error {
 	if childrenSeen != len(labels) || bitPosition != logicalBitmapBits || levelRemaining != 0 || nextLevel != 0 {
 		return fmt.Errorf("MRS domain tree topology is inconsistent")
 	}
-	// No leaves-vs-rules comparison. mihomo stores a suffix rule as two trie
-	// entries, so `+.` rule sets — every geosite file meta-rules-dat ships —
-	// carry twice the header's rule count in leaves (cn.mrs: 111,873 rules,
-	// 223,746 leaves). Upstream keeps the header count for display only and
-	// never checks it against the trie, so a comparison here rejects files
-	// the kernel itself writes. The structural checks above are what this
-	// validator is for: they bound the parse before the tunnel touches it.
 	return nil
 }
 
@@ -258,10 +210,6 @@ func validateIPCIDRMRSBody(cursor *mrsCursor) error {
 	if err != nil {
 		return err
 	}
-	// Same reasoning as the domain half: the header count is display-only
-	// upstream (ipcidrStrategy.FromMrs assigns it to i.count and never looks
-	// at it again), and one rule can need several ranges, so a comparison
-	// here rejects files the kernel writes.
 	for offset := 0; offset < len(ranges); offset += 32 {
 		var fromBytes, toBytes [16]byte
 		copy(fromBytes[:], ranges[offset:offset+16])

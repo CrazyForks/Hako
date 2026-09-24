@@ -11,7 +11,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// InterfaceChangeCallback structure allows interface change callback handling.
 type InterfaceChangeCallback struct {
 	cb   func(notificationType MibNotificationType, iface *MibIPInterfaceRow)
 	wait sync.WaitGroup
@@ -24,9 +23,6 @@ var (
 	interfaceChangeHandle         = windows.Handle(0)
 )
 
-// RegisterInterfaceChangeCallback registers a new InterfaceChangeCallback. If this particular callback is already
-// registered, the function will silently return. Returned InterfaceChangeCallback.Unregister method should be used
-// to unregister.
 func RegisterInterfaceChangeCallback(callback func(notificationType MibNotificationType, iface *MibIPInterfaceRow)) (*InterfaceChangeCallback, error) {
 	s := &InterfaceChangeCallback{cb: callback}
 
@@ -50,7 +46,6 @@ func RegisterInterfaceChangeCallback(callback func(notificationType MibNotificat
 	return s, nil
 }
 
-// Unregister unregisters the callback.
 func (callback *InterfaceChangeCallback) Unregister() error {
 	interfaceChangeAddRemoveMutex.Lock()
 	defer interfaceChangeAddRemoveMutex.Unlock()

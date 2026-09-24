@@ -33,11 +33,6 @@ func closeAdapter(wintun *Adapter) {
 	syscall.SyscallN(procWintunCloseAdapter.Addr(), 1, wintun.handle, 0, 0)
 }
 
-// CreateAdapter creates a Wintun adapter. name is the cosmetic name of the adapter.
-// tunnelType represents the type of adapter and should be "Wintun". requestedGUID is
-// the GUID of the created network adapter, which then influences NLA generation
-// deterministically. If it is set to nil, the GUID is chosen by the system at random,
-// and hence a new NLA entry is created for each new adapter.
 func CreateAdapter(name string, tunnelType string, requestedGUID *windows.GUID) (wintun *Adapter, err error) {
 	err = procWintunCloseAdapter.Find()
 	if err != nil {
@@ -63,7 +58,6 @@ func CreateAdapter(name string, tunnelType string, requestedGUID *windows.GUID) 
 	return
 }
 
-// OpenAdapter opens an existing Wintun adapter by name.
 func OpenAdapter(name string) (wintun *Adapter, err error) {
 	var name16 *uint16
 	name16, err = windows.UTF16PtrFromString(name)
@@ -80,7 +74,6 @@ func OpenAdapter(name string) (wintun *Adapter, err error) {
 	return
 }
 
-// Close closes a Wintun adapter.
 func (wintun *Adapter) Close() (err error) {
 	runtime.SetFinalizer(wintun, nil)
 	r1, _, e1 := syscall.Syscall(procWintunCloseAdapter.Addr(), 1, wintun.handle, 0, 0)
@@ -90,7 +83,6 @@ func (wintun *Adapter) Close() (err error) {
 	return
 }
 
-// Uninstall removes the driver from the system if no drivers are currently in use.
 func Uninstall() (err error) {
 	r1, _, e1 := syscall.Syscall(procWintunDeleteDriver.Addr(), 0, 0, 0, 0)
 	if r1 == 0 {
@@ -99,7 +91,6 @@ func Uninstall() (err error) {
 	return
 }
 
-// RunningVersion returns the version of the running Wintun driver.
 func RunningVersion() (version uint32, err error) {
 	r0, _, e1 := syscall.Syscall(procWintunGetRunningDriverVersion.Addr(), 0, 0, 0, 0)
 	version = uint32(r0)
@@ -109,7 +100,6 @@ func RunningVersion() (version uint32, err error) {
 	return
 }
 
-// LUID returns the LUID of the adapter.
 func (wintun *Adapter) LUID() (luid uint64) {
 	syscall.Syscall(procWintunGetAdapterLUID.Addr(), 2, uintptr(wintun.handle), uintptr(unsafe.Pointer(&luid)), 0)
 	return

@@ -12,28 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package checksum provides the implementation of the encoding and decoding of
-// network protocol headers.
 package checksum
 
 import (
 	"encoding/binary"
 )
 
-// Size is the size of a checksum.
-//
-// The checksum is held in a uint16 which is 2 bytes.
 const Size = 2
 
-// Put puts the checksum in the provided byte slice.
 func Put(b []byte, xsum uint16) {
 	binary.BigEndian.PutUint16(b, xsum)
 }
 
-// Combine combines the two uint16 to form their checksum. This is done
-// by adding them and the carry.
-//
-// Note that checksum a must have been computed on an even number of bytes.
 func Combine(a, b uint16) uint16 {
 	v := uint32(a) + uint32(b)
 	return uint16(v + v>>16)

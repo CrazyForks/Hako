@@ -2,9 +2,6 @@ package hako
 
 import "testing"
 
-// the row says whether the field was written, as data, so a client can render "not
-// set" itself instead of reading the prose the kernel used to put into given. This lock adds
-// the fields and keeps the prose; the prose goes once both clients render from these.
 func TestRowsSayWhetherTheFieldWasWritten(t *testing.T) {
 	policy := runtimePolicyFor(runtimeProfileIOSPacketTunnel, true)
 	const document = "tun:\n  mtu: 1500\nrules:\n  - PROCESS-NAME,curl,DIRECT\n  - MATCH,DIRECT\nproxies: []\n"

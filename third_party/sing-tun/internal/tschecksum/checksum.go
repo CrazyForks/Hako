@@ -8,9 +8,6 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
-// checksumGeneric64 is a reference implementation of checksum using 64 bit
-// arithmetic for use in testing or when an architecture-specific implementation
-// is not available.
 func checksumGeneric64(b []byte, initial uint16) uint16 {
 	var ac uint64
 	var carry uint64
@@ -144,9 +141,6 @@ func checksumGeneric64(b []byte, initial uint16) uint16 {
 	return folded
 }
 
-// checksumGeneric32 is a reference implementation of checksum using 32 bit
-// arithmetic for use in testing or when an architecture-specific implementation
-// is not available.
 func checksumGeneric32(b []byte, initial uint16) uint16 {
 	var ac uint32
 	var carry uint32
@@ -272,9 +266,6 @@ func checksumGeneric32(b []byte, initial uint16) uint16 {
 	return folded
 }
 
-// checksumGeneric32Alternate is an alternate reference implementation of
-// checksum using 32 bit arithmetic for use in testing or when an
-// architecture-specific implementation is not available.
 func checksumGeneric32Alternate(b []byte, initial uint16) uint16 {
 	var ac uint32
 
@@ -461,9 +452,6 @@ func checksumGeneric32Alternate(b []byte, initial uint16) uint16 {
 	return folded
 }
 
-// checksumGeneric64Alternate is an alternate reference implementation of
-// checksum using 64 bit arithmetic for use in testing or when an
-// architecture-specific implementation is not available.
 func checksumGeneric64Alternate(b []byte, initial uint16) uint16 {
 	var ac uint64
 
@@ -590,30 +578,14 @@ func checksumGeneric64Alternate(b []byte, initial uint16) uint16 {
 
 func ipChecksumFold64(unfolded uint64, initialCarry uint64) uint16 {
 	sum, carry := bits.Add32(uint32(unfolded>>32), uint32(unfolded&0xffff_ffff), uint32(initialCarry))
-	// if carry != 0, sum <= 0xffff_fffe, otherwise sum <= 0xffff_ffff
-	// therefore (sum >> 16) + (sum & 0xffff) + carry <= 0x1_fffe; so there is
-	// no need to save the carry flag
 	sum = (sum >> 16) + (sum & 0xffff) + carry
-	// sum <= 0x1_fffe therefore this is the last fold needed:
-	//   if (sum >> 16) > 0 then
-	//     (sum >> 16) == 1 && (sum & 0xffff) <= 0xfffe and therefore
-	//     the addition will not overflow
-	// otherwise (sum >> 16) == 0 and sum will be unchanged
 	sum = (sum >> 16) + (sum & 0xffff)
 	return uint16(sum)
 }
 
 func ipChecksumFold32(unfolded uint32, initialCarry uint32) uint16 {
 	sum := (unfolded >> 16) + (unfolded & 0xffff) + initialCarry
-	// sum <= 0x1_ffff:
-	//   0xffff + 0xffff = 0x1_fffe
-	//   initialCarry is 0 or 1, for a combined maximum of 0x1_ffff
 	sum = (sum >> 16) + (sum & 0xffff)
-	// sum <= 0x1_0000 therefore this is the last fold needed:
-	//   if (sum >> 16) > 0 then
-	//     (sum >> 16) == 1 && (sum & 0xffff) == 0 and therefore
-	//     the addition will not overflow
-	// otherwise (sum >> 16) == 0 and sum will be unchanged
 	sum = (sum >> 16) + (sum & 0xffff)
 	return uint16(sum)
 }
@@ -621,13 +593,13 @@ func ipChecksumFold32(unfolded uint32, initialCarry uint32) uint16 {
 func addrPartialChecksum64(addr []byte, initial, carryIn uint64) (sum, carry uint64) {
 	sum, carry = initial, carryIn
 	switch len(addr) {
-	case 4: // IPv4
+	case 4:
 		if cpu.IsBigEndian {
 			sum, carry = bits.Add64(sum, uint64(binary.BigEndian.Uint32(addr)), carry)
 		} else {
 			sum, carry = bits.Add64(sum, uint64(binary.LittleEndian.Uint32(addr)), carry)
 		}
-	case 16: // IPv6
+	case 16:
 		if cpu.IsBigEndian {
 			sum, carry = bits.Add64(sum, binary.BigEndian.Uint64(addr), carry)
 			sum, carry = bits.Add64(sum, binary.BigEndian.Uint64(addr[8:]), carry)
@@ -644,13 +616,13 @@ func addrPartialChecksum64(addr []byte, initial, carryIn uint64) (sum, carry uin
 func addrPartialChecksum32(addr []byte, initial, carryIn uint32) (sum, carry uint32) {
 	sum, carry = initial, carryIn
 	switch len(addr) {
-	case 4: // IPv4
+	case 4:
 		if cpu.IsBigEndian {
 			sum, carry = bits.Add32(sum, binary.BigEndian.Uint32(addr), carry)
 		} else {
 			sum, carry = bits.Add32(sum, binary.LittleEndian.Uint32(addr), carry)
 		}
-	case 16: // IPv6
+	case 16:
 		if cpu.IsBigEndian {
 			sum, carry = bits.Add32(sum, binary.BigEndian.Uint32(addr), carry)
 			sum, carry = bits.Add32(sum, binary.BigEndian.Uint32(addr[4:8]), carry)
@@ -702,8 +674,6 @@ func pseudoHeaderChecksum32(protocol uint8, srcAddr, dstAddr []byte, totalLen ui
 	return foldedSum
 }
 
-// PseudoHeaderChecksum computes an IP pseudo-header checksum. srcAddr and
-// dstAddr must be 4 or 16 bytes in length.
 func PseudoHeaderChecksum(protocol uint8, srcAddr, dstAddr []byte, totalLen uint16) uint16 {
 	if strconv.IntSize < 64 {
 		return pseudoHeaderChecksum32(protocol, srcAddr, dstAddr, totalLen)

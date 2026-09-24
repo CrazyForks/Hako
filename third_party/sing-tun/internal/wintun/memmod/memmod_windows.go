@@ -51,7 +51,6 @@ func (module *Module) copySections(address, size uintptr, oldHeaders *IMAGE_NT_H
 	sections := module.headers.Sections()
 	for i := range sections {
 		if sections[i].SizeOfRawData == 0 {
-			// Section doesn't contain data in the dll itself, but may define uninitialized data.
 			sectionSize := oldHeaders.OptionalHeader.SectionAlignment
 			if sectionSize == 0 {
 				continue
@@ -64,9 +63,7 @@ func (module *Module) copySections(address, size uintptr, oldHeaders *IMAGE_NT_H
 				return fmt.Errorf("Error allocating section: %w", err)
 			}
 
-			// Always use position from file to support alignments smaller than page size (allocation above will align to page size).
 			dest = module.codeBase + uintptr(sections[i].VirtualAddress)
-			// NOTE: On 64bit systems we truncate to 32bit here but expand again later when "PhysicalAddress" is used.
 			sections[i].SetPhysicalAddress((uint32)(dest & 0xffffffff))
 			dst := unsafe.Slice((*byte)(a2p(dest)), sectionSize)
 			for j := range dst {
@@ -79,7 +76,6 @@ func (module *Module) copySections(address, size uintptr, oldHeaders *IMAGE_NT_H
 			return errors.New("Incomplete section")
 		}
 
-		// Commit memory block and copy data from dll.
 		dest, err := windows.VirtualAlloc(module.codeBase+uintptr(sections[i].VirtualAddress),
 			uintptr(sections[i].SizeOfRawData),
 			windows.MEM_COMMIT,
@@ -88,12 +84,10 @@ func (module *Module) copySections(address, size uintptr, oldHeaders *IMAGE_NT_H
 			return fmt.Errorf("Error allocating memory block: %w", err)
 		}
 
-		// Always use position from file to support alignments smaller than page size (allocation above will align to page size).
 		memcpy(
 			module.codeBase+uintptr(sections[i].VirtualAddress),
 			address+uintptr(sections[i].PointerToRawData),
 			uintptr(sections[i].SizeOfRawData))
-		// NOTE: On 64bit systems we truncate to 32bit here but expand again later when "PhysicalAddress" is used.
 		sections[i].SetPhysicalAddress((uint32)(dest & 0xffffffff))
 	}
 
@@ -128,33 +122,29 @@ func (module *Module) finalizeSection(sectionData *sectionFinalizeData) error {
 	}
 
 	if (sectionData.characteristics & IMAGE_SCN_MEM_DISCARDABLE) != 0 {
-		// Section is not needed any more and can safely be freed.
 		if sectionData.address == sectionData.alignedAddress &&
 			(sectionData.last ||
 				(sectionData.size%uintptr(module.headers.OptionalHeader.SectionAlignment)) == 0) {
-			// Only allowed to decommit whole pages.
 			windows.VirtualFree(sectionData.address, sectionData.size, windows.MEM_DECOMMIT)
 		}
 		return nil
 	}
 
-	// determine protection flags based on characteristics
 	ProtectionFlags := [8]uint32{
-		windows.PAGE_NOACCESS,          // not writeable, not readable, not executable
-		windows.PAGE_EXECUTE,           // not writeable, not readable, executable
-		windows.PAGE_READONLY,          // not writeable, readable, not executable
-		windows.PAGE_EXECUTE_READ,      // not writeable, readable, executable
-		windows.PAGE_WRITECOPY,         // writeable, not readable, not executable
-		windows.PAGE_EXECUTE_WRITECOPY, // writeable, not readable, executable
-		windows.PAGE_READWRITE,         // writeable, readable, not executable
-		windows.PAGE_EXECUTE_READWRITE, // writeable, readable, executable
+		windows.PAGE_NOACCESS,
+		windows.PAGE_EXECUTE,
+		windows.PAGE_READONLY,
+		windows.PAGE_EXECUTE_READ,
+		windows.PAGE_WRITECOPY,
+		windows.PAGE_EXECUTE_WRITECOPY,
+		windows.PAGE_READWRITE,
+		windows.PAGE_EXECUTE_READWRITE,
 	}
 	protect := ProtectionFlags[sectionData.characteristics>>29]
 	if (sectionData.characteristics & IMAGE_SCN_MEM_NOT_CACHED) != 0 {
 		protect |= windows.PAGE_NOCACHE
 	}
 
-	// Change memory access flags.
 	var oldProtect uint32
 	err := windows.VirtualProtect(sectionData.address, sectionData.size, protect, &oldProtect)
 	if err != nil {
@@ -183,16 +173,12 @@ func (module *Module) finalizeSections() error {
 	sections[0].SetVirtualSize(uint32(sectionData.size))
 	sectionData.characteristics = sections[0].Characteristics
 
-	// Loop through all sections and change access flags.
 	for i := uint16(1); i < module.headers.FileHeader.NumberOfSections; i++ {
 		sectionAddress := uintptr(sections[i].PhysicalAddress()) | imageOffset
 		alignedAddress := alignDown(sectionAddress, uintptr(module.headers.OptionalHeader.SectionAlignment))
 		sectionSize := module.realSectionSize(&sections[i])
 		sections[i].SetVirtualSize(uint32(sectionSize))
-		// Combine access flags of all sections that share a page.
-		// TODO: We currently share flags of a trailing large section with the page of a first small section. This should be optimized.
 		if sectionData.alignedAddress == alignedAddress || sectionData.address+sectionData.size > alignedAddress {
-			// Section shares page with previous.
 			if (sections[i].Characteristics&IMAGE_SCN_MEM_DISCARDABLE) == 0 || (sectionData.characteristics&IMAGE_SCN_MEM_DISCARDABLE) == 0 {
 				sectionData.characteristics = (sectionData.characteristics | sections[i].Characteristics) &^ IMAGE_SCN_MEM_DISCARDABLE
 			} else {
@@ -261,14 +247,11 @@ func (module *Module) performBaseRelocation(delta uintptr) (relocated bool, err 
 			(*uint16)(a2p(uintptr(unsafe.Pointer(relocationHdr))+unsafe.Sizeof(*relocationHdr))),
 			(uintptr(relocationHdr.SizeOfBlock)-unsafe.Sizeof(*relocationHdr))/unsafe.Sizeof(uint16(0)))
 		for _, relInfo := range relInfos {
-			// The upper 4 bits define the type of relocation.
 			relType := relInfo >> 12
-			// The lower 12 bits define the offset.
 			relOffset := uintptr(relInfo & 0xfff)
 
 			switch relType {
 			case IMAGE_REL_BASED_ABSOLUTE:
-				// Skip relocation.
 
 			case IMAGE_REL_BASED_LOW:
 				*(*uint16)(a2p(dest + relOffset)) += uint16(delta & 0xffff)
@@ -320,7 +303,6 @@ func (module *Module) performBaseRelocation(delta uintptr) (relocated bool, err 
 			}
 		}
 
-		// Advance to next relocation block.
 		relocationHdr = (*IMAGE_BASE_RELOCATION)(a2p(uintptr(unsafe.Pointer(relocationHdr)) + uintptr(relocationHdr.SizeOfBlock)))
 	}
 	return true, nil
@@ -344,7 +326,6 @@ func (module *Module) buildImportTable() error {
 			thunkRef = (*uintptr)(a2p(module.codeBase + uintptr(importDesc.OriginalFirstThunk())))
 			funcRef = (*uintptr)(a2p(module.codeBase + uintptr(importDesc.FirstThunk)))
 		} else {
-			// No hint table.
 			thunkRef = (*uintptr)(a2p(module.codeBase + uintptr(importDesc.FirstThunk)))
 			funcRef = (*uintptr)(a2p(module.codeBase + uintptr(importDesc.FirstThunk)))
 		}
@@ -462,7 +443,6 @@ func hookRtlPcToFileHeader() error {
 	return nil
 }
 
-// LoadLibrary loads module image to memory.
 func LoadLibrary(data []byte) (module *Module, err error) {
 	size := uintptr(len(data))
 	if size < unsafe.Sizeof(IMAGE_DOS_HEADER{}) {
@@ -506,7 +486,6 @@ func LoadLibrary(data []byte) (module *Module, err error) {
 	for i := range sections {
 		var endOfSection uintptr
 		if sections[i].SizeOfRawData == 0 {
-			// Section without data in the DLL
 			endOfSection = uintptr(sections[i].VirtualAddress) + uintptr(optionalSectionSize)
 		} else {
 			endOfSection = uintptr(sections[i].VirtualAddress) + uintptr(sections[i].SizeOfRawData)
@@ -528,14 +507,11 @@ func LoadLibrary(data []byte) (module *Module, err error) {
 		}
 	}()
 
-	// Reserve memory for image of library.
-	// TODO: Is it correct to commit the complete memory region at once? Calling DllEntry raises an exception if we don't.
 	module.codeBase, err = windows.VirtualAlloc(oldHeader.OptionalHeader.ImageBase,
 		alignedImageSize,
 		windows.MEM_RESERVE|windows.MEM_COMMIT,
 		windows.PAGE_READWRITE)
 	if err != nil {
-		// Try to allocate memory at arbitrary position.
 		module.codeBase, err = windows.VirtualAlloc(0,
 			alignedImageSize,
 			windows.MEM_RESERVE|windows.MEM_COMMIT,
@@ -555,7 +531,6 @@ func LoadLibrary(data []byte) (module *Module, err error) {
 		err = errors.New("Incomplete headers")
 		return
 	}
-	// Commit memory for headers.
 	headers, err := windows.VirtualAlloc(module.codeBase,
 		uintptr(oldHeader.OptionalHeader.SizeOfHeaders),
 		windows.MEM_COMMIT,
@@ -564,21 +539,17 @@ func LoadLibrary(data []byte) (module *Module, err error) {
 		err = fmt.Errorf("Error allocating headers: %w", err)
 		return
 	}
-	// Copy PE header to code.
 	memcpy(headers, addr, uintptr(oldHeader.OptionalHeader.SizeOfHeaders))
 	module.headers = (*IMAGE_NT_HEADERS)(a2p(headers + uintptr(dosHeader.E_lfanew)))
 
-	// Update position.
 	module.headers.OptionalHeader.ImageBase = module.codeBase
 
-	// Copy sections from DLL file block to new memory location.
 	err = module.copySections(addr, size, oldHeader)
 	if err != nil {
 		err = fmt.Errorf("Error copying sections: %w", err)
 		return
 	}
 
-	// Adjust base address of imported data.
 	locationDelta := module.headers.OptionalHeader.ImageBase - oldHeader.OptionalHeader.ImageBase
 	if locationDelta != 0 {
 		module.isRelocated, err = module.performBaseRelocation(locationDelta)
@@ -594,24 +565,20 @@ func LoadLibrary(data []byte) (module *Module, err error) {
 		module.isRelocated = true
 	}
 
-	// Load required dlls and adjust function table of imports.
 	err = module.buildImportTable()
 	if err != nil {
 		err = fmt.Errorf("Error building import table: %w", err)
 		return
 	}
 
-	// Mark memory pages depending on section headers and release sections that are marked as "discardable".
 	err = module.finalizeSections()
 	if err != nil {
 		err = fmt.Errorf("Error finalizing sections: %w", err)
 		return
 	}
 
-	// Register exception tables, if they exist.
 	module.registerExceptionHandlers()
 
-	// Register function PCs.
 	loadedAddressRangesMu.Lock()
 	loadedAddressRanges = append(loadedAddressRanges, addressRange{module.codeBase, module.codeBase + alignedImageSize})
 	loadedAddressRangesMu.Unlock()
@@ -623,14 +590,11 @@ func LoadLibrary(data []byte) (module *Module, err error) {
 		return
 	}
 
-	// TLS callbacks are executed BEFORE the main loading.
 	module.executeTLS()
 
-	// Get entry point of loaded module.
 	if module.headers.OptionalHeader.AddressOfEntryPoint != 0 {
 		module.entry = module.codeBase + uintptr(module.headers.OptionalHeader.AddressOfEntryPoint)
 		if module.isDLL {
-			// Notify library about attaching to process.
 			r0, _, _ := syscall.SyscallN(module.entry, module.codeBase, DLL_PROCESS_ATTACH, 0)
 			successful := r0 != 0
 			if !successful {
@@ -645,15 +609,12 @@ func LoadLibrary(data []byte) (module *Module, err error) {
 	return
 }
 
-// Free releases module resources and unloads it.
 func (module *Module) Free() {
 	if module.initialized {
-		// Notify library about detaching from process.
 		syscall.SyscallN(module.entry, module.codeBase, DLL_PROCESS_DETACH, 0)
 		module.initialized = false
 	}
 	if module.modules != nil {
-		// Free previously opened libraries.
 		for _, handle := range module.modules {
 			windows.FreeLibrary(handle)
 		}
@@ -669,7 +630,6 @@ func (module *Module) Free() {
 	}
 }
 
-// ProcAddressByName returns function address by exported name.
 func (module *Module) ProcAddressByName(name string) (uintptr, error) {
 	directory := module.headerDirectory(IMAGE_DIRECTORY_ENTRY_EXPORT)
 	if directory.Size == 0 {
@@ -683,13 +643,11 @@ func (module *Module) ProcAddressByName(name string) (uintptr, error) {
 		if uint32(idx) >= exports.NumberOfFunctions {
 			return 0, errors.New("Ordinal number too high")
 		}
-		// AddressOfFunctions contains the RVAs to the "real" functions.
 		return module.codeBase + uintptr(*(*uint32)(a2p(module.codeBase + uintptr(exports.AddressOfFunctions) + uintptr(idx)*4))), nil
 	}
 	return 0, errors.New("Function not found by name")
 }
 
-// ProcAddressByOrdinal returns function address by exported ordinal.
 func (module *Module) ProcAddressByOrdinal(ordinal uint16) (uintptr, error) {
 	directory := module.headerDirectory(IMAGE_DIRECTORY_ENTRY_EXPORT)
 	if directory.Size == 0 {
@@ -703,7 +661,6 @@ func (module *Module) ProcAddressByOrdinal(ordinal uint16) (uintptr, error) {
 	if uint32(idx) >= exports.NumberOfFunctions {
 		return 0, errors.New("Ordinal number too high")
 	}
-	// AddressOfFunctions contains the RVAs to the "real" functions.
 	return module.codeBase + uintptr(*(*uint32)(a2p(module.codeBase + uintptr(exports.AddressOfFunctions) + uintptr(idx)*4))), nil
 }
 

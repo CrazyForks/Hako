@@ -10,10 +10,6 @@ import (
 	"github.com/metacubex/gvisor/pkg/tcpip/transport/tcp"
 )
 
-// TestGVisorTCPBufferBytesControlsWindow proves the window policy: by
-// default the stack uses the adaptive range (4 KiB min / 32 KiB initial /
-// 256 KiB max, grown per connection by the moderation option), while a positive
-// GVisorTCPBufferBytes pins Default == Max for controlled benchmark runs.
 func TestGVisorTCPBufferBytesControlsWindow(t *testing.T) {
 	original := GVisorTCPBufferBytes
 	t.Cleanup(func() { GVisorTCPBufferBytes = original })

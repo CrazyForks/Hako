@@ -156,8 +156,6 @@ func TestRuntimeDiagnosticsLifecycle(t *testing.T) {
 	}
 }
 
-// helloYAML is a minimal no-tun config: proxies + DNS, no tun stanza,
-// no providers (nothing fetches the network at parse time).
 const helloYAML = `
 mode: rule
 log-level: info
@@ -175,8 +173,6 @@ rules:
   - MATCH,DIRECT
 `
 
-// DoD: a proxies+DNS YAML without tun brings the core to Running,
-// with logs flowing through platform.WriteLog.
 func TestStartNoTunReachesRunning(t *testing.T) {
 	t.Cleanup(func() { logrus.SetOutput(os.Stdout) })
 	opts := testOptions(t)
@@ -200,14 +196,7 @@ func TestStartNoTunReachesRunning(t *testing.T) {
 		t.Fatal("second Start must be rejected (one process, one core)")
 	}
 
-	// (The bbolt "cache.db lands in WorkingPath" DoD is order-dependent in a
-	// single-process test run — cachefile.Cache() is a package-wide
-	// sync.Once, so whichever core-starting test runs first claims the path.
-	// It is verified end-to-end on device instead: the NE created cache.db
-	// inside the App Group container.)
 
-	// The core logged during ApplyConfig; those lines must have reached
-	// the platform, not stdout.
 	select {
 	case <-platform.lines:
 	case <-time.After(2 * time.Second):
@@ -215,8 +204,6 @@ func TestStartNoTunReachesRunning(t *testing.T) {
 	}
 }
 
-// DoD: Close is clean and the same process can start a fresh core
-// afterwards — the full hello-core cycle twenty times over.
 func TestCloseThenRestart(t *testing.T) {
 	t.Cleanup(func() { logrus.SetOutput(os.Stdout) })
 	if err := Setup(testOptions(t)); err != nil {
@@ -242,8 +229,6 @@ func TestCloseThenRestart(t *testing.T) {
 	}
 }
 
-// DoD: mode switching takes effect; Pause/Wake don't disturb a
-// running core.
 func TestModeStatusPauseWake(t *testing.T) {
 	t.Cleanup(func() { logrus.SetOutput(os.Stdout) })
 	if err := Setup(testOptions(t)); err != nil {
@@ -261,7 +246,7 @@ func TestModeStatusPauseWake(t *testing.T) {
 	if got := svc.Status(); got != tunnel.Running.String() {
 		t.Fatalf("Status() = %q, want %q", got, tunnel.Running.String())
 	}
-	if err := svc.SetMode("Global"); err != nil { // case-insensitive
+	if err := svc.SetMode("Global"); err != nil {
 		t.Fatalf("SetMode(global): %v", err)
 	}
 	if svc.Mode() != tunnel.Global.String() {
@@ -281,8 +266,6 @@ func TestModeStatusPauseWake(t *testing.T) {
 	}
 }
 
-// DoD: Reload applies a new config on a running (no-tun) core
-// without error and stays Running; rejects broken YAML.
 func TestReloadNoTun(t *testing.T) {
 	t.Cleanup(func() { logrus.SetOutput(os.Stdout) })
 	if err := Setup(testOptions(t)); err != nil {
@@ -300,7 +283,6 @@ func TestReloadNoTun(t *testing.T) {
 	if err := svc.Reload("mode: [broken"); err == nil {
 		t.Fatal("Reload must reject unparsable YAML")
 	}
-	// Reload before Start on a fresh service is rejected.
 	fresh, _ := NewService(newRecordingPlatform())
 	if err := fresh.Reload(helloYAML); err == nil {
 		t.Fatal("Reload before Start must fail")
@@ -336,11 +318,6 @@ func TestStartRejectsBrokenYAML(t *testing.T) {
 	}
 }
 
-// tunStack answers the three-stack matrix's readback requirement: which stack the live tun
-// actually runs, read from the same source upstream's own /configs answers from
-// (listener.GetTunConf), not inferred from what was sent. Absent when no tun is live -- and
-// absence is load-bearing, because LC.Tun's zero-value Stack is TunGvisor: without the Enable
-// guard a coreless run would confidently report a stack it does not have.
 func TestRuntimeDiagnosticsCarryTheLiveTunStack(t *testing.T) {
 	t.Cleanup(func() { logrus.SetOutput(os.Stdout) })
 	if err := Setup(testOptions(t)); err != nil {
@@ -363,9 +340,6 @@ func TestRuntimeDiagnosticsCarryTheLiveTunStack(t *testing.T) {
 		t.Fatalf("no tun is live, but diagnostics carry tunStack=%v (the zero-value lie)", value)
 	}
 
-	// The listener's own record, the way a real tun leaves it (listener.go writes LastTunConf
-	// when it builds the device and clears it on cleanup). Each mihomo stack name must come
-	// back verbatim -- the UI vocabulary rule pins the literal spellings.
 	previous := coreListener.LastTunConf
 	t.Cleanup(func() { coreListener.LastTunConf = previous })
 	for stack, literal := range map[C.TUNStack]string{

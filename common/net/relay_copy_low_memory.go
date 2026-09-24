@@ -12,19 +12,8 @@ import (
 	N "github.com/metacubex/sing/common/network"
 )
 
-// lowMemoryRelayMTU bounds each direction of an idle TCP relay to one 2 KiB
-// copy buffer. A 4 KiB baseline still reached Apple's critical memory-pressure
-// signal during the signed 500-connection gate even though phys_footprint
-// remained below the engineering budget. TCP streaming permits a 4064-byte
-// TUN payload to be read in multiple chunks, while protocol writers that need
-// framing headroom still receive it through ReadWaitOptions and sources or
-// destinations that declare a larger MTU retain their declared requirement.
 const lowMemoryRelayMTU = 2 * 1024
 
-// relayCopy keeps sing's cached-reader, replaceable handshake and counter
-// semantics. Only the final streaming buffer is constrained. This is kept
-// local rather than changing sing's global low-memory buffer because UDP and
-// protocol transports have different allocation and framing requirements.
 func relayCopy(destination io.Writer, source io.Reader) (n int64, err error) {
 	if source == nil {
 		return 0, E.New("nil reader")
@@ -116,9 +105,6 @@ func (w *boundedRelayWriter) UpstreamWriter() any {
 	return w.ExtendedWriter
 }
 
-// Preserve sing's zero-copy syscall path on platforms where it is available.
-// Apple builds fall back to the bounded ExtendedWriter path because sing's
-// non-Linux splice implementation intentionally reports handled=false.
 func (w *boundedRelayWriter) SyscallConn() (syscall.RawConn, error) {
 	if syscallConn, ok := w.upstream.(syscall.Conn); ok {
 		return syscallConn.SyscallConn()

@@ -15,7 +15,7 @@ func TestStripHakoSuffix(t *testing.T) {
 		"1.19.28-hako.1":   "1.19.28",
 		"1.19.28-hako.42":  "1.19.28",
 		"1.19.29":          "1.19.29",
-		"1.20.0-hako.3-rc": "1.20.0", // any -hako... is stripped
+		"1.20.0-hako.3-rc": "1.20.0",
 	}
 	for in, want := range cases {
 		if got := stripHakoSuffix(in); got != want {
@@ -260,8 +260,6 @@ func TestFinalizeXCFrameworkAddsPrivacyManifestAndNormalizesConstructors(t *test
 	}
 }
 
-// coreVersion must reject a nearest tag that is not a v-prefixed
-// semver, instead of silently injecting garbage as the core version.
 func TestParseCoreVersion(t *testing.T) {
 	ok := map[string]string{
 		"v1.19.28\n":        "1.19.28",
@@ -323,16 +321,9 @@ func TestEncodeAppleBuildInfo(t *testing.T) {
 	if strings.Join(info.BuildTags, ",") != strings.Join(wantTags, ",") {
 		t.Fatalf("build tags = %v, want %v", info.BuildTags, wantTags)
 	}
-	// The non-macOS slices are compiled with one more tag than the base set, through
-	// gomobile's -tags-not-macos. A provenance record that names only the base set describes
-	// the macOS slice and misdescribes the other four; the exact invocation is what "binds
-	// this binary to the exact build mode" has to mean.
 	if strings.Join(info.BuildTagsNotMacos, ",") != "with_low_memory" {
 		t.Fatalf("build tags (not macOS) = %v, want [with_low_memory]", info.BuildTagsNotMacos)
 	}
-	// The standard library is part of what was built, and it is the part govulncheck's std
-	// findings are about; without the toolchain in the record, a scan of the delivered
-	// artifact has to guess which Go built it.
 	if info.GoToolchain != "go1.26.6" {
 		t.Fatalf("go toolchain = %q, want go1.26.6", info.GoToolchain)
 	}
@@ -347,8 +338,6 @@ func TestEncodeAppleBuildInfo(t *testing.T) {
 	}
 }
 
-// goToolchainVersion asks the go command itself, from inside the bind module, so the answer
-// honours that module's toolchain line -- the same resolution gomobile's go build performs.
 func TestGoToolchainVersionReadsTheBindModuleToolchain(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -428,8 +417,6 @@ func TestGitSourceStateDetectsTrackedAndUntrackedChanges(t *testing.T) {
 	}
 }
 
-// sdkVersion must fail when more than one release tag points at HEAD
-// rather than silently choosing one, enforcing the exactly-one-tag rule.
 func TestSelectSDKVersion(t *testing.T) {
 	if got, err := selectSDKVersion("v1.19.28-hako.2\n", "abc1234"); err != nil || got != "v1.19.28-hako.2" {
 		t.Errorf("one tag: got %q, %v; want v1.19.28-hako.2", got, err)
@@ -445,13 +432,6 @@ func TestSelectSDKVersion(t *testing.T) {
 	}
 }
 
-// Two clean builds of the same revision produced five archives that differed only in the
-// `__.SYMDEF SORTED` member's timestamp -- Apple's ar/ranlib/libtool stamp the symbol table
-// with the current time -- so "the artifact checksum is reproducible" (CORE-RELEASE-GOAL §6)
-// was false while every object inside was identical. cctools honour ZERO_AR_DATE, and the
-// Go linker's own archive step already zeroes the object timestamps, so this one variable is
-// the difference between "same objects" and "same bytes" (measured: two c-archive builds with
-// -trimpath -buildid= differ without it and are byte-identical with it).
 func TestBuildEnvZeroesArchiveDates(t *testing.T) {
 	found := false
 	for _, entry := range buildEnv() {
@@ -464,10 +444,6 @@ func TestBuildEnvZeroesArchiveDates(t *testing.T) {
 	}
 }
 
-// xcodebuild -create-xcframework orders AvailableLibraries by something that is not the
-// argument order and not stable across runs (measured: tvos-arm64 first in one delivery), which
-// makes the root Info.plist the second source of checksum drift. Sorting by LibraryIdentifier
-// is a canonical form the loader does not care about and a diff reader does.
 func TestCanonicalizeXCFrameworkPlistSortsTheLibraries(t *testing.T) {
 	root := t.TempDir()
 	plist := filepath.Join(root, "Info.plist")
@@ -524,8 +500,6 @@ func TestCanonicalizeXCFrameworkPlistSortsTheLibraries(t *testing.T) {
 		!strings.Contains(text, "<string>XFWK</string>") {
 		t.Fatalf("canonicalization lost keys:\n%s", text)
 	}
-	// Idempotent: a second pass is a no-op, byte for byte -- otherwise it is a
-	// transformation, not a canonical form.
 	if err := canonicalizeXCFrameworkPlist(root); err != nil {
 		t.Fatalf("second canonicalizeXCFrameworkPlist: %v", err)
 	}

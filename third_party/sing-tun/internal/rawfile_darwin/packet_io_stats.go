@@ -6,8 +6,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// PacketReadStats reports exact read-side syscall attempts for the active
-// Darwin packet descriptor. It contains no packet contents or endpoint data.
 type PacketReadStats struct {
 	Syscalls   uint64
 	WouldBlock uint64

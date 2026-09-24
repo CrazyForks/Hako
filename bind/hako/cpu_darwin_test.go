@@ -10,8 +10,6 @@ func TestProcessCPUTimeNanosecondsIsAvailableAndMonotonic(t *testing.T) {
 		t.Fatalf("process CPU time unavailable: %d", before)
 	}
 
-	// Exercise the current process so this also catches unit/scaling mistakes
-	// without requiring the timer resolution to expose a strictly larger value.
 	var sum uint64
 	for i := uint64(0); i < 100_000; i++ {
 		sum += i

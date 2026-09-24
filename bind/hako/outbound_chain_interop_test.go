@@ -66,8 +66,6 @@ func TestControlledDialerProxyChainInterop(t *testing.T) {
 	configYAML, err := yaml.Marshal(map[string]any{
 		"mode":      "rule",
 		"log-level": "info",
-		// This fixture counts exactly one HEAD per probe; the applied config
-		// must say so itself, or the factory default flips the global on.
 		"unified-delay": false,
 		"dns": map[string]any{
 			"enable":     true,

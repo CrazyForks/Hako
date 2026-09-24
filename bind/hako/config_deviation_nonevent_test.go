@@ -5,10 +5,6 @@ import (
 	"testing"
 )
 
-// A row in "what the running core did" names something that happened. Two shapes of row that
-// named nothing were found in one sweep after the store-fake-ip defect: a rule reported on a
-// profile where its guard never fires, and a forced value reported for a configuration that
-// wrote exactly that value.
 
 func deviationFields(t *testing.T, yaml, profile string) map[string]map[string]any {
 	t.Helper()
@@ -29,8 +25,6 @@ func deviationFields(t *testing.T, yaml, profile string) map[string]map[string]a
 	return out
 }
 
-// Class A: geodata-loader is forced only where memoryConservativeGeodata is set. On a macOS
-// profile the loader stays as written, and the report must not say otherwise.
 func TestGeodataLoaderIsReportedOnlyWhereItIsForced(t *testing.T) {
 	cfg := "geodata-loader: standard\nproxies: []\nrules:\n  - MATCH,DIRECT\n"
 	for profile, want := range map[string]bool{
@@ -46,9 +40,8 @@ func TestGeodataLoaderIsReportedOnlyWhereItIsForced(t *testing.T) {
 	}
 }
 
-// Class B: a configuration that wrote exactly the forced value has no deviation.
 func TestAWrittenValueEqualToTheForcedOneIsNotReported(t *testing.T) {
-	cases := map[string][2]string{ // field -> {written == forced, written != forced}
+	cases := map[string][2]string{
 		"dns.enable":                  {"dns:\n  enable: true\n", "dns:\n  enable: false\n"},
 		"tun.enable":                  {"tun:\n  enable: true\n", "tun:\n  enable: false\n"},
 		"tun.auto-route":              {"tun:\n  enable: true\n  auto-route: false\n", "tun:\n  enable: true\n  auto-route: true\n"},
@@ -68,10 +61,6 @@ func TestAWrittenValueEqualToTheForcedOneIsNotReported(t *testing.T) {
 	}
 }
 
-// The unwritten case still reports where the moved default differs from upstream's: nothing
-// else the reader can see tells them. (A forced rule with no upstreamDefault is one where the
-// force equals upstream's own default; an unwritten field there deviates from nothing and was
-// never reported -- that's rule, not this change's.)
 func TestAnUnwrittenForcedFieldWithAMovedDefaultIsStillReported(t *testing.T) {
 	rows := deviationFields(t, "proxies: []\nrules:\n  - MATCH,DIRECT\n", RuntimeProfileIOSPacketTunnel)
 	for _, field := range []string{"find-process-mode", "dns.enable", "profile.store-fake-ip"} {
@@ -86,9 +75,6 @@ func TestAnUnwrittenForcedFieldWithAMovedDefaultIsStillReported(t *testing.T) {
 	}
 }
 
-// Every forced rule either names the scalar it forces or is on the short list of rules whose
-// value is not a constant scalar. A forced rule with neither would silently keep reporting the
-// written-equals-forced non-event.
 func TestEveryForcedRuleNamesItsValueOrIsExempt(t *testing.T) {
 	exempt := map[string]string{
 		"tun.mtu":        "chosen at startup, not a constant",

@@ -11,7 +11,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// UnicastAddressChangeCallback structure allows unicast address change callback handling.
 type UnicastAddressChangeCallback struct {
 	cb   func(notificationType MibNotificationType, unicastAddress *MibUnicastIPAddressRow)
 	wait sync.WaitGroup
@@ -24,9 +23,6 @@ var (
 	unicastAddressChangeHandle         = windows.Handle(0)
 )
 
-// RegisterUnicastAddressChangeCallback registers a new UnicastAddressChangeCallback. If this particular callback is already
-// registered, the function will silently return. Returned UnicastAddressChangeCallback.Unregister method should be used
-// to unregister.
 func RegisterUnicastAddressChangeCallback(callback func(notificationType MibNotificationType, unicastAddress *MibUnicastIPAddressRow)) (*UnicastAddressChangeCallback, error) {
 	s := &UnicastAddressChangeCallback{cb: callback}
 
@@ -50,7 +46,6 @@ func RegisterUnicastAddressChangeCallback(callback func(notificationType MibNoti
 	return s, nil
 }
 
-// Unregister unregisters the callback.
 func (callback *UnicastAddressChangeCallback) Unregister() error {
 	unicastAddressChangeAddRemoveMutex.Lock()
 	defer unicastAddressChangeAddRemoveMutex.Unlock()

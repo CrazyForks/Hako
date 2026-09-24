@@ -25,7 +25,7 @@ var _ stack.LinkEndpoint = (*WintunEndpoint)(nil)
 
 type WintunEndpoint struct {
 	tun        *NativeTun
-	mu         sync.RWMutex // mu guards dispatcher
+	mu         sync.RWMutex
 	dispatcher stack.NetworkDispatcher
 }
 

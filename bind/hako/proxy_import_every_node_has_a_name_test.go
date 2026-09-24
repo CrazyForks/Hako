@@ -9,20 +9,6 @@ import (
 	"github.com/TokenPLS/Hako/config"
 )
 
-// unnamedShareLinks is one link per scheme with no #fragment, which is how a
-// person's clipboard often arrives. The list is per scheme on purpose. The
-// defect these tests were written for lived in makeProxyImportNameUnique, and
-// writing the gate around its call sites would have been writing it around
-// today's implementation -- three call sites that could become one tomorrow
-// without changing anything a person can see. A scheme is what is being
-// tested; a call site is how it currently happens.
-//
-// Three lanes each sampled a different slice of this list on 2026-08-28 and
-// each concluded something true about their slice: this tree checked anytls
-// and reported that unnamed links get host:port, the iOS lane checked four and
-// reported that they get "", the macOS lane checked five and found both. The
-// list is exhaustive so that the next reading does not depend on which rows
-// somebody happened to pick.
 var unnamedShareLinks = map[string]string{
 	"ss":        "ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpwd2Q@e.example:1080",
 	"trojan":    "trojan://pw@e.example:443",
@@ -45,17 +31,6 @@ func sortedSchemes() []string {
 	return schemes
 }
 
-// Two links with no name of their own still produce two nodes the kernel will
-// load.
-//
-// Five of these ten schemes reached makeProxyImportNameUnique with an empty
-// name and were returned unchanged, so pasting the same unnamed link twice
-// produced a configuration mihomo refused outright: `proxy  is the duplicate
-// name`. The person got a profile that would not load, and nothing in the
-// import report said why -- the import had reported success.
-//
-// The kernel's own parser is the judge here rather than an assertion about
-// names, because that is the thing that was failing.
 func TestTwoUnnamedLinksOfEverySchemeProduceALoadableConfiguration(t *testing.T) {
 	for _, scheme := range sortedSchemes() {
 		t.Run(scheme, func(t *testing.T) {
@@ -85,14 +60,6 @@ func TestTwoUnnamedLinksOfEverySchemeProduceALoadableConfiguration(t *testing.T)
 	}
 }
 
-// Every field this build could not honour names the node it belonged to, by the
-// name that node ends up with.
-//
-// The association has to survive renaming, and renaming is what makes it hard:
-// the notices are produced while the link is being read and the final name is
-// assigned afterwards, so a notice stamped with the name from the link sends
-// every same-named node's notices to whichever one came first. Two identical
-// links are the smallest case that tells the difference.
 func TestAFieldNoticeNamesTheNodeItBelongsTo(t *testing.T) {
 	for _, scheme := range sortedSchemes() {
 		unhonourable, ok := map[string]string{
@@ -133,16 +100,7 @@ func TestAFieldNoticeNamesTheNodeItBelongsTo(t *testing.T) {
 	}
 }
 
-// A link that is skipped carries its own field notices instead of filing them
-// against a node that does not exist.
 func TestASkippedLinkCarriesItsOwnFieldNotices(t *testing.T) {
-	// The port is out of range, which is fatal to the record, and alpn on the
-	// same link is a field snell has nowhere to put.
-	//
-	// The fixture used to be an unbuildable plugin name. That stopped being a
-	// skip on 2026-08-28 -- upstream drops the plugin and the kernel loads the
-	// node, so refusing was stricter than the chain below us -- and the test
-	// went red rather than quietly asserting nothing, which is what it is for.
 	link := "snell://cHNr@e.example:99999?alpn=h2&version=4#N"
 	report := readImportReport(t, []byte(link))
 	if len(report.Proxies) != 0 || len(report.Skipped) != 1 {
@@ -195,23 +153,6 @@ func importedNodeName(proxy map[string]any) string {
 	return name
 }
 
-// The report says which pasted links describe the same node, and the four cases
-// that decide it are all here.
-//
-// Collapsing duplicates is the client's, because this pass sees only what was
-// pasted just now while the duplicate a person actually meets is the one
-// already in their profile. What is not the client's is knowing whether two
-// links describe the same node, which needs to know what each field means to an
-// outbound. So the kernel answers that and nothing else.
-//
-// The two orderings that make this work pull opposite ways, and both are
-// asserted here because getting either backwards silently produces the wrong
-// answer rather than an error:
-//
-//   - the identity is computed BEFORE renaming, or the second "HK" is already
-//     "HK-01" and no two nodes are ever alike;
-//   - a field notice is stamped AFTER renaming, or both notices name "HK" and
-//     the second node's is lost.
 func TestTheReportSaysWhichPastedLinksAreTheSameNode(t *testing.T) {
 	for _, test := range []struct {
 		name    string

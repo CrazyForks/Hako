@@ -1,40 +1,3 @@
-// Command gen_protocol_inventory regenerates the proxy-protocol field inventory
-// that the iOS client's protocol editor decodes, by parsing the Core outbound
-// option structs. Making the inventory a
-// generated artifact — rather than a hand-copied one — lets a CI gate catch a
-// silently stale catalog when the pinned core is bumped.
-//
-// Output is a JSON object { "<type>": [ field, ... ] } where each field is
-// { "goName", "key", "goType", "required", "nested"? }, matching the client's
-// rawJSON shape:
-//   - goName  = Go struct field name
-//   - key     = proxy:"..." tag key
-//   - goType  = the field type exactly as written in source (so C.DNSPrefer,
-//     *bool, []string, map[string]any, ECHOptions render verbatim)
-//   - required = the tag has no ,omitempty
-//   - nested   = present only when the field's (deref/elem) type is a struct
-//     defined in the outbound package; map[string]any stays a leaf.
-//
-// The embedded BasicOption is flattened into each type's top level. SingMuxOption
-// (smux) is excluded — the client appends those fields via a separate list.
-//
-// Which types exist is READ FROM THE PARSER, not kept in a map here: the `switch`
-// in adapter/parser.go ParseProxy (and listener/parse.go ParseListener for the
-// listener surface) is walked, and each `case "<type>":` clause yields the
-// `&pkg.XxxOption{` it decodes into. A hand-kept map is a second copy of that
-// switch and it fell behind exactly the way second copies do -- v1.19.30 added
-// `zerotier` to the switch and this generator kept emitting 26 types, so the
-// gate that compares the client's catalog to "the pinned core's structs" would
-// have stayed green with a whole outbound missing. A case the
-// walk cannot pair with an option literal is an error, not a skip: the pattern
-// changed, so the walk must fail loudly rather than lose a type silently.
-//
-// Surfaces (--surface): `proxies` (default, the client-facing shape above),
-// `listeners` (the same shape for ParseListener over listener/inbound with
-// inbound:"..." tags), or `all` -- {"proxies": {...}, "listeners": {...}} -- the
-// shape the core-side field inventory golden and its drift/ledger gate use.
-// --root points the walk at another checkout of this repository (a base
-// revision, say) instead of the cwd.
 package main
 
 import (
@@ -54,13 +17,12 @@ import (
 	"strings"
 )
 
-// surface names one parser switch and the option-struct package it decodes into.
 type surface struct {
 	name       string
-	parserFile string // relative to the repository root
+	parserFile string
 	parserFunc string
-	optionPkg  string // the import alias the parser file uses for the option package
-	optionDir  string // relative to the repository root
+	optionPkg  string
+	optionDir  string
 	tagName    string
 }
 
@@ -75,7 +37,6 @@ var surfaces = map[string]surface{
 	},
 }
 
-// excludedStructs are never flattened as an embed nor expanded as nested.
 var excludedStructs = map[string]bool{"SingMuxOption": true}
 
 type inventoryField struct {
@@ -89,9 +50,6 @@ type inventoryField struct {
 type generator struct {
 	fset    *token.FileSet
 	structs map[string]*ast.StructType
-	// constructors maps the option package's top-level functions to the struct
-	// they return (`func DefaultXOption() *XOption` -> XOption), for the parser
-	// cases that obtain their option through a call instead of a literal.
 	constructors map[string]string
 	tagName      string
 }
@@ -143,7 +101,6 @@ func run(args []string, out *os.File) error {
 	return nil
 }
 
-// inventoryFor walks one surface: parser switch -> type/struct roots -> fields.
 func inventoryFor(root string, s surface) (map[string][]inventoryField, error) {
 	gen, err := newGenerator(filepath.Join(root, s.optionDir), s.tagName)
 	if err != nil {
@@ -164,15 +121,6 @@ func inventoryFor(root string, s surface) (map[string][]inventoryField, error) {
 	return inventory, nil
 }
 
-// parserRoots reads the `switch` inside funcName in parserFile and returns every
-// `case "<type>":` paired with the option struct its clause decodes into. Two
-// shapes are recognised, the two the parsers use: the `&pkg.XxxOption{...}`
-// composite literal taken by address (every ParseProxy case, most ParseListener
-// cases), and a call to a constructor in the option package whose result is a
-// pointer to an option struct (`IN.DefaultHysteria2RealmServerOption()`),
-// resolved through constructors -- the option package's top-level functions
-// mapped to the struct they return. Every case that names a string must pair with
-// exactly one struct; the default clause is ignored.
 func parserRoots(parserFile, funcName, optionPkg string, constructors map[string]string) (map[string]string, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, parserFile, nil, 0)
@@ -202,7 +150,7 @@ func parserRoots(parserFile, funcName, optionPkg string, constructors map[string
 		for _, stmt := range sw.Body.List {
 			clause, ok := stmt.(*ast.CaseClause)
 			if !ok || len(clause.List) == 0 {
-				continue // default:
+				continue
 			}
 			var types []string
 			for _, expr := range clause.List {
@@ -217,7 +165,7 @@ func parserRoots(parserFile, funcName, optionPkg string, constructors map[string
 				types = append(types, value)
 			}
 			if len(types) == 0 {
-				continue // a switch on something other than the type string
+				continue
 			}
 			structs := optionLiteralsIn(clause.Body, optionPkg)
 			if len(structs) == 0 {
@@ -237,7 +185,7 @@ func parserRoots(parserFile, funcName, optionPkg string, constructors map[string
 				roots[typeName] = structs[0]
 			}
 		}
-		return false // one switch per parser; do not descend into nested ones
+		return false
 	})
 	if walkErr != nil {
 		return nil, walkErr
@@ -248,8 +196,6 @@ func parserRoots(parserFile, funcName, optionPkg string, constructors map[string
 	return roots, nil
 }
 
-// optionLiteralsIn lists, in source order and de-duplicated, the struct names of
-// `&pkg.Name{...}` expressions in stmts whose selector package is optionPkg.
 func optionLiteralsIn(stmts []ast.Stmt, optionPkg string) []string {
 	var names []string
 	seen := map[string]bool{}
@@ -281,8 +227,6 @@ func optionLiteralsIn(stmts []ast.Stmt, optionPkg string) []string {
 	return names
 }
 
-// optionConstructorsIn lists, in source order and de-duplicated, the option structs
-// returned by `pkg.F(...)` calls in stmts, for the F that constructors knows.
 func optionConstructorsIn(stmts []ast.Stmt, optionPkg string, constructors map[string]string) []string {
 	var names []string
 	seen := map[string]bool{}
@@ -319,10 +263,6 @@ func newGenerator(dir, tagName string) (*generator, error) {
 		return nil, fmt.Errorf("parse %s: %w", dir, err)
 	}
 	gen := &generator{fset: fset, structs: map[string]*ast.StructType{}, constructors: map[string]string{}, tagName: tagName}
-	// Deterministic: walk files in name order so a struct declared twice under
-	// different build tags (zerotier.go / zerotier_stub.go) resolves the same way
-	// on every run. The stub mirrors the real one field for field by upstream's
-	// own discipline; the test pins that they agree.
 	for _, pkg := range pkgs {
 		names := make([]string, 0, len(pkg.Files))
 		for name := range pkg.Files {
@@ -364,9 +304,6 @@ func newGenerator(dir, tagName string) (*generator, error) {
 	return gen, nil
 }
 
-// collect returns structName's inventory fields, flattening embedded structs and
-// recursing into nested struct-typed fields. seen guards against a struct that
-// embeds/nests itself.
 func (g *generator) collect(structName string, seen map[string]bool) ([]inventoryField, error) {
 	st, ok := g.structs[structName]
 	if !ok {
@@ -380,7 +317,6 @@ func (g *generator) collect(structName string, seen map[string]bool) ([]inventor
 
 	var fields []inventoryField
 	for _, astField := range st.Fields.List {
-		// Embedded field (no names): flatten its fields into this level.
 		if len(astField.Names) == 0 {
 			embedded := baseTypeName(astField.Type)
 			if embedded == "" || excludedStructs[embedded] {
@@ -421,9 +357,6 @@ func (g *generator) collect(structName string, seen map[string]bool) ([]inventor
 	return fields, nil
 }
 
-// tagKey extracts the tag's key and whether the field is required (no
-// ,omitempty). A missing tag, or `<tag>:"-"`, means the field is not part of the
-// decoded config and is skipped.
 func tagKey(tag *ast.BasicLit, tagName string) (key string, required bool, ok bool) {
 	if tag == nil {
 		return "", false, false
@@ -443,9 +376,6 @@ func tagKey(tag *ast.BasicLit, tagName string) (key string, required bool, ok bo
 	return name, !strings.Contains(","+opts+",", ",omitempty,"), true
 }
 
-// baseTypeName returns the underlying named type of an expression after peeling
-// pointers and slices: Ident -> its name, *T/[]T -> base of T, everything else
-// (map, selector like C.DNSPrefer, func, ...) -> "" (a leaf, not a local struct).
 func baseTypeName(expr ast.Expr) string {
 	switch t := expr.(type) {
 	case *ast.Ident:
@@ -459,7 +389,6 @@ func baseTypeName(expr ast.Expr) string {
 	}
 }
 
-// renderType prints the field type exactly as written in source.
 func (g *generator) renderType(expr ast.Expr) string {
 	var buf bytes.Buffer
 	if err := printer.Fprint(&buf, g.fset, expr); err != nil {

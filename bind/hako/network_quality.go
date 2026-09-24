@@ -10,8 +10,6 @@ import (
 const NetworkQualityDefaultConfigURL = networkquality.DefaultConfigURL
 const NetworkQualityDefaultMaxRuntimeSeconds = int32(networkquality.DefaultMaxRuntime / time.Second)
 
-// NetworkQualityHTTP3Available reports the compile-time SDK capability. It
-// does not probe the current network or initialize a QUIC transport.
 func NetworkQualityHTTP3Available() bool {
 	return networkquality.HTTP3Available()
 }
@@ -61,9 +59,6 @@ type NetworkQualityTestHandler interface {
 	OnError(message string)
 }
 
-// NetworkQualityTest mirrors libbox's standalone test. When created in the
-// container app while the packet tunnel is connected, its sockets traverse
-// the active VPN and are independently observed by mihomo /traffic.
 type NetworkQualityTest struct {
 	ctx    context.Context
 	cancel context.CancelFunc

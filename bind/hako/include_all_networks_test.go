@@ -11,14 +11,6 @@ import (
 	tun "github.com/metacubex/sing-tun"
 )
 
-// A tunnel started with Include All Networks carries traffic through the gVisor stack and
-// through nothing else: the system and mixed stacks hand the packets they re-inject to the
-// kernel, and under Include All Networks the kernel drops them on the way out, so the
-// session looks alive (proxy tests run on the extension's own sockets) while every flow
-// through the tun goes nowhere. sing-tun knows this and refuses `system`/`mixed` when it is
-// told about the setting; nobody told it, so the failure was silent. Two halves close it:
-// the override moves the stack where it can work and says so, and the stack layer is told
-// the truth so that anything the override misses fails loudly at Start instead.
 
 func withIncludeAllNetworks(t *testing.T, on bool) {
 	t.Helper()
@@ -61,9 +53,6 @@ func TestIncludeAllNetworksMovesSystemAndMixedToGVisor(t *testing.T) {
 	}
 }
 
-// The setting belongs to a packet tunnel. A process that is not one (the macOS application
-// profile) has no NEPacketTunnelNetworkSettings to carry it, so the override must not fire
-// there even if the bit is somehow set.
 func TestIncludeAllNetworksLeavesTheStackAloneOutsideAPacketTunnel(t *testing.T) {
 	withIncludeAllNetworks(t, true)
 	_, ours := parseBoth(t, tunStackDocument("system"))
@@ -89,10 +78,6 @@ func tunStackDeviations(t *testing.T, document string, policy appleRuntimePolicy
 	return rows
 }
 
-// The report row exists exactly when the move happened: written system or mixed under
-// Include All Networks. A written gvisor, a silent configuration, a tunnel without the
-// setting, and a process that is not a packet tunnel all report nothing ( nonevent
-// discipline).
 func TestIncludeAllNetworksReportsTheMoveAndOnlyTheMove(t *testing.T) {
 	tunnel := runtimePolicyFor(runtimeProfileIOSPacketTunnel, true)
 
@@ -128,9 +113,6 @@ func TestIncludeAllNetworksReportsTheMoveAndOnlyTheMove(t *testing.T) {
 	}
 }
 
-// Setup carries the extension's reading of NETunnelProviderProtocol.includeAllNetworks into
-// both consumers: the override that moves the stack, and sing-tun's own guard, which turns
-// a stack the override did not catch into a loud Start failure instead of a silent tunnel.
 func TestSetupCarriesIncludeAllNetworksToTheOverrideAndTheStack(t *testing.T) {
 	withIncludeAllNetworks(t, false)
 	previousStackFlag := sing_tun.IncludeAllNetworks
@@ -160,8 +142,6 @@ func TestSetupCarriesIncludeAllNetworksToTheOverrideAndTheStack(t *testing.T) {
 			includeAllNetworksRequested.Load(), sing_tun.IncludeAllNetworks)
 	}
 
-	// The setting lives on the tunnel configuration and only changes with a reconnect, so a
-	// Setup that flips it while a core is running is a caller error, like RuntimeProfile.
 	activeCoreCount.Add(1)
 	t.Cleanup(func() { activeCoreCount.Add(-1) })
 	err := Setup(options(true))
@@ -173,8 +153,6 @@ func TestSetupCarriesIncludeAllNetworksToTheOverrideAndTheStack(t *testing.T) {
 	}
 }
 
-// The passthrough is only worth anything if sing-tun really refuses the two stacks under the
-// setting. This pins the upstream contract the loud-failure half relies on.
 func TestSingTunRefusesSystemAndMixedUnderIncludeAllNetworks(t *testing.T) {
 	for _, stack := range []string{"system", "mixed"} {
 		_, err := tun.NewStack(stack, tun.StackOptions{IncludeAllNetworks: true})

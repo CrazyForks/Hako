@@ -13,9 +13,6 @@ func stubPlatformResolvers(t *testing.T, lines []string, err error) {
 	t.Cleanup(func() { platformResolvers = previous })
 }
 
-// iOS has no /etc/resolv.conf (ENOENT from the App and the extension alike, iPhone 17 Pro
-// Max, 2026-09-06): the platform resolver library is the source there, and the file is only
-// a fallback for where the library has nothing.
 func TestTheResolverLibraryIsTheSourceAndTheFileTheFallback(t *testing.T) {
 	stubRoutes(t, 11, nil, map[string]int{"10.0.0.53": 11, "fe80::1": 11, "198.18.0.2": 11, "192.0.2.53": 11, "119.29.29.29": 11}, nil)
 	withResolvConf(t, "nameserver 119.29.29.29\n")

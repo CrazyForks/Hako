@@ -21,9 +21,6 @@ func fipsCipherSuites(c *Config) []uint16      { panic("fipsCipherSuites") }
 
 var fipsSupportedSignatureAlgorithms []SignatureScheme
 
-// [uTLS]
-// Boring struct is only to be used to record static env variables
-// in boring package. We do not implement BoringSSL compatibliity here.
 type Boring struct {
 	Enabled bool
 }
@@ -33,7 +30,6 @@ func (*Boring) NewGCMTLS(_ cipher.Block) (cipher.AEAD, error) {
 }
 
 func (*Boring) Unreachable() {
-	// do nothing
 }
 
 var boring Boring

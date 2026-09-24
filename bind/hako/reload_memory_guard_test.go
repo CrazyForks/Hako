@@ -14,11 +14,6 @@ import (
 
 const testMiB = int64(1 << 20)
 
-// The numbers are the iPad's (2026-08-19): a profile running at 31.5 MiB inside a wall that
-// leaves 18.5 MiB, versus one running at 14 MiB. The first died 116 ms into a reload with no
-// crash report and no shutdown line; the second reloads every day. Building a second core
-// costs about one core, and the judge is asked to bias high: a wrong refusal is a one-second
-// restart, a wrong acceptance is that death.
 func TestReloadMemoryJudgeRefusesTheProfileThatDied(t *testing.T) {
 	verdict := judgeReloadMemory(reloadMemoryReading{
 		AvailableBytes: 18*testMiB + testMiB/2,
@@ -50,9 +45,6 @@ func TestReloadMemoryJudgeAcceptsTheLightProfile(t *testing.T) {
 	}
 }
 
-// A larger candidate costs more than the running one -- a subscription update growing is the
-// ordinary case -- so the estimate scales up with the candidate's size. It never scales down:
-// a smaller file can still pull larger providers, and the asymmetry says bias high.
 func TestReloadMemoryJudgeScalesUpWithTheCandidateAndNeverDown(t *testing.T) {
 	reading := reloadMemoryReading{AvailableBytes: 30 * testMiB, FootprintBytes: 20 * testMiB, BaselineBytes: 8 * testMiB}
 	same := judgeReloadMemory(reading, 100_000, 100_000)
@@ -66,10 +58,6 @@ func TestReloadMemoryJudgeScalesUpWithTheCandidateAndNeverDown(t *testing.T) {
 	}
 }
 
-// os_proc_available_memory returns 0 for a process without a limit (every ordinary macOS
-// process) and the reader returns -1 where the symbol does not exist. Neither is a reading;
-// judging on either would refuse reloads on platforms that have no wall. Both directions are
-// pinned: a strictly positive value is judged, zero and negative are not.
 func TestReloadMemoryJudgeOnlyJudgesAStrictlyPositiveReading(t *testing.T) {
 	heavy := func(available int64) reloadMemoryVerdict {
 		return judgeReloadMemory(reloadMemoryReading{
@@ -84,16 +72,12 @@ func TestReloadMemoryJudgeOnlyJudgesAStrictlyPositiveReading(t *testing.T) {
 			t.Fatalf("available=%d is not a reading; reason = %q, want %q", available, verdict.Reason, reloadUnmeasured)
 		}
 	}
-	// No footprint reading either: nothing to estimate from, so nothing to refuse on.
 	verdict := judgeReloadMemory(reloadMemoryReading{AvailableBytes: 10 * testMiB, FootprintBytes: -1, BaselineBytes: 8 * testMiB}, 1, 1)
 	if verdict.Reason != reloadUnmeasured {
 		t.Fatalf("no footprint reading must be unmeasured, got %+v", verdict)
 	}
 }
 
-// The service-level shape: a Reload that the judge refuses returns the refusal sentence and
-// builds nothing -- the running configuration is untouched and the service is still running.
-// The readers are faked to the iPad's numbers because the test process has no wall.
 func TestReloadRefusesUnderTheMemoryCeilingWithoutBuildingASecondCore(t *testing.T) {
 	t.Cleanup(func() { logrus.SetOutput(os.Stdout) })
 	if err := Setup(testOptions(t)); err != nil {
@@ -111,8 +95,6 @@ func TestReloadRefusesUnderTheMemoryCeilingWithoutBuildingASecondCore(t *testing
 	defer restore()
 	svc.startFootprintBytes = 7*testMiB + 7*testMiB/10
 
-	// The candidate is deliberately unparsable: if the refusal comes back instead of the YAML
-	// error, the judge ran before the parse -- which is the second core this exists to not build.
 	err = svc.Reload("mode: [broken")
 	if err == nil {
 		t.Fatal("a reload that would exceed the ceiling must be refused")
@@ -129,7 +111,6 @@ func TestReloadRefusesUnderTheMemoryCeilingWithoutBuildingASecondCore(t *testing
 		t.Fatalf("the diagnostics must carry the refusal in numbers, got %+v", verdict)
 	}
 
-	// And with the light profile's numbers the same reload goes through.
 	restore()
 	restore = fakeReloadMemoryReaders(t, 36*testMiB, 14*testMiB)
 	if err := svc.Reload(helloYAML + "\n"); err != nil {
@@ -140,8 +121,6 @@ func TestReloadRefusesUnderTheMemoryCeilingWithoutBuildingASecondCore(t *testing
 	}
 }
 
-// fakeReloadMemoryReaders makes the judge see the given headroom and footprint. It returns the
-// restore function and also registers it on cleanup, so a test that forgets is still clean.
 func fakeReloadMemoryReaders(t *testing.T, available, footprint int64) func() {
 	t.Helper()
 	previousAvailable, previousFootprint := readAvailableMemoryForReload, readFootprintForReload
@@ -154,17 +133,12 @@ func fakeReloadMemoryReaders(t *testing.T, available, footprint int64) func() {
 	return restore
 }
 
-// recordedReloadVerdict reads the verdict the service kept for its diagnostics, under the
-// same lock the diagnostics take.
 func recordedReloadVerdict(svc *BoxService) reloadMemoryVerdict {
 	svc.mu.Lock()
 	defer svc.mu.Unlock()
 	return svc.reloadVerdict
 }
 
-// The verdict is for the App's diagnostics card as much as for the refusal: after a reload,
-// RuntimeDiagnosticsJSON carries what the judge saw and decided, in numbers. It is absent
-// until a reload has been judged, so a reader cannot mistake "never asked" for "accepted".
 func TestRuntimeDiagnosticsCarryTheLastReloadVerdict(t *testing.T) {
 	t.Cleanup(func() { logrus.SetOutput(os.Stdout) })
 	if err := Setup(testOptions(t)); err != nil {
@@ -209,13 +183,6 @@ func TestRuntimeDiagnosticsCarryTheLastReloadVerdict(t *testing.T) {
 	}
 }
 
-// Apple's own words on os_proc_available_memory (os/proc.h): "0 is returned if the calling
-// process is not an app, or the calling process exceeds its memory limit." On a macOS host that
-// is the first clause -- every ordinary process, no wall, nothing to judge. In an iOS or tvOS
-// extension, where the same call answers positive numbers all day, a zero is the second clause:
-// the process is at or over its limit, and building a second core is the surest way to be
-// killed. So where the platform's zero means "exhausted", the judge refuses on it; where it
-// means "no reading", the judge stays out. Both directions, pinned.
 func TestReloadMemoryJudgeReadsAZeroByThePlatformsOwnMeaning(t *testing.T) {
 	onIOS := judgeReloadMemory(reloadMemoryReading{
 		AvailableBytes: 0, FootprintBytes: 20 * testMiB, BaselineBytes: 8 * testMiB, ZeroMeansExhausted: true,
@@ -232,21 +199,15 @@ func TestReloadMemoryJudgeReadsAZeroByThePlatformsOwnMeaning(t *testing.T) {
 	if onMac.Reason != reloadUnmeasured {
 		t.Fatalf("zero where zero means no reading must stay unmeasured, got %+v", onMac)
 	}
-	// Even with no footprint reading, an exhausted process must not build: there is nothing to
-	// estimate, and nothing is what fits.
 	blind := judgeReloadMemory(reloadMemoryReading{AvailableBytes: 0, FootprintBytes: -1, ZeroMeansExhausted: true}, 1, 1)
 	if blind.Reason != reloadRefusedMemory {
 		t.Fatalf("exhausted with no footprint reading must still refuse, got %+v", blind)
 	}
-	// -1 (the symbol does not exist) is never a reading, whatever zero means.
 	if v := judgeReloadMemory(reloadMemoryReading{AvailableBytes: -1, FootprintBytes: 20 * testMiB, ZeroMeansExhausted: true}, 1, 1); v.Reason != reloadUnmeasured {
 		t.Fatalf("-1 must stay unmeasured, got %+v", v)
 	}
 }
 
-// Service level, iOS meaning of zero: a Reload on a process at its limit is refused before the
-// parse, and the sentence says "have 0 MiB". On the host the reader really does answer 0, so
-// only the meaning is switched.
 func TestReloadRefusesOnZeroHeadroomWhereZeroMeansExhausted(t *testing.T) {
 	t.Cleanup(func() { logrus.SetOutput(os.Stdout) })
 	if err := Setup(testOptions(t)); err != nil {
@@ -269,8 +230,6 @@ func TestReloadRefusesOnZeroHeadroomWhereZeroMeansExhausted(t *testing.T) {
 	if err == nil || !strings.HasPrefix(err.Error(), "hako: reload refused (memory): need ~") || !strings.Contains(err.Error(), ", have 0 MiB; restart the appex instead") {
 		t.Fatalf("zero headroom on iOS must refuse before parsing with have 0 MiB, got %v", err)
 	}
-	// And with the darwin meaning the same zero is no reading: the parse happens (and fails on
-	// the YAML, which is the proof it was reached).
 	zeroHeadroomMeansExhausted = false
 	err = svc.Reload("mode: [broken")
 	if err == nil || strings.HasPrefix(err.Error(), "hako: reload refused (memory)") {
@@ -278,10 +237,6 @@ func TestReloadRefusesOnZeroHeadroomWhereZeroMeansExhausted(t *testing.T) {
 	}
 }
 
-// The configuration text is not the whole candidate: providers are read from files -- up to
-// 16 MiB each -- and prepared before the parse, and a subscription can grow from small to large
-// under an unchanged YAML. The estimate therefore also counts provider payload growth (twice,
-// raw plus prepared) on top of the core-sized estimate; shrinkage is not credited.
 func TestReloadMemoryJudgeCountsProviderPayloadGrowth(t *testing.T) {
 	base := reloadMemoryReading{AvailableBytes: 30 * testMiB, FootprintBytes: 16 * testMiB, BaselineBytes: 8 * testMiB}
 	same := judgeReloadMemory(base, 100, 100)
@@ -304,9 +259,6 @@ func TestReloadMemoryJudgeCountsProviderPayloadGrowth(t *testing.T) {
 	}
 }
 
-// providerPayloadBytes reads what the candidate's providers will bring in: the sizes of the files
-// behind them, resolved the way upstream resolves them (path, or the hashed default for an http
-// provider without one). Unreadable YAML or a missing file counts zero -- the estimate is a floor.
 func TestProviderPayloadBytesSumsTheFilesBehindTheProviders(t *testing.T) {
 	if err := Setup(testOptions(t)); err != nil {
 		t.Fatal(err)
@@ -329,11 +281,6 @@ func TestProviderPayloadBytesSumsTheFilesBehindTheProviders(t *testing.T) {
 	}
 }
 
-// The real pipeline canonicalizes provider-definition keys to lowercase before reading them
-// (canonicalizeProviderDefinitionKeys), so `Path:` and `URL:` are valid spellings that load a
-// provider all the same. The estimator must read them the way the pipeline does -- a 16 MiB
-// rule file behind `Path:` charged as zero growth is the exact hole the estimator exists to
-// close (adversarial review, round 2).
 func TestProviderPayloadBytesReadsKeysTheWayThePipelineDoes(t *testing.T) {
 	if err := Setup(testOptions(t)); err != nil {
 		t.Fatal(err)
@@ -348,11 +295,6 @@ func TestProviderPayloadBytesReadsKeysTheWayThePipelineDoes(t *testing.T) {
 		t.Fatalf("providerPayloadBytes with a `Path:` spelling = %d, want 4096", got)
 	}
 
-	// Conflicting spellings, the pipeline's precedence: a key already lowercase always wins --
-	// canonicalizeProviderDefinitionKeys never lets `Path:` overwrite `path:` -- so the
-	// estimator must read the file the pipeline will actually load, not whichever variant a
-	// map iteration happens to visit first. Eight rounds because the defect this pins was
-	// order-dependent: a first-match reader is right about half the time.
 	missing := filepath.Join(dir, "absent.yaml")
 	both := "mode: rule\nrule-providers:\n  r:\n    type: file\n    behavior: domain\n    path: " + file + "\n    Path: " + missing + "\nrules:\n  - MATCH,DIRECT\n"
 	for round := 0; round < 8; round++ {
@@ -360,9 +302,6 @@ func TestProviderPayloadBytesReadsKeysTheWayThePipelineDoes(t *testing.T) {
 			t.Fatalf("round %d: with `path:` present the pipeline loads it, but the estimator read %d bytes (the `Path:` duplicate)", round, got)
 		}
 	}
-	// No lowercase key at all: the pipeline's own resolution is map-order between the mixed
-	// spellings, so the estimator takes the largest -- over-counting is the safe side of a
-	// nondeterminism upstream of it.
 	small := filepath.Join(dir, "small.yaml")
 	if err := os.WriteFile(small, make([]byte, 100), 0o600); err != nil {
 		t.Fatal(err)
@@ -373,11 +312,6 @@ func TestProviderPayloadBytesReadsKeysTheWayThePipelineDoes(t *testing.T) {
 			t.Fatalf("round %d: with no lowercase key the estimator must charge the largest variant, got %d", round, got)
 		}
 	}
-	// And the case that tells precedence apart from "largest": the lowercase key points to the
-	// SMALL file, a mixed-case duplicate to the big one. The pipeline will load the small one
-	// -- lowercase always wins -- so charging the big one would be a phantom 4 KiB that could
-	// tip a borderline reload into refusal. Exactness where the pipeline is deterministic,
-	// bias only where it is not.
 	precedence := "mode: rule\nrule-providers:\n  r:\n    type: file\n    behavior: domain\n    path: " + small + "\n    Path: " + file + "\nrules:\n  - MATCH,DIRECT\n"
 	for round := 0; round < 8; round++ {
 		if got := providerPayloadBytes(precedence); got != 100 {
@@ -385,13 +319,6 @@ func TestProviderPayloadBytesReadsKeysTheWayThePipelineDoes(t *testing.T) {
 		}
 	}
 
-	// A declared path wins even when its file is empty. Zero-byte providers are a deliberate
-	// contract (a 404'd subscription writes an empty file and the provider starts as an empty
-	// set), and the pipeline reads the explicit path exclusively whenever one is declared --
-	// the url is where the file CAME from, not an alternative to it. An estimator that treats
-	// "zero bytes" as "no path" falls through to the url's hashed cache location, and whatever
-	// stale download sits there gets charged at six times its size: a phantom refusal
-	// (adversarial review, round 4).
 	empty := filepath.Join(dir, "empty.yaml")
 	if err := os.WriteFile(empty, nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -409,23 +336,15 @@ func TestProviderPayloadBytesReadsKeysTheWayThePipelineDoes(t *testing.T) {
 	if got := providerPayloadBytes(zeroWithURL); got != 0 {
 		t.Fatalf("a declared zero-byte path must charge zero; the estimator charged %d (the url's stale cache)", got)
 	}
-	// And with no path declared at all, the url's cache location is exactly what will be read.
 	urlOnly := "mode: rule\nrule-providers:\n  r:\n    type: http\n    behavior: domain\n    url: " + staleURL + "\nrules:\n  - MATCH,DIRECT\n"
 	if got := providerPayloadBytes(urlOnly); got != 8192 {
 		t.Fatalf("with only a url the hashed cache is the payload, got %d want 8192", got)
 	}
 }
 
-// The provider factor is a measured number, not a guess: this tree records a 4.7 MB domain
-// rule-set taking an iOS extension from 25 MiB to its 50 MiB ceiling inside Initial -- the raw
-// file, a pointer trie, a full copy of the domains and the succinct set live at once, over
-// five times the file (hub/executor/executor.go, the comment above Initial). The charge per
-// grown byte must not fall below that measurement.
 func TestProviderGrowthIsChargedAtTheMeasuredExpansion(t *testing.T) {
 	base := reloadMemoryReading{AvailableBytes: 40 * testMiB, FootprintBytes: 12 * testMiB, BaselineBytes: 8 * testMiB}
 	same := judgeReloadMemory(base, 100, 100)
-	// The measurement itself, replayed: 4.7 MB of file cost at least 25 MiB to build. The
-	// charge for exactly that growth must not come in under it.
 	grown := base
 	grown.CurrentProviderBytes, grown.CandidateProviderBytes = 0, 4_700_000
 	verdict := judgeReloadMemory(grown, 100, 100)

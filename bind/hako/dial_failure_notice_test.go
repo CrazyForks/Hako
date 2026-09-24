@@ -14,8 +14,6 @@ import (
 	"github.com/TokenPLS/Hako/log"
 )
 
-// warningCapture collects log payloads while a test runs. The core publishes through
-// log.Subscribe, so this reads the same stream the containing app does.
 type warningCapture struct {
 	mu       sync.Mutex
 	payloads []string
@@ -44,12 +42,6 @@ func captureWarnings(t *testing.T) *warningCapture {
 		}
 	}()
 	t.Cleanup(func() {
-		// UnSubscribe FIRST, then stop reading. The other order deadlocks the whole process:
-		// log.Infoln publishes into an observable that blocks on a full subscriber channel, so a
-		// subscription whose reader has gone away wedges every later log call in the binary. The
-		// first version of this helper did exactly that and hung the suite for ten minutes on an
-		// unrelated test -- a test helper that stops draining a live subscription is not a slow
-		// test, it is a stopped program.
 		log.UnSubscribe(subscription)
 		close(stop)
 		<-done
@@ -58,7 +50,7 @@ func captureWarnings(t *testing.T) *warningCapture {
 }
 
 func (c *warningCapture) matching(fragment string) []string {
-	time.Sleep(50 * time.Millisecond) // let the publisher drain
+	time.Sleep(50 * time.Millisecond)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var found []string
@@ -99,11 +91,6 @@ func permissionDenied(_ string) error {
 	}
 }
 
-// The case this was built from: a macOS extension without the client-network entitlement logged
-// 2,900 identical refusals in 65 seconds while the tunnel said connected, the tun fd was live,
-// the phases were green and the controller was listening. The core knew every time; nobody was
-// told. So the assertion is that a run of identical failures with no success produces exactly
-// one sentence, and that the sentence names the thing to check.
 func TestARunOfIdenticalRefusalsSaysSomethingOnce(t *testing.T) {
 	resetDialFailureWatch(t)
 	logs := captureWarnings(t)
@@ -124,9 +111,6 @@ func TestARunOfIdenticalRefusalsSaysSomethingOnce(t *testing.T) {
 	}
 }
 
-// One success means the path works and the failures were ordinary -- a dead node among live
-// ones. Counting those towards a sentence that blames a permission would be the report crying
-// wolf, which is how a report stops being read.
 func TestOneSuccessResetsTheRun(t *testing.T) {
 	resetDialFailureWatch(t)
 	logs := captureWarnings(t)
@@ -144,8 +128,6 @@ func TestOneSuccessResetsTheRun(t *testing.T) {
 	}
 }
 
-// Different failures in a row are what a broken network looks like, not what one broken
-// permission looks like. Naming a single cause for a mixed run would be a confident wrong answer.
 func TestMixedFailuresDoNotAccumulateIntoOneCause(t *testing.T) {
 	resetDialFailureWatch(t)
 	logs := captureWarnings(t)
@@ -164,8 +146,6 @@ func TestMixedFailuresDoNotAccumulateIntoOneCause(t *testing.T) {
 	}
 }
 
-// The tail comparison is what makes "identical" mean "same verdict about different addresses":
-// every one of those 2,900 lines named a different destination.
 func TestFailuresAboutDifferentAddressesStillCountAsTheSameComplaint(t *testing.T) {
 	first := "dial tcp 93.184.216.34:443: connect: operation not permitted"
 	second := "dial tcp 1.1.1.1:853: connect: operation not permitted"

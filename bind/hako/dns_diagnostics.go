@@ -8,10 +8,6 @@ import (
 	MDNS "github.com/TokenPLS/Hako/dns"
 )
 
-// dnsTransportSnapshot intentionally contains only protocol classes, never
-// resolver addresses, proxy names, policy domains, credentials or parameters.
-// It lets device diagnostics prove which effective DNS transport was
-// configured without copying private YAML into a report.
 type dnsTransportSnapshot struct {
 	main        []string
 	fallback    []string
@@ -54,8 +50,6 @@ func classifyDNSTransports(servers []MDNS.NameServer) []string {
 		case "https":
 			switch {
 			case strings.EqualFold(server.Params["h3"], "true"):
-				// h3=true removes HTTP/1.1 and HTTP/2 from mihomo's client,
-				// so a successful query is strict DoH over HTTP/3 evidence.
 				kind = "doh3"
 			case server.PreferH3:
 				kind = "doh-h3-preferred"

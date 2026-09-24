@@ -5,11 +5,6 @@ import (
 	"testing"
 )
 
-// A rule that only changes a default is not a deviation for a configuration that wrote the
-// field. Found on a Mac: the profile wrote profile.store-fake-ip: false, the guard in
-// applyStoreFakeIPDefault returned early (an explicit value always wins), and the page still
-// showed "false -> true" one line under "off, from configuration" -- the report described an
-// event that had not happened.
 
 func storeFakeIPRowFor(t *testing.T, yaml string) map[string]any {
 	t.Helper()
@@ -51,9 +46,6 @@ func TestAnUnwrittenDefaultOnlyFieldIsReportedAsADefault(t *testing.T) {
 	}
 }
 
-// defaultOnly only makes sense on a rule that forces a value and lets the reader override it.
-// A stripped or unavailable rule acts regardless of what was written, and a forced rule that is
-// not recoverable overrides the reader's value -- both of those deviate for a written field too.
 func TestDefaultOnlyIsOnlyOnRecoverableForcedRules(t *testing.T) {
 	count := 0
 	for _, rule := range deviationRules {

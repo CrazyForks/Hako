@@ -17,9 +17,6 @@ type Uid struct {
 }
 
 func NewUid(oUid, adapter string) (*Uid, error) {
-	// macOS Transparent Proxy supplies the source UID from Apple's
-	// audit token, so Darwin can evaluate this metadata rule without a Linux
-	// process lookup. iOS uses GOOS=ios and remains fail-closed/stripped.
 	if !(runtime.GOOS == "linux" || runtime.GOOS == "android" || runtime.GOOS == "darwin") {
 		return nil, fmt.Errorf("uid rule not support this platform")
 	}

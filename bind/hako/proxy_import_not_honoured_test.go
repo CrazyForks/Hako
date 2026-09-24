@@ -7,13 +7,6 @@ import (
 	"testing"
 )
 
-// TestRegisteredUnhonouredFieldsImportAndAreNamed holds the three-way ruling on a
-// field the exporter emits that the kernel has nowhere to put: the record still
-// imports, the field is named in the report, and a field nobody registered still
-// refuses the whole record. The last cell is the one that matters -- a blanket
-// pass-through would silently drop a connection-critical field and hand back a
-// node that looks complete and cannot connect, which is the defect this importer
-// keeps being bitten by.
 func TestRegisteredUnhonouredFieldsImportAndAreNamed(t *testing.T) {
 	authority := base64.RawURLEncoding.EncodeToString([]byte("user:secret@198.51.100.10:443"))
 	read := func(t *testing.T, link string) proxyImportReport {
@@ -47,8 +40,6 @@ func TestRegisteredUnhonouredFieldsImportAndAreNamed(t *testing.T) {
 					if notice.Code != "fieldNotHonoured" {
 						t.Errorf("%s: code = %q", honoured.field, notice.Code)
 					}
-					// The reason is what makes the notice actionable rather than a
-					// shrug; a bare field name tells the reader nothing.
 					if !strings.Contains(notice.Message, "mihomo") {
 						t.Errorf("%s: notice carries no reason: %s", honoured.field, notice.Message)
 					}
@@ -60,16 +51,6 @@ func TestRegisteredUnhonouredFieldsImportAndAreNamed(t *testing.T) {
 		}
 	})
 
-	// The reader's ruling on 2026-08-28 reversed this one: there is no
-	// "recognized but unsupported" outcome, and a key nobody here has registered
-	// is a key nobody here has registered -- not a broken link. Upstream reads
-	// the keys it knows and ignores the rest, and two of the reader's own
-	// airport links were lost to this whitelist within an hour of each other.
-	//
-	// What is still asserted is that the field is named. Tolerating without
-	// saying so is the other half of the same mistake: the node would import
-	// with a field silently missing and fail later, somewhere that does not
-	// point back at the link.
 	t.Run("an unregistered field is named, and the node still arrives", func(t *testing.T) {
 		report := read(t, "trojan://secret@198.51.100.10:443?peer=sni.example.invalid&hakoFutureField=x")
 		if len(report.Proxies) != 1 {

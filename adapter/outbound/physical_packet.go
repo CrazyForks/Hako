@@ -12,10 +12,6 @@ import (
 
 const physicalPacketReverseLimit = 64
 
-// physicalAddressPacketConn translates only addresses used by the local
-// physical UDP socket. Logical metadata and proxy payloads stay untouched, so
-// an IPv4 flow receives an IPv4 source address even when the outer packet was
-// carried through a system-synthesized NAT64 IPv6 address.
 type physicalAddressPacketConn struct {
 	net.PacketConn
 	mu      sync.Mutex

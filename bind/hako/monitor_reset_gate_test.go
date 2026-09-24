@@ -4,26 +4,6 @@ import (
 	"testing"
 )
 
-// The resolver reset fires on every applied path update, and this test exists to stop it
-// being gated again.
-//
-// It WAS gated on identity-or-address-family change, to avoid paying a re-dial -- and a
-// trustd round trip per stateful DNS transport on iOS -- for an update where nothing
-// meaningful moved. Adversarial review found the counterexample, and it is an ordinary one:
-// moving from Wi-Fi to a Personal Hotspot keeps the same interface name and index and can
-// keep both address families, so neither gate condition fires, while the source address and
-// gateway change and the old socket is bound to a path that is gone. Apple documents
-// Personal Hotspot as an expensive path, so the only forwarded flag that moves is one the
-// gate ignored. DHCP address replacement and same-interface Wi-Fi roaming have the same
-// shape.
-//
-// The consequence was a failed request, not a slow one: dns/dot.go allows a cached
-// connection five seconds before retrying and the DNS request carries the same five-second
-// deadline, so on a black-holed old path the deadline expires before the retry can connect.
-//
-// A failed DNS request is worse than a redundant handshake. The handshake cost is still
-// worth removing, but by making verification in-process (the certificate-pool work), not by
-// skipping resets that turn out to be necessary.
 
 func TestResolverResetFiresOnEveryAppliedPathUpdate(t *testing.T) {
 	cases := []struct {
@@ -68,14 +48,7 @@ func TestResolverResetFiresOnEveryAppliedPathUpdate(t *testing.T) {
 	}
 }
 
-// TestConnectionTeardownStaysGated: the asymmetry with the resolver is deliberate, so it is
-// asserted rather than left to look like an oversight. A TCP flow through the tunnel survives
-// a path change and recovers on its own; a DNS socket pinned to a dead source address does
-// not.
 func TestConnectionTeardownStaysGatedWhileResolverResetDoesNot(t *testing.T) {
-	// A capabilities-only update after initialisation: identityChanged and
-	// addressFamiliesChanged are both false, which is exactly the condition
-	// updateDefaultPath uses to decide whether to close tracked connections.
 	const identityChanged, addressFamiliesChanged = false, false
 	if identityChanged || addressFamiliesChanged {
 		t.Fatal("this case is meant to be the one where the teardown condition is false")

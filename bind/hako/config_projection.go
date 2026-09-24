@@ -15,14 +15,8 @@ const (
 	projectionPackageScalars   = "scalars"
 )
 
-// Bumped whenever a package's shape changes in a way a stored projection could
-// not survive; the client keys stored projections by revision AND this.
 const projectionSchemaVersion = 1
 
-// Document kinds a caller may claim. The kernel cannot verify the claim, but
-// embedding it makes misuse auditable: a source-census page that reads a
-// "merged" artifact can refuse on sight. Two real incidents of exactly that
-// confusion are on record.
 const (
 	projectionKindSource = "source"
 	projectionKindMerged = "merged"
@@ -36,7 +30,6 @@ type projectionNode struct {
 type projectionGroup struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
-	// Declared membership only -- never the effective set.
 	Proxies    []string `json:"proxies"`
 	Use        []string `json:"use"`
 	IncludeAll bool     `json:"includeAll"`
@@ -51,7 +44,7 @@ type projectionCatalog struct {
 type projectionProvider struct {
 	Name     string `json:"name"`
 	Type     string `json:"type"`
-	Behavior string `json:"behavior"` // rule providers only; empty otherwise
+	Behavior string `json:"behavior"`
 	Path     string `json:"path"`
 }
 
@@ -62,17 +55,10 @@ type projectionResources struct {
 
 type projectionRuleFacts struct {
 	RuleCount       int      `json:"ruleCount"`
-	LastMatchTarget string   `json:"lastMatchTarget"` // "" when the file has no MATCH
+	LastMatchTarget string   `json:"lastMatchTarget"`
 	SubRuleNames    []string `json:"subRuleNames"`
 }
 
-// Scalars: PRESENCE from the generic root, VALUE from the typed RawConfig.
-// Presence must not come from RawConfig -- it starts from DefaultRawConfig
-// (config.go:507), so a key the reader never wrote would look declared. Value
-// must not come from the root's dynamic type -- the runtime applies YAML-1.1
-// and weak conversions (`enable: yes` is true, `global-ua: 123` is "123"),
-// and requiring an exact Go type here reported those declared settings as
-// absent. Absent stays absent; declared means what the runtime will do.
 type projectionScalars struct {
 	Mode      *string `json:"mode"`
 	GlobalUA  *string `json:"globalUA"`
@@ -88,20 +74,6 @@ type configProjection struct {
 	Scalars       *projectionScalars   `json:"scalars,omitempty"`
 }
 
-// The projection reads each mapping through mihomo's OWN weak decoder, with
-// the same tag names the runtime parsers use (adapter/parser.go "proxy",
-// adapter/outboundgroup/parser.go "group", adapter/provider/parser.go and
-// rules/provider/parse.go "provider"). A first draft read exact Go types off
-// the generic maps instead, and Codex's review showed how that lies:
-// `include-all: 1` is true to the runtime (structure.go weak int->bool) but
-// was projected as false, and a numeric member in `use` is a string to the
-// runtime but was silently dropped. Reimplementing the conversion here would
-// be a second decoder that drifts; borrowing the real one cannot drift.
-//
-// Every field is omitempty: a declaration the runtime would refuse (a group
-// with no name) is still a declaration; refusing it is the runtime's job, not
-// the projection's. Decode errors leave the partially-filled declaration --
-// the runtime's own error remains the authoritative rejection.
 type projectionProxyDecl struct {
 	Name string `proxy:"name,omitempty"`
 	Type string `proxy:"type,omitempty"`
@@ -122,13 +94,6 @@ type projectionProviderDecl struct {
 	Path     string `provider:"path,omitempty"`
 }
 
-// buildConfigProjection is the ONLY producer of a projection. Both the handle
-// method and the one-shot export route through it; two producers that can
-// disagree is the failure this design is most likely to have.
-//
-// It performs no I/O by construction: a provider's nodes are downloaded while
-// the tunnel runs and are not in this document, so the projection can only
-// ever report that a provider was declared.
 func buildConfigProjection(doc *ConfigDocument, kind string, packages []string) (configProjection, error) {
 	views, err := doc.snapshot()
 	if err != nil {
@@ -142,9 +107,6 @@ func buildConfigProjection(doc *ConfigDocument, kind string, packages []string) 
 	for _, name := range packages {
 		wanted[name] = true
 	}
-	// Per-call decoders: structure.Decoder itself is a thin option holder, but
-	// per-call construction removes any shared-state question under concurrent
-	// ProjectionJSON calls on one handle.
 	proxyDecoder := structure.NewDecoder(structure.Option{TagName: "proxy", WeaklyTypedInput: true})
 	groupDecoder := structure.NewDecoder(structure.Option{TagName: "group", WeaklyTypedInput: true})
 	providerDecoder := structure.NewDecoder(structure.Option{TagName: "provider", WeaklyTypedInput: true})
@@ -193,9 +155,6 @@ func buildConfigProjection(doc *ConfigDocument, kind string, packages []string) 
 				Name: name, Type: decl.Type, Behavior: decl.Behavior, Path: decl.Path,
 			})
 		}
-		// Go randomizes map iteration; unsorted output would defeat any cache
-		// keyed by content hash, and the symptom ("cache never hits") would sit
-		// far from this cause.
 		sort.Slice(resources.ProxyProviders, func(i, j int) bool {
 			return resources.ProxyProviders[i].Name < resources.ProxyProviders[j].Name
 		})
@@ -222,13 +181,6 @@ func buildConfigProjection(doc *ConfigDocument, kind string, packages []string) 
 		out.RuleFacts = facts
 	}
 	if wanted[projectionPackageScalars] {
-		// Presence from the generic root (RawConfig fills defaults for absent
-		// keys, config.go:507); VALUE from the typed RawConfig, which applied
-		// the same YAML-1.1 and weak conversions the runtime lives by. The
-		// first draft required the root value's exact dynamic type, so
-		// `dns: {enable: yes}` (string in root, true to the runtime) and
-		// `global-ua: 123` ("123" to the runtime) were reported as absent --
-		// declared settings the UI would then not see.
 		scalars := &projectionScalars{}
 		if _, present := views.root["mode"]; present {
 			mode := views.raw.Mode.String()

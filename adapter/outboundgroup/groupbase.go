@@ -244,10 +244,6 @@ func (gb *GroupBase) URLTest(ctx context.Context, url string, expectedStatus uti
 		proxy := proxy
 		wg.Add(1)
 		go func() {
-			// An answer outside `expected` is an outcome, not an error
-			// (adapter.URLTestOutcome): it is read here so the group endpoint
-			// agrees with the single-proxy one and with the per-URL liveness
-			// it just recorded, instead of reporting the member as a success.
 			var delay uint16
 			var err error
 			satisfied := true

@@ -11,17 +11,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// YamlToJSON converts a complete YAML configuration object to JSON for an
-// App-owned override script. YAML aliases and merge keys are resolved during
-// conversion. Mapping key order is preserved end to end: several kernel
-// sections are first-match and order-sensitive — most importantly
-// dns.nameserver-policy and dns.proxy-server-nameserver-policy, which the
-// kernel builds into an ordered map and evaluates in order (returning the
-// first matching policy and grouping consecutive plain-domain entries into one
-// trie), so reordering keys silently changes split-DNS routing. Comments,
-// anchors, aliases and scalar style are not representable in JSON and are
-// therefore not preserved by a round trip. The YAML input is capped at 4 MiB
-// and the escaped JSON result at 16 MiB.
 func YamlToJSON(rawYAML string) (*StringBox, error) {
 	if err := validateConfigurationInput(rawYAML); err != nil {
 		return nil, bridgeSafeError(err)
@@ -31,21 +20,10 @@ func YamlToJSON(rawYAML string) (*StringBox, error) {
 	if err := decoder.Decode(&document); err != nil {
 		return nil, bridgeSafeError(fmt.Errorf("hako: decode YAML: %w", err))
 	}
-	// First-document-wins, matching upstream yaml.v3 Unmarshal -- and therefore
-	// FormatConfig / CheckConfig / Start / PlatformConfigIntentJSON, which all
-	// decode through it. Any trailing YAML documents are ignored, not rejected;
-	// rejecting them would refuse a config the kernel itself accepts.
 	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
 		return nil, bridgeSafeError(fmt.Errorf("hako: YAML configuration root must be an object"))
 	}
 
-	// Pre-flight through yaml.v3's own decoder purely to reject inputs the
-	// order-preserving walk below would mishandle: self-referential anchors
-	// (which the manual alias-follow would recurse on forever), pathological
-	// alias amplification (the "billion laughs" bomb), and duplicate keys.
-	// Decode enforces yaml.v3's alias-ratio and duplicate-key limits and then
-	// its result is discarded; the walk produces the ordered output. This is the
-	// same decode the previous implementation performed, so it adds no new cost.
 	var safety any
 	if err := document.Content[0].Decode(&safety); err != nil {
 		return nil, bridgeSafeError(fmt.Errorf("hako: reject unsafe YAML configuration: %w", err))
@@ -61,10 +39,6 @@ func YamlToJSON(rawYAML string) (*StringBox, error) {
 	return WrapString(payload.String()), nil
 }
 
-// encodeYAMLNodeAsJSON writes node to buf as JSON, preserving mapping key order
-// and resolving aliases and merge keys. Scalars are decoded through yaml before
-// marshaling so their type — and large-integer precision — matches a direct
-// decode of the whole document.
 func encodeYAMLNodeAsJSON(node *yaml.Node, buf *bytes.Buffer) error {
 	switch node.Kind {
 	case yaml.AliasNode:
@@ -122,11 +96,6 @@ type yamlMappingPair struct {
 	value *yaml.Node
 }
 
-// resolvedMappingPairs returns node's key/value pairs in source order with YAML
-// merge keys (<<) expanded in place. Explicitly-defined keys win over merged
-// ones, and earlier merge sources win over later; the first occurrence of a key
-// keeps its position. This matches yaml.v3's decode-into-map merge semantics
-// while preserving order, which decoding into a Go map would discard.
 func resolvedMappingPairs(node *yaml.Node) ([]yamlMappingPair, error) {
 	explicit := make(map[string]bool)
 	for index := 0; index+1 < len(node.Content); index += 2 {
@@ -138,11 +107,6 @@ func resolvedMappingPairs(node *yaml.Node) ([]yamlMappingPair, error) {
 		if err != nil {
 			return nil, err
 		}
-		// yaml.v3's duplicate-key check compares raw key nodes, so an alias key
-		// and a scalar key that resolve to the same string slip past the
-		// pre-flight decode. Reject the resolved-key collision here rather than
-		// silently keeping the first occurrence, which would diverge from the
-		// map yaml.v3 produces.
 		if explicit[keyString] {
 			return nil, fmt.Errorf("hako: duplicate YAML mapping key %q", keyString)
 		}
@@ -188,10 +152,6 @@ func resolvedMappingPairs(node *yaml.Node) ([]yamlMappingPair, error) {
 	return pairs, nil
 }
 
-// mappingKeyString resolves a mapping key node to its JSON object key. An alias
-// key is followed to its anchor; only a scalar key is representable as a JSON
-// object key, so anything else is rejected rather than emitted as an empty or
-// anchor-named key.
 func mappingKeyString(key *yaml.Node) (string, error) {
 	node := key
 	if node.Kind == yaml.AliasNode {
@@ -206,17 +166,10 @@ func mappingKeyString(key *yaml.Node) (string, error) {
 	return node.Value, nil
 }
 
-// isMergeKey reports whether key is a YAML merge key (<<). It matches the
-// resolved !!merge tag, not the literal value, so a quoted "<<" string key is
-// treated as an ordinary key exactly as yaml.v3 does.
 func isMergeKey(key *yaml.Node) bool {
 	return key.Kind == yaml.ScalarNode && key.Tag == "!!merge"
 }
 
-// mergeSources resolves a << merge value into the mapping nodes it references.
-// Matching yaml.v3, a merge value is a mapping, an alias to a mapping, or a flat
-// sequence of those; an alias to a non-mapping, or a nested sequence, is
-// rejected rather than silently flattened.
 func mergeSources(value *yaml.Node) ([]*yaml.Node, error) {
 	switch value.Kind {
 	case yaml.AliasNode:
@@ -244,12 +197,6 @@ func mergeSources(value *yaml.Node) ([]*yaml.Node, error) {
 	}
 }
 
-// JSONToYaml converts an App-owned override script result back to a complete
-// YAML configuration object. Object key order is preserved (see YamlToJSON for
-// why the DNS policy sections require it). The caller must run the result
-// through the normal plan/finalize/preflight pipeline before publishing or
-// starting the core. The intermediate JSON is capped at 16 MiB and the YAML
-// result at 4 MiB.
 func JSONToYaml(rawJSON string) (*StringBox, error) {
 	if err := validateConfigurationJSONInput(rawJSON); err != nil {
 		return nil, bridgeSafeError(err)
@@ -286,22 +233,8 @@ func JSONToYaml(rawJSON string) (*StringBox, error) {
 	return WrapString(output.String()), nil
 }
 
-// maximumJSONNestingDepth bounds the recursion below. The two functions recurse
-// once per nesting level, so without a bound the only limit was the 16 MiB
-// input size -- roughly sixteen million levels of `[`, and a Go stack overflow
-// is a fatal throw that no recover can catch: the process dies, and inside a
-// Network Extension that is the tunnel dropping with nothing to report.
-//
-// The YAML direction never had this problem (yaml.v3's scanner stops at 10000
-// levels, scannerc.go), so this is that same bound restated for the JSON side.
-// A mihomo profile nests a handful of levels; 10000 is far enough above
-// anything real that refusing at it can only mean a document built to break
-// something.
 const maximumJSONNestingDepth = 10000
 
-// decodeJSONValueAsYAMLNode reads exactly one JSON value from decoder and builds
-// the equivalent yaml.Node. A json.Decoder yields object keys in document
-// order, so object key order is preserved rather than sorted.
 func decodeJSONValueAsYAMLNode(decoder *json.Decoder, depth int) (*yaml.Node, error) {
 	if depth > maximumJSONNestingDepth {
 		return nil, fmt.Errorf("hako: JSON is nested deeper than %d levels", maximumJSONNestingDepth)
@@ -319,10 +252,6 @@ func jsonTokenAsYAMLNode(token json.Token, decoder *json.Decoder, depth int) (*y
 		switch typed {
 		case '{':
 			node := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-			// json.Decoder keeps every duplicate member; a plain decode into a
-			// map would silently take the last. Reject duplicates outright so the
-			// emitted YAML can never carry a duplicate key that downstream
-			// yaml.v3 decoding would in turn reject.
 			seen := make(map[string]bool)
 			for decoder.More() {
 				keyToken, err := decoder.Token()
@@ -346,7 +275,7 @@ func jsonTokenAsYAMLNode(token json.Token, decoder *json.Decoder, depth int) (*y
 					value,
 				)
 			}
-			if _, err := decoder.Token(); err != nil { // consume '}'
+			if _, err := decoder.Token(); err != nil {
 				return nil, err
 			}
 			return node, nil
@@ -359,7 +288,7 @@ func jsonTokenAsYAMLNode(token json.Token, decoder *json.Decoder, depth int) (*y
 				}
 				node.Content = append(node.Content, item)
 			}
-			if _, err := decoder.Token(); err != nil { // consume ']'
+			if _, err := decoder.Token(); err != nil {
 				return nil, err
 			}
 			return node, nil

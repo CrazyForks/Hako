@@ -12,15 +12,6 @@ import (
 	"time"
 )
 
-// ClientHandshakeState includes both TLS 1.3-only and TLS 1.2-only states,
-// only one of them will be used, depending on negotiated version.
-//
-// ClientHandshakeState will be converted into and from either
-//   - clientHandshakeState      (TLS 1.2)
-//   - clientHandshakeStateTLS13 (TLS 1.3)
-//
-// uTLS will call .handshake() on one of these private internal states,
-// to perform TLS handshake using standard crypto/tls implementation.
 type PubClientHandshakeState struct {
 	C            *Conn
 	ServerHello  *PubServerHelloMsg
@@ -34,7 +25,6 @@ type PubClientHandshakeState struct {
 	uconn *UConn
 }
 
-// TLS 1.3 only
 type TLS13OnlyState struct {
 	Suite                *PubCipherSuiteTLS13
 	EcdheKey             *ecdh.PrivateKey
@@ -45,10 +35,9 @@ type TLS13OnlyState struct {
 	UsingPSK             bool
 	SentDummyCCS         bool
 	Transcript           hash.Hash
-	TrafficSecret        []byte // client_application_traffic_secret_0
+	TrafficSecret        []byte
 }
 
-// TLS 1.2 and before only
 type TLS12OnlyState struct {
 	FinishedHash FinishedHash
 	Suite        PubCipherSuite
@@ -158,9 +147,6 @@ func (chs12 *clientHandshakeState) toPublic12() *PubClientHandshakeState {
 	}
 }
 
-// type EcdheParameters interface {
-// 	ecdheParameters
-// }
 
 type CertificateRequestMsgTLS13 struct {
 	Raw                              []byte
@@ -251,13 +237,12 @@ type PubServerHelloMsg struct {
 	SecureRenegotiationSupported bool
 	AlpnProtocol                 string
 
-	// 1.3
 	SupportedVersion        uint16
 	ServerShare             keyShare
 	SelectedIdentityPresent bool
 	SelectedIdentity        uint16
-	Cookie                  []byte  // HelloRetryRequest extension
-	SelectedGroup           CurveID // HelloRetryRequest extension
+	Cookie                  []byte
+	SelectedGroup           CurveID
 
 }
 
@@ -332,7 +317,7 @@ type PubClientHelloMsg struct {
 	ServerName                   string
 	OcspStapling                 bool
 	Scts                         bool
-	Ems                          bool // [uTLS] actually implemented due to its prevalence
+	Ems                          bool
 	SupportedCurves              []CurveID
 	SupportedPoints              []uint8
 	TicketSupported              bool
@@ -342,7 +327,6 @@ type PubClientHelloMsg struct {
 	SecureRenegotiationSupported bool
 	AlpnProtocols                []string
 
-	// 1.3
 	SupportedSignatureAlgorithmsCert []SignatureScheme
 	SupportedVersions                []uint16
 	Cookie                           []byte
@@ -431,8 +415,6 @@ func (chm *clientHelloMsg) getPublicPtr() *PubClientHelloMsg {
 	}
 }
 
-// UnmarshalClientHello allows external code to parse raw client hellos.
-// It returns nil on failure.
 func UnmarshalClientHello(data []byte) *PubClientHelloMsg {
 	m := &clientHelloMsg{}
 	if m.unmarshal(data) {
@@ -441,22 +423,16 @@ func UnmarshalClientHello(data []byte) *PubClientHelloMsg {
 	return nil
 }
 
-// Marshal allows external code to convert a ClientHello object back into
-// raw bytes.
 func (chm *PubClientHelloMsg) Marshal() ([]byte, error) {
 	return chm.getPrivatePtr().marshal()
 }
 
-// A CipherSuite is a specific combination of key agreement, cipher and MAC
-// function. All cipher suites currently assume RSA key agreement.
 type PubCipherSuite struct {
 	Id uint16
-	// the lengths, in bytes, of the key material needed for each component.
 	KeyLen int
 	MacLen int
 	IvLen  int
 	Ka     func(version uint16) keyAgreement
-	// flags is a bitmask of the suite* values, above.
 	Flags  int
 	Cipher func(key, iv []byte, isRead bool) interface{}
 	Mac    func(macKey []byte) hash.Hash
@@ -499,17 +475,13 @@ func (cs *cipherSuite) getPublicObj() PubCipherSuite {
 	}
 }
 
-// A FinishedHash calculates the hash of a set of handshake messages suitable
-// for including in a Finished message.
 type FinishedHash struct {
 	Client hash.Hash
 	Server hash.Hash
 
-	// Prior to TLS 1.2, an additional MD5 hash is required.
 	ClientMD5 hash.Hash
 	ServerMD5 hash.Hash
 
-	// In TLS 1.2, a full buffer is sadly required.
 	Buffer []byte
 
 	Version uint16
@@ -547,10 +519,9 @@ func (fh *finishedHash) getPublicObj() FinishedHash {
 	}
 }
 
-// TLS 1.3 Key Share. See RFC 8446, Section 4.2.8.
 type KeyShare struct {
 	Group CurveID `json:"group"`
-	Data  []byte  `json:"key_exchange,omitempty"` // optional
+	Data  []byte  `json:"key_exchange,omitempty"`
 }
 
 type KeyShares []KeyShare
@@ -571,8 +542,6 @@ func (KSS KeyShares) ToPrivate() []keyShare {
 	return kss
 }
 
-// TLS 1.3 PSK Identity. Can be a Session Ticket, or a reference to a saved
-// session. See RFC 8446, Section 4.2.11.
 type PskIdentity struct {
 	Label               []byte `json:"identity"`
 	ObfuscatedTicketAge uint32 `json:"obfuscated_ticket_age"`
@@ -597,9 +566,7 @@ func (PSS PskIdentities) ToPrivate() []pskIdentity {
 	return pss
 }
 
-// ClientSessionState is public, but all its fields are private. Let's add setters, getters and constructor
 
-// ClientSessionState contains the state needed by clients to resume TLS sessions.
 func MakeClientSessionState(
 	SessionTicket []uint8,
 	Vers uint16,
@@ -620,32 +587,26 @@ func MakeClientSessionState(
 	return css
 }
 
-// Encrypted ticket used for session resumption with server
 func (css *ClientSessionState) SessionTicket() []uint8 {
 	return css.ticket
 }
 
-// SSL/TLS version negotiated for the session
 func (css *ClientSessionState) Vers() uint16 {
 	return css.session.version
 }
 
-// Ciphersuite negotiated for the session
 func (css *ClientSessionState) CipherSuite() uint16 {
 	return css.session.cipherSuite
 }
 
-// MasterSecret generated by client on a full handshake
 func (css *ClientSessionState) MasterSecret() []byte {
 	return css.session.secret
 }
 
-// Certificate chain presented by the server
 func (css *ClientSessionState) ServerCertificates() []*x509.Certificate {
 	return css.session.peerCertificates
 }
 
-// Certificate chains we built for verification
 func (css *ClientSessionState) VerifiedChains() [][]*x509.Certificate {
 	return css.session.verifiedChains
 }
@@ -684,11 +645,9 @@ func (css *ClientSessionState) SetVerifiedChains(VerifiedChains [][]*x509.Certif
 	css.session.verifiedChains = VerifiedChains
 }
 
-// TicketKey is the internal representation of a session ticket key.
 type TicketKey struct {
 	AesKey  [16]byte
 	HmacKey [16]byte
-	// created is the time at which this ticket key was created. See Config.ticketKeys.
 	Created time.Time
 }
 
@@ -696,8 +655,6 @@ type TicketKeys []TicketKey
 type ticketKeys []ticketKey
 
 func TicketKeyFromBytes(b [32]byte) TicketKey {
-	// [uTLS]
-	// empty config is required
 	config := &Config{}
 	tk := config.ticketKeyFromBytes(b)
 	return tk.ToPublic()

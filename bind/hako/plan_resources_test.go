@@ -102,9 +102,6 @@ proxy-providers:
     url: https://example.com/proxies.yaml
     size-limit: -1
 `)
-	// vehicle.go:157 reads `if h.sizeLimit > 0`, so a negative limit means "no
-	// limit" upstream. The plan needs a number for the app's downloader and
-	// takes the default; it does not cost the configuration.
 	if len(r.Errors) != 0 {
 		t.Fatalf("negative size-limit refused the configuration: %+v", r.Errors)
 	}
@@ -143,7 +140,6 @@ rule-providers:
     url: https://example.com/rules.yaml
     interval: -1
 `)
-	// Upstream's schema is a plain `Interval int` and never checks the sign.
 	if len(r.Errors) != 0 {
 		t.Fatalf("negative interval refused the configuration: %+v", r.Errors)
 	}
@@ -160,9 +156,6 @@ proxy-providers:
     url: https://example.com/proxies.yaml
     interval: 9223372037
 `)
-	// A value that would wrap upstream's time.Duration is not representable
-	// here either, but zero -- upstream's own "no timer" -- is, and the
-	// provider still loads.
 	if len(r.Errors) != 0 {
 		t.Fatalf("overflowing interval refused the configuration: %+v", r.Errors)
 	}
@@ -171,16 +164,6 @@ proxy-providers:
 	}
 }
 
-// What a provider URL may be is what the core will fetch, and the core refuses
-// almost nothing: it parses the URL, hands it to net/http, and turns userinfo
-// into Basic auth (component/http/http.go:32-61). Three refusals that used to
-// live here were stricter than that and none was required by the platform —
-// admits a rejection only when it is both.
-//
-// http:// blocked every reader running a Sub-Store or rule mirror on their own
-// network. Userinfo is how a private rule server is authenticated, and the
-// refusal pointed at Keychain-backed headers, which abolished. A fragment
-// never reaches the wire at all.
 func TestPlanAcceptsEveryProviderURLTheCoreWouldFetch(t *testing.T) {
 	r := planOf(t, `
 proxy-providers:
@@ -201,7 +184,6 @@ rule-providers:
 		"plaintext":   "http://192.168.1.4:3000/download/hako",
 		"credentials": "https://user:password@example.com/proxies.yaml",
 		"fragment":    "https://example.com/rules.yaml#ignored",
-		// Surrounding whitespace is still trimmed: it is a typo, not an intent.
 		"valid-query": "https://example.com/rules.yaml?token=opaque",
 	}
 	for name, expected := range want {
@@ -211,7 +193,6 @@ rule-providers:
 	}
 }
 
-// What stays refused: a URL the core could not fetch either.
 func TestPlanReportsProviderURLsTheCoreCouldNotFetch(t *testing.T) {
 	r := planOf(t, `
 rule-providers:
@@ -219,10 +200,6 @@ rule-providers:
   not-a-transport: {type: http, behavior: domain, url: "file:///etc/passwd"}
   relative: {type: http, behavior: domain, url: "rules.yaml"}
 `)
-	// None of the three costs the configuration: rewriteProviders applies this
-	// same predicate before demanding materialization, so each definition
-	// survives finalize and the kernel fails its own download the way upstream
-	// does (executor.go:400).
 	if len(r.Errors) != 0 {
 		t.Fatalf("an unfetchable provider url refused the configuration: %+v", r.Errors)
 	}
@@ -333,11 +310,6 @@ rules:
 	}
 }
 
-// Geodata URLs answer to the same rule as provider URLs, because the core
-// fetches them through the same helper: no scheme restriction, userinfo turned
-// into Basic auth, fragment never sent. An internal mirror on http and a
-// geosite behind Basic auth are ordinary, and refusing them was stricter than
-// upstream without being required by the platform.
 func TestPlanAcceptsEveryGeodataURLTheCoreWouldFetch(t *testing.T) {
 	r := planOf(t, `
 geodata-mode: false
@@ -420,10 +392,6 @@ dns:
 }
 
 func TestPlanGeoIPRequirementMirrorsUpstreamFileDependency(t *testing.T) {
-	// requiredGeodata must match what upstream NewGEOIP actually reads: a non-lan
-	// country needs the GeoIP database, but country "lan" (case-insensitive,
-	// evaluated by a pure netip predicate before any file access) needs no file.
-	// SRC-GEOIP shares GEOIP's dependency and was previously omitted from the scan.
 	for name, tc := range map[string]struct {
 		rule    string
 		wantGeo bool
@@ -492,11 +460,6 @@ func TestPlanProviderNameCannotEscapeCandidateDirectory(t *testing.T) {
 	}
 }
 
-// TestPlanCarriesHeadersAndHonoursProviderProxy: a fetch proxy is no longer stripped (
-// already lets the core fetch a provider the app has no local copy of; a named proxy is routed
-// onto that same path instead of being blanked). The app-side decision not to pre-download a
-// proxy-bound provider is not this function's to make or verify -- only that the field survives
-// into the plan unaltered, so the app HAS the value to act on.
 func TestPlanCarriesHeadersAndHonoursProviderProxy(t *testing.T) {
 	y := "rule-providers:\n  rules:\n    type: http\n    behavior: classical\n    url: https://example.com/r.yaml\n    proxy: Selected\n    header:\n      X-Token: secret\n      Accept:\n        - application/yaml\n"
 	r := planOf(t, y)
@@ -528,12 +491,6 @@ func TestPlanCarriesHeadersAndHonoursProviderProxy(t *testing.T) {
 	}
 }
 
-// TestPlanNotesAProviderNamingItselfAsItsOwnFetchProxy: checkable from the document alone, at
-// plan time, with no knowledge of what has loaded -- a provider's own key in proxy-providers is
-// never itself an entry in the outbound table the core resolves a fetch proxy against
-// (tunnel.go resolveMetadata: proxies[metadata.SpecialProxy]), whether or not this provider has
-// fetched. Purely informational: this changes nothing the core does, upstream fails the same
-// dial the same way.
 func TestPlanNotesAProviderNamingItselfAsItsOwnFetchProxy(t *testing.T) {
 	y := "proxy-providers:\n  HK:\n    type: http\n    url: https://example.com/hk.yaml\n    proxy: HK\n"
 	r := planOf(t, y)
@@ -549,17 +506,11 @@ func TestPlanNotesAProviderNamingItselfAsItsOwnFetchProxy(t *testing.T) {
 	if found == "" {
 		t.Fatalf("expected a self-referential fetch-proxy notice, got: %v", r.Notices)
 	}
-	// The consequence sentence is the core's own -- quoted, not paraphrased
-	// (tunnel/tunnel.go resolveMetadata: fmt.Errorf("proxy %s not found", ...)).
 	if !strings.Contains(found, `"proxy HK not found"`) {
 		t.Fatalf("notice must quote the core's own error text verbatim, got: %q", found)
 	}
 }
 
-// TestPlanDoesNotFlagASiblingProviderAsSelfReferential: the self-referential check is scoped to
-// a provider naming ITSELF, not to any name shared with a sibling provider -- a sibling's own
-// nodes may well have loaded by the time this one fetches, which is a real, working
-// configuration this notice must not discourage.
 func TestPlanDoesNotFlagASiblingProviderAsSelfReferential(t *testing.T) {
 	y := "proxy-providers:\n  HK:\n    type: http\n    url: https://example.com/hk.yaml\n  JP:\n    type: http\n    url: https://example.com/jp.yaml\n    proxy: HK\n"
 	r := planOf(t, y)
@@ -587,9 +538,6 @@ proxy-providers:
     url: https://example.com/proxies.yaml
     `+headerYAML+`
 `)
-			// vehicle.go:125-139 caps nothing and forbids nothing, so a field
-			// this layer cannot reproduce is dropped on its own and the
-			// provider still loads.
 			if len(r.Errors) != 0 {
 				t.Fatalf("an unusable header refused the configuration: %+v", r.Errors)
 			}
@@ -601,8 +549,6 @@ proxy-providers:
 				if strings.Contains(notice, "header field") {
 					dropped = true
 				}
-				// The value may carry an Authorization token; only the field
-				// name is ever named.
 				if strings.Contains(notice, "Injected") || strings.Contains(notice, "keep-alive") {
 					t.Fatalf("header value leaked in a notice: %q", notice)
 				}
@@ -614,16 +560,6 @@ proxy-providers:
 	}
 }
 
-// Renamed and inverted on 2026-08-27 from
-// TestPlanDropsProviderHeadersOverAggregateByteLimit. The aggregate byte
-// envelope it pinned -- along with the per-field 8 KiB and 64-field caps -- was
-// this tree's invention: upstream has no header limits of any kind
-// (component/resource/vehicle.go:125-139 passes the map straight through), and
-// no Apple API imposes one. A subscription needing a long token used to lose it
-// without being refused, which is worse than a refusal because nothing said so
-// loudly enough to act on.
-//
-// The test stays, pointed the other way: large headers must SURVIVE.
 func TestPlanKeepsProviderHeadersThatUsedToExceedTheByteEnvelope(t *testing.T) {
 	value := strings.Repeat("a", 8*1024)
 	r := planOf(t, `
@@ -667,8 +603,6 @@ func TestProviderHeadersAcceptEveryHTTPTokenCharacter(t *testing.T) {
 func TestPlanReportsFileProviderWithoutRefusingTheConfiguration(t *testing.T) {
 	y := "rule-providers:\n  local:\n    type: file\n    behavior: classical\n    path: ../private/rules.yaml\n"
 	r := planOf(t, y)
-	// executor.go:400 logs a provider whose Initial() fails and keeps going, so
-	// the kernel starts on this and the provider rides empty.
 	if len(r.Errors) != 0 {
 		t.Fatalf("a file provider refused the configuration: %+v", r.Errors)
 	}
@@ -694,8 +628,6 @@ tun:
   include-package: [com.example.app]
   exclude-dst-port: [53]
 `)
-	// These host-route filters are stripped on iOS (tolerate + strip), so the
-	// plan reports them as notices and the config still starts — never as errors.
 	if len(r.Errors) != 0 {
 		t.Fatalf("stripped tun intent must not be a plan error: %+v", r.Errors)
 	}
@@ -719,9 +651,6 @@ tun:
 }
 
 func TestPlanNotesEveryOutboundEgressOverride(t *testing.T) {
-	// Global AND per-proxy interface-name/routing-mark egress overrides are all
-	// stripped on iOS (tolerate + strip), so the plan reports them as notices,
-	// never errors — a config carrying one still starts.
 	for name, yaml := range map[string]string{
 		"global": "routing-mark: 233\n",
 		"direct proxy": `
@@ -812,11 +741,6 @@ proxy-providers:
 	}
 }
 
-// Renamed from TestPlanErrorsOnDanglingRouteAddressSet on 2026-08-27. A set
-// naming a provider that does not exist contributes no routes, which is what
-// upstream does with it too (listener/sing_tun/server.go:565-593, and mihomo
-// accepts the document when driven). It is worth saying and not worth refusing
-// the rest of the configuration over.
 func TestPlanNotesADanglingRouteAddressSet(t *testing.T) {
 	y := "tun:\n  route-address-set:\n    - ruleset-1\n"
 	r := planOf(t, y)
@@ -829,8 +753,6 @@ func TestPlanNotesADanglingRouteAddressSet(t *testing.T) {
 func TestPlanNotesProcessRuleAsStripped(t *testing.T) {
 	y := "rules:\n  - PROCESS-NAME,curl,DIRECT\n"
 	r := planOf(t, y)
-	// A PROCESS rule no-ops on iOS (FindProcessOff); the plan notes it rather
-	// than failing, so a subscription carrying one still starts.
 	if len(r.Errors) != 0 {
 		t.Fatalf("a PROCESS rule must not be a plan error: %+v", r.Errors)
 	}
@@ -846,7 +768,6 @@ func TestPlanNotesProcessRuleAsStripped(t *testing.T) {
 }
 
 func TestPlanNotesStrippedDNSSchemeButErrorsOnBootstrap(t *testing.T) {
-	// system/dhcp in a query-resolver list is stripped on iOS → notice, no error.
 	r := planOf(t, "dns:\n  nameserver: [223.5.5.5, system]\n  fallback: [dhcp://en0]\n")
 	if len(r.Errors) != 0 {
 		t.Fatalf("stripped DNS scheme must not be a plan error: %+v", r.Errors)
@@ -860,23 +781,12 @@ func TestPlanNotesStrippedDNSSchemeButErrorsOnBootstrap(t *testing.T) {
 	if noticed < 2 {
 		t.Fatalf("expected notices for stripped nameserver+fallback schemes, got: %v", r.Notices)
 	}
-	// An all-system bootstrap is NOT an error, because mihomo loads it: the
-	// pure-IP check `continue`s past ns.Net == "system" (config/config.go:1461-1463).
-	// The plan has to agree with the runtime about which configs start, and the
-	// runtime now starts this one -- CheckConfig proves it in
-	// TestCheckConfigStripsSystemNameserverButRejectsSystemBootstrap.
 	rb := planOf(t, "dns:\n  default-nameserver: [system]\n")
 	for _, e := range rb.Errors {
 		if e.Field == "dns.default-nameserver" {
 			t.Fatalf("all-system bootstrap must not be a plan error: %+v", rb.Errors)
 		}
 	}
-	// It is not reported as STRIPPED, because it is not stripped -- but it is
-	// not silent either. The old rejection was at least loud about the hazard;
-	// its replacement is a kept-notice: the entry stays as written, and inside a
-	// packet tunnel the system resolver is the tunnel itself, so a nameserver
-	// that needs bootstrapping may fail. Total silence here was reviewed as the
-	// worst of both worlds.
 	keptNoticed := false
 	for _, n := range rb.Notices {
 		if strings.Contains(n, "default-nameserver") {
@@ -891,9 +801,6 @@ func TestPlanNotesStrippedDNSSchemeButErrorsOnBootstrap(t *testing.T) {
 	if !keptNoticed {
 		t.Fatalf("an all-system bootstrap must carry a repair notice, got: %v", rb.Notices)
 	}
-	// dhcp:// in the same slot is stripped and repaired like system, so it is a
-	// notice too. What stays a plan error is a survivor mihomo itself refuses:
-	// a hostname where the pure-IP check wants an address.
 	rbd := planOf(t, "dns:\n  default-nameserver: [dhcp://en0]\n")
 	for _, e := range rbd.Errors {
 		if e.Field == "dns.default-nameserver" {
@@ -910,8 +817,6 @@ func TestPlanNotesStrippedDNSSchemeButErrorsOnBootstrap(t *testing.T) {
 	if !found {
 		t.Fatalf("a bootstrap mihomo rejects must stay a plan error: %+v", rbh.Errors)
 	}
-	// A bootstrap with system + usable IPs strips system, keeps the IPs: not an
-	// error (the common real shape, e.g. [system, 180.76.76.76, 8.8.8.8, ...]).
 	rb2 := planOf(t, "dns:\n  default-nameserver: [system, 180.76.76.76, 8.8.8.8]\n")
 	for _, e := range rb2.Errors {
 		if e.Field == "dns.default-nameserver" {
@@ -921,8 +826,6 @@ func TestPlanNotesStrippedDNSSchemeButErrorsOnBootstrap(t *testing.T) {
 }
 
 func TestPlanNotesDNSPhysicalInterfaceFragmentAsStripped(t *testing.T) {
-	// The fragment is stripped on iOS (the resolver survives through normal
-	// core routing), so the plan notes it rather than failing the config.
 	r := planOf(t, `
 dns:
   enable: true
@@ -979,9 +882,6 @@ proxy-providers:
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := planOf(t, yaml)
-			// wireguard.go:496-503 parses the servers and then overwrites
-			// ProxyAdapter unconditionally: the fragment selects nothing, but
-			// the outbound is built and the configuration starts.
 			if len(r.Errors) != 0 {
 				t.Fatalf("a nested dns fragment refused the configuration: %+v", r.Errors)
 			}
@@ -1008,8 +908,6 @@ func TestPlanNotesEveryUnavailableMetadataRuleShapeAsStripped(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := planOf(t, yaml)
-			// Every process/uid/in-user rule shape no-ops on iOS; the plan notes
-			// it (matches nothing, falls through) rather than failing the config.
 			if len(r.Errors) != 0 {
 				t.Fatalf("metadata rule must not be a plan error: %+v", r.Errors)
 			}
@@ -1072,29 +970,11 @@ rule-providers:
 	}
 }
 
-// The plan and the runtime must agree about which bootstraps start, because
-// defaultNameserverStrip exists for exactly that promise and the App shows the
-// plan's verdict before the core ever runs. Rather than assert a hand-derived
-// table, this drives both sides over the same inputs and compares them -- so a
-// future change to either one cannot drift without a red test, and the kernel
-// stays the authority on the answer.
 func TestPlanAndRuntimeAgreeOnBootstrapShapes(t *testing.T) {
 	options := testOptions(t)
 	if err := Setup(options); err != nil {
 		t.Fatal(err)
 	}
-	// The first review of this test carried nine shapes and missed three
-	// disagreements; the matrix below is fat on purpose. Notable rows, as
-	// decided AFTER the Apple packet-tunnel DNS repair joined the pipeline:
-	// every system/dhcp-schemed entry is removed by strip or repair before
-	// mihomo looks (so "SyStEm" -- NE-incompatible by our case-insensitive
-	// predicate -- never reaches parsePureDNSServer's exact comparison at
-	// config/config.go:1308, and an all-system or explicit-empty list is
-	// refilled with mihomo's defaults rather than tripping "should have at
-	// least one nameserver", config.go:1453); what still refuses is mihomo's
-	// own verdict on a SURVIVOR -- a hostname where the pure-IP check wants an
-	// address (bare "dhcp", "tls://dns.google") or an unknown scheme failing
-	// parseNameServer outright (config.go:1269-1270).
 	for _, list := range []string{
 		`[system]`,
 		`[system, ""]`,
@@ -1145,11 +1025,6 @@ func TestPlanAndRuntimeAgreeOnBootstrapShapes(t *testing.T) {
 	}
 }
 
-// The projection must NEVER ride in the plan result. Two reasons, both hard:
-// the plan result has a 16 MiB ceiling (config_limits.go:32) and a projection
-// pushing a legal plan past it turns "slower" into "activation fails at
-// coordinator :858"; and three notice-only UI callers (two on the main thread)
-// would pay for bytes they never read.
 func TestPlanResultCarriesNoProjection(t *testing.T) {
 	box, err := PlanResourcesForIOS("proxies:\n  - {name: A, type: socks5, server: e.test, port: 1080}\n")
 	if err != nil {
@@ -1162,8 +1037,6 @@ func TestPlanResultCarriesNoProjection(t *testing.T) {
 	if _, present := root["projection"]; present {
 		t.Fatal("the plan result must not carry a projection")
 	}
-	// Exact key set, not just presence: ANY new top-level key grows every
-	// notice-only caller's payload, projection or otherwise.
 	expected := map[string]bool{
 		"schemaVersion": true, "providers": true, "geodata": true,
 		"notices": true, "structuredNotices": true, "errors": true,
@@ -1180,8 +1053,6 @@ func TestPlanResultCarriesNoProjection(t *testing.T) {
 	}
 }
 
-// One flow, one parse: the handle serves the plan and a projection from the
-// same open, and both agree with the standalone route.
 func TestHandleServesPlanAndProjectionFromOneOpen(t *testing.T) {
 	yamlText := "proxies:\n  - {name: A, type: socks5, server: e.test, port: 1080}\nproxy-groups:\n  - {name: G, type: select, proxies: [A]}\n"
 	doc, err := NewConfigDocument(yamlText)
@@ -1216,23 +1087,8 @@ func TestHandleServesPlanAndProjectionFromOneOpen(t *testing.T) {
 	}
 }
 
-// The kernel half of "large headers reach the server as written", which is the
-// half that can be measured without a packet capture.
-//
-// The feature has two halves and only one needs a capture: whether this tree
-// DROPS an oversized header (kernel, measurable here) and whether the App's
-// downloader actually sends it (client, needs a server or a capture). On
-// 2026-08-28 the whole thing was reported to the device lanes as "unverified",
-// which reads as "no evidence for any of it" -- and there is evidence for the
-// half that this session changed. The caps removed were 64 fields, 16 values
-// per field and 8 KiB; a header past them used to vanish silently, which is
-// worse than a refusal because nothing said so.
-//
-// So the boundary is written as a test rather than as a sentence in a message:
-// what survives into the plan is measured, and what the downloader does with it
-// is named as out of scope right here.
 func TestLargeProviderHeadersSurviveIntoThePlan(t *testing.T) {
-	big := strings.Repeat("a", 9*1024) // past the old 8 KiB per-value cap
+	big := strings.Repeat("a", 9*1024)
 	r := planOf(t, `
 proxy-providers:
   p:
@@ -1255,8 +1111,4 @@ proxy-providers:
 			t.Errorf("%s reached the plan truncated: %d bytes of %d", field, got, len(big))
 		}
 	}
-	// Out of scope, stated where someone reading this test will see it: whether
-	// the App's downloader puts these on the wire is a client-side question and
-	// needs a capture. This test says only that the kernel no longer removes
-	// them, which is exactly what changed.
 }

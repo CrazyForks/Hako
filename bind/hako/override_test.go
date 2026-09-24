@@ -19,14 +19,14 @@ func TestOverrideForIOSForcesTunParams(t *testing.T) {
 			Inbound: config.Inbound{
 				Tun: LC.Tun{
 					Enable:                true,
-					Stack:                 C.TunSystem, // honoured now: upstream allows it, the platform allows it
+					Stack:                 C.TunSystem,
 					MTU:                   1500,
 					AutoRoute:             true,
 					AutoDetectInterface:   true,
 					GSO:                   true,
 					GSOMaxSize:            65536,
 					DisableICMPForwarding: false,
-					FileDescriptor:        42, // injected fd must survive override
+					FileDescriptor:        42,
 				},
 			},
 		},
@@ -41,11 +41,6 @@ func TestOverrideForIOSForcesTunParams(t *testing.T) {
 	overrideForIOS(cfg)
 
 	tun := cfg.General.Tun
-	// Stack is deliberately absent from this test now. It stopped being forced on 2026-08-10:
-	// the platform half was closed by measurement long before, and the cost that kept it -- "a
-	// swap invalidates the ProcessorsPerChannel=1 device A/B" -- was true of changing the
-	// DEFAULT and false of honouring an explicit value, because constant/tun.go:15 already makes
-	// gVisor the zero value. tun_stack_test.go pins both halves.
 	if tun.Stack != C.TunSystem {
 		t.Errorf("Stack = %v, want the System the configuration asked for", tun.Stack)
 	}
@@ -73,23 +68,14 @@ func TestOverrideForIOSForcesTunParams(t *testing.T) {
 	if cfg.General.GeoAutoUpdate {
 		t.Error("GeoAutoUpdate must be disabled")
 	}
-	// ExternalController is no longer cleared, and that is not the same as honouring it:
-	// executor.go:83 configures every part "without ExternalController" and nothing in this
-	// build reaches route.ReCreateServer from configuration. Carrying it is inert; clearing it
-	// was too, and clearing it made the ledger's word for these fields impossible to keep true.
-	// The External UI fields are honoured now: the hold was, an architecture decision,
-	// and the standard is that only a platform fact justifies holding a field back.
 	if cfg.Controller.ExternalUI == "" {
 		t.Error("external-ui was cleared; upstream keeps it and the platform permits it")
 	}
 
-	// the advertised DNS server (gateway+1) must be within the
-	// hijack set after override.
 	if !dnsHijackCovers(&cfg.General.Tun) {
 		t.Errorf("advertised DNS not covered by DNSHijack %v", cfg.General.Tun.DNSHijack)
 	}
 
-	// find-process-mode forced off.
 	if cfg.General.FindProcessMode != process.FindProcessOff {
 		t.Errorf("FindProcessMode = %v, want off", cfg.General.FindProcessMode)
 	}
@@ -121,8 +107,6 @@ func TestOverrideForNetworkExtensionKeepsOnlyTunInbound(t *testing.T) {
 	if inbound.Tun.FileDescriptor != 42 || !inbound.Tun.Enable {
 		t.Fatalf("tun inbound was not preserved: %+v", inbound.Tun)
 	}
-	// The local proxy surface survives on purpose now: hub/executor's updateListeners reads
-	// these fields, and zeroing them here was what made the batch that opened them a no-op.
 	if inbound.Port == 0 || inbound.SocksPort == 0 || inbound.MixedPort == 0 {
 		t.Fatalf("the local proxy ports were zeroed again: %+v", inbound)
 	}
@@ -133,27 +117,19 @@ func TestOverrideForNetworkExtensionKeepsOnlyTunInbound(t *testing.T) {
 	if inbound.BindAddress == "127.0.0.1" {
 		t.Fatalf("bind-address was pinned to loopback; genAddr then makes allow-lan a no-op: %+v", inbound)
 	}
-	// What still goes: the surfaces no Apple platform can serve, or that are a different
-	// product entirely.
 	if inbound.RedirPort != 0 || inbound.TProxyPort != 0 {
 		t.Fatalf("a platform-impossible port survived: %+v", inbound)
 	}
-	// The protocol server surface is honoured now: upstream allows it, the platform allows it,
-	// and hub/executor wires ReCreateShadowSocks/Vmess/Tuic. The ledger note that used to
-	// justify removing it said in so many words that the capability was proven and the removal
-	// was a product decision -- which is not a reason under the standard.
 	if inbound.ShadowSocksConfig == "" || inbound.VmessConfig == "" {
 		t.Fatalf("a protocol server surface was stripped: %+v", inbound)
 	}
-	// Listeners and tunnels are honoured now; iptables is not, and that one is genuinely a
-	// platform answer -- the whole block is consumed by Linux netfilter.
 	if cfg.IPTables.Enable {
 		t.Fatal("iptables must stay disabled: no Apple platform has netfilter")
 	}
 }
 
 func TestDNSHijackCovers(t *testing.T) {
-	base := []netip.Prefix{netip.MustParsePrefix("172.19.0.1/30")} // gateway+1 = .2
+	base := []netip.Prefix{netip.MustParsePrefix("172.19.0.1/30")}
 	cases := []struct {
 		name   string
 		hijack []string
@@ -176,11 +152,6 @@ func TestDNSHijackCovers(t *testing.T) {
 }
 
 func TestEnsureTunEnabled(t *testing.T) {
-	// It enables tun and changes nothing else. Feeding it a bare LC.Tun is why
-	// this test used to pass while a parsed configuration diverged: the addresses
-	// it once filled in are decided by upstream's parseTun and parseIPV6, and
-	// overwriting them here overrode the user's `ipv6: false`. Address parity is
-	// covered against real parse output in tun_ipv6_parity_test.go.
 	tun := &LC.Tun{Enable: false}
 	ensureTunEnabled(tun)
 	if !tun.Enable {
@@ -190,7 +161,6 @@ func TestEnsureTunEnabled(t *testing.T) {
 		t.Fatalf("ensureTunEnabled invented addresses: inet4=%v inet6=%v", tun.Inet4Address, tun.Inet6Address)
 	}
 
-	// Existing addresses are preserved.
 	custom := &LC.Tun{Inet4Address: []netip.Prefix{netip.MustParsePrefix("10.0.0.1/30")}}
 	ensureTunEnabled(custom)
 	if custom.Inet4Address[0].String() != "10.0.0.1/30" {
@@ -210,7 +180,6 @@ func TestOverrideForIOSLeavesTunAloneWhenDisabled(t *testing.T) {
 		},
 	}
 	overrideForIOS(cfg)
-	// No-tun path: tun params are not rewritten.
 	if cfg.General.Tun.Stack != C.TunSystem || cfg.General.Tun.MTU != 1500 {
 		t.Error("disabled tun should not be rewritten")
 	}

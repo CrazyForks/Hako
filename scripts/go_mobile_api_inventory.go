@@ -1,6 +1,3 @@
-// Command go_mobile_api_inventory prints the exported Go surface selected by
-// one target's build constraints. It is intentionally dependency-free so the
-// Hako/libbox parity review can inventory two unrelated modules reproducibly.
 package main
 
 import (

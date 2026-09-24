@@ -48,8 +48,6 @@ func TestProbeAdmissionAdmitsBelowCeilingAndCharges(t *testing.T) {
 func TestProbeAdmissionChargesCountAgainstCeiling(t *testing.T) {
 	defer drainProbeAdmissionCharges(t)
 	cfg := testAdmissionConfig(func() int64 { return 41 << 20 })
-	// 41 + 1*4 = 45 <= 48 admits; second: 41 + 2*4 = 49 > 48 must wait until
-	// the first charge decays.
 	if _, verdict := probeAdmissionWait(context.Background(), cfg); verdict != probeAdmitted {
 		t.Fatal("first admission must not be forced")
 	}
@@ -59,8 +57,6 @@ func TestProbeAdmissionChargesCountAgainstCeiling(t *testing.T) {
 		t.Fatal("second admission at charged water must wait")
 	}
 	if verdict == probeForced {
-		// decay (30ms) lands inside maxWait (15ms)? No: 30 > 15, so this
-		// admission is forced by maxWait. Accept either only if it waited.
 		if time.Since(start) < cfg.maxWait {
 			t.Fatal("forced admission must only happen after maxWait")
 		}
@@ -152,9 +148,6 @@ func TestProbeAdmissionShouldArmOnlyForNEOnBudgetedPlatform(t *testing.T) {
 
 func TestProbeAdmissionBurstSelfSerializes(t *testing.T) {
 	defer drainProbeAdmissionCharges(t)
-	// A same-instant burst of ten (the kernel health-check fan-out) at 40 MiB
-	// must admit at most two immediately: 40 + 2*4 = 48 fits, a third would
-	// need 52.
 	cfg := testAdmissionConfig(func() int64 { return 40 << 20 })
 	var immediate atomic.Int64
 	done := make(chan struct{})
@@ -177,10 +170,6 @@ func TestProbeAdmissionBurstSelfSerializes(t *testing.T) {
 
 func TestProbeAdmissionForcedExitsSerialize(t *testing.T) {
 	defer drainProbeAdmissionCharges(t)
-	// Sustained high water: ten stuck waiters must not stampede out together
-	// at maxWait (the device kill: 300s-storm waiters force-admitted in
-	// the same second, +7MB in 200ms). Forced exits are rationed: one per
-	// forcedInterval.
 	cfg := testAdmissionConfig(func() int64 { return 49 << 20 })
 	cfg.maxWait = 10 * time.Millisecond
 	cfg.forcedInterval = 40 * time.Millisecond

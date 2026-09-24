@@ -76,9 +76,6 @@ type STUNTestHandler interface {
 	OnError(message string)
 }
 
-// STUNTest is the standalone app-process path. iOS routes its ordinary UDP
-// socket through an active Packet Tunnel, while the command-client path below
-// is preferred when an exact mihomo outbound must be selected.
 type STUNTest struct {
 	mu     sync.Mutex
 	ctx    context.Context
@@ -215,10 +212,6 @@ func stunWireResult(result *internalSTUN.Result) stunWireEvent {
 	}
 }
 
-// STUNTestSession owns one streaming request to the Extension. Close cancels
-// the HTTP request and therefore the core UDP socket. It is safe, idempotent,
-// and deliberately non-blocking so handlers may close their session from a
-// callback without waiting on the reader goroutine that invoked them.
 type STUNTestSession struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -237,9 +230,6 @@ func (s *STUNTestSession) Close() error {
 	return nil
 }
 
-// StartSTUNTest starts the Extension-owned path over the existing App Group
-// Unix controller. An empty outbound follows the active RULES routing; a
-// non-empty name selects that exact UDP-capable mihomo proxy or group.
 func (c *ClashAPIClient) StartSTUNTest(server, outbound string, handler STUNTestHandler) (*STUNTestSession, error) {
 	if c == nil || c.httpClient == nil {
 		return nil, bridgeSafeError(errors.New("hako: Clash API client is unavailable"))
@@ -390,10 +380,6 @@ func (s *BoxService) runSTUN(
 	outbound string,
 	onProgress func(internalSTUN.Progress),
 ) (*internalSTUN.Result, error) {
-	// Reject an invalid selection before competing for the single diagnostic
-	// slot. Close is deliberately non-blocking, so a canceled session may still
-	// be unwinding on the server when the next request arrives. Input errors must
-	// not be nondeterministically masked as "another test is already running".
 	if err := validateSTUNOutbound(outbound); err != nil {
 		return nil, err
 	}
@@ -402,8 +388,6 @@ func (s *BoxService) runSTUN(
 		return nil, err
 	}
 	defer finish()
-	// Serialize against Reload and Close so the selected adapter cannot be
-	// replaced while the test owns its UDP PacketConn.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.running {
@@ -451,9 +435,6 @@ func dialSTUNThroughCore(ctx context.Context, endpoint, outbound string) (net.Pa
 	} else {
 		dialer = tunnel.NewDNSDialer(resolver.DefaultResolver, tunnel.Proxies()[outbound], "")
 	}
-	// Preserve the hostname in metadata so Follow Rules can evaluate DOMAIN
-	// rules. DNSDialer resolves it once with the live Core resolver and exposes
-	// that exact chosen address through the tracker metadata used below.
 	connection, err := dialer.ListenPacket(ctx, "udp", endpoint)
 	if err != nil {
 		return nil, netip.AddrPort{}, err

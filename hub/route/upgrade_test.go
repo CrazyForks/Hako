@@ -7,22 +7,6 @@ import (
 	"github.com/metacubex/http"
 )
 
-// Embed mode closes exactly one of these three, and each answer has its own reason -- which is
-// why they are asserted separately rather than as a block.
-//
-// POST /          stays closed: it replaces the running binary, and code signing forbids that
-//                 on Apple. A platform fact, so the gate is legitimate.
-// POST /ui        stays open: the core already calls AutoDownloadUI on the start path,
-//                 synchronously, measured adding six seconds to a first connection. Refusing
-//                 the route asked for nothing this core was not doing unprompted on a worse
-//                 schedule -- it refused the safer half.
-// POST /geo       is gated on its own measurement, not on embed mode: 17 MB fetched and
-//                 unpacked does not fit an iOS packet tunnel measured dying at 49.5 MiB, while
-//                 a macOS app extension has no such ceiling.
-//
-// This test asserted all three closed and stayed red on main from the day upgrade.go changed
-// until 2026-08-11, because the workflow that runs the root module's tests triggers on Alpha
-// and tags, never on main.
 func TestEmbeddedUpgradeRouterClosesOnlyTheBinaryReplacement(t *testing.T) {
 	previous := embedMode
 	SetEmbedMode(true)

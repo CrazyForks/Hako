@@ -72,17 +72,6 @@ func putMsgToCache(c dnsCache, q D.Question, msg *D.Msg) {
 		return rr.Header().Rrtype != D.TypeOPT
 	})
 
-	// Negative answers take the same path as any other answer, which is mihomo's: the
-	// minimum TTL across Answer+Ns+Extra, which for an NXDOMAIN or NODATA is the SOA's
-	// header TTL.
-	//
-	// This core used to bound them by RFC 2308 section 5 instead -- min(SOA header TTL,
-	// SOA MINIMUM) -- and that is measurably the more conformant reading: amazon.com's
-	// NXDOMAIN via 1.1.1.1 carries a 7200 second header TTL where the RFC gives 60. It was
-	// removed anyway. A mihomo configuration has to behave the way mihomo behaves,
-	// and being more correct than upstream is still being different from it; the fix
-	// belongs upstream, where every mihomo user gets it, not in a fork whose whole promise
-	// is that it runs their configuration unchanged.
 	var ttl uint32
 	if msg.Rcode == D.RcodeServerFailure {
 		// [...] a resolver MAY cache a server failure response.

@@ -21,17 +21,9 @@ import (
 )
 
 const (
-	// ProxyShareMinimumPort and ProxyShareMaximumPort are generated into the
-	// gomobile SDK so the containing App can validate before making a request.
 	ProxyShareMinimumPort int32 = 1024
 	ProxyShareMaximumPort int32 = 65535
-	// SOCKS5 username/password fields are one-byte length-prefixed.
 	ProxyShareMaximumCredentialBytes int32 = 255
-	// ProxyShareMinimumPasswordBytes is the wire-protocol floor for the LAN
-	// proxy-share credential, not a strength policy: SOCKS5 (RFC 1929) and HTTP
-	// Basic (RFC 7617) only require a non-empty password, and the upstream
-	// authenticator compares it verbatim with no length rule. Password strength
-	// is surfaced as a non-blocking client-side hint, never a bind-layer reject.
 	ProxyShareMinimumPasswordBytes int32 = 1
 )
 
@@ -52,17 +44,6 @@ type proxyShareConfiguration struct {
 	password string
 }
 
-// proxySharePortUnavailableError marks the one rejection the user can act on:
-// the port they picked cannot be bound. Whether that happens at all is a
-// platform decision -- a config listener on 127.0.0.1:P and this wildcard bind
-// coexist on macOS and collide on iOS -- so the App cannot predict it and must
-// be told.
-//
-// Naming the port leaks nothing: the caller chose it, reaches this API only
-// through the App Group socket, and could learn the same by binding it. The
-// cause (which listener, which address) stays in the wrapped error, reachable
-// through Unwrap for a caller that wants it -- this sentence is the one the
-// App shows, and it is about the one thing the reader can act on.
 type proxySharePortUnavailableError struct {
 	port  int32
 	cause error
@@ -180,18 +161,6 @@ type proxyShareStatus struct {
 	AuthenticationRequired bool     `json:"authenticationRequired"`
 }
 
-// StartProxyShare exposes one controlled mixed HTTP/SOCKS5 listener for local
-// network peers: opening a LAN port through THIS surface is an explicit,
-// authenticated runtime action rather than a side effect of importing a
-// configuration.
-//
-// It is no longer the only way a listener opens. The zero-squeeze ruling
-// restored the source YAML's own inbound surface -- `listeners`, ss-config,
-// vmess-config, tuic-server and the shared ports are honoured as written
-// -- so this comment used to claim a safety property the code had
-// stopped providing. What the reader actually gets for a configured listener
-// is disclosure, not suppression: unauthenticatedLANListenerNotices names it,
-// its exposure and the fact that the allow-lan permission does not cover it.
 func (s *BoxService) StartProxyShare(port int32, username, password string) error {
 	configuration, err := newProxyShareConfiguration(port, username, password)
 	if err != nil {
@@ -202,11 +171,6 @@ func (s *BoxService) StartProxyShare(port int32, username, password string) erro
 	if !s.running {
 		return bridgeSafeError(errors.New("hako: proxy share requires a running service"))
 	}
-	// A config's own listeners (mixed-port and friends) coexist with the share.
-	// Upstream never refuses because a listener exists -- a genuine port
-	// collision is the bind error below, exactly as ReCreateMixed reports it
-	// (ruled 2026-08-15; the old blanket refusal predated, when NE
-	// stripped every config listener and the branch could refuse nobody).
 	previous := s.proxyShare
 	if previous != nil {
 		_ = previous.close()
@@ -229,8 +193,6 @@ func (s *BoxService) StartProxyShare(port int32, username, password string) erro
 	return nil
 }
 
-// StopProxyShare is idempotent. It closes the owned listener before clearing
-// authentication and LAN policy so there is no unauthenticated transition.
 func (s *BoxService) StopProxyShare() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -241,9 +203,6 @@ func (s *BoxService) StopProxyShare() error {
 	return bridgeSafeError(err)
 }
 
-// ProxyShareStatusJSON intentionally omits credentials and interface/IP data.
-// The client already owns the secret in Keychain and can obtain displayable
-// LAN addresses from Apple APIs when the user opens the feature UI.
 func (s *BoxService) ProxyShareStatusJSON() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -329,9 +288,6 @@ func validProxySharePassword(value string) bool {
 }
 
 func newProxyShareRuntime(configuration *proxyShareConfiguration) (*proxyShareRuntime, error) {
-	// Authentication is private to these listeners; source filtering is owned
-	// by proxyShareListenConfig. Neither uses mihomo's mutable process-global
-	// default LAN/auth state, so config reload cannot race or weaken it.
 	authentication := authStore.NewAuthStore(coreAuth.NewAuthenticator([]coreAuth.AuthUser{{
 		User: configuration.username,
 		Pass: configuration.password,

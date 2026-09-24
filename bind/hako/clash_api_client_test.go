@@ -63,8 +63,6 @@ func (h *recordingClashAPIHandler) WriteConnections(message string) {
 }
 
 func TestClashAPIClientStreamsAndREST(t *testing.T) {
-	// Own a rejecting endpoint instead of assuming a developer's port 1080
-	// is unused. Every accepted connection closes before a SOCKS handshake.
 	rejecting, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -187,10 +185,6 @@ func TestClashAPIClientStreamsAndREST(t *testing.T) {
 	if _, err := client.URLTest("probe", "http://127.0.0.1:1/"); err == nil {
 		t.Fatal("unreachable fixture unexpectedly passed URLTest")
 	} else {
-		// The error names the endpoint it failed on, proxy name included
-		// . It used to be rewritten to
-		// `/proxies/<redacted>`, which left a reader with a failure that could
-		// not be told from the same failure on any other node.
 		if !strings.Contains(err.Error(), "probe") {
 			t.Fatalf("URLTest error does not name the proxy it failed on: %v", err)
 		}
@@ -212,18 +206,12 @@ func TestClashAPIClientStreamsAndREST(t *testing.T) {
 	if service.Mode() != "global" {
 		t.Fatalf("mode = %q, want global", service.Mode())
 	}
-	// PATCH /configs is open now, and this assertion used to say the opposite. The embed gate
-	// closed it alongside PUT and POST /geo, whose reasons -- bypassing the revision pipeline,
-	// downloading inside the extension -- are not true of PATCH. Switching modes from a
-	// dashboard is the most ordinary action a Clash panel has, and it answered 405 on a device.
 	if _, err := client.request(http.MethodPatch, "/configs", map[string]string{"mode": "direct"}); err != nil {
 		t.Fatalf("PATCH /configs is a runtime switch and must be available: %v", err)
 	}
 	if service.Mode() != "direct" {
 		t.Fatalf("PATCH /configs did not take effect; mode = %q", service.Mode())
 	}
-	// What stays closed is the one the reason actually covers: replacing the whole configuration
-	// would walk past the immutable revision pipeline the containing app owns.
 	if _, err := client.request(http.MethodPut, "/configs", map[string]string{"path": "/dev/null"}); err == nil {
 		t.Fatal("PUT /configs remained available; it bypasses the revision pipeline")
 	}
@@ -237,9 +225,6 @@ func TestClashAPIClientStreamsAndREST(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("disconnected callback missing")
 	}
-	// The upstream /memory handler only observes a peer close on its next 1 Hz
-	// write. Let it leave before opening another status stream; otherwise two
-	// handlers call mihomo's known non-synchronized Memory() sampler at once.
 	time.Sleep(1100 * time.Millisecond)
 
 	statusOptions := &ClashAPIClientOptions{}
@@ -405,16 +390,6 @@ func TestClashAPIClientRequestsProxyOnlyTrafficWithoutChangingOtherStreams(t *te
 	}
 }
 
-// A subscription node lives under its provider, not in the global proxies
-// table, and upstream measures it at /providers/proxies/{provider}/{name}/
-// healthcheck. The client asked /proxies for every name, so every probe of a
-// reader whose nodes all come from a subscription could measure nothing.
-//
-// A real core with a file provider and an include-all group, so the routing is
-// upstream's, not a stub's. The node itself points at a dead port on purpose:
-// the assertion is about WHICH failure comes back. A 404 means the name was
-// never found; anything else means the probe reached the node and the node
-// did not answer, which is the truth for a fixture.
 func TestURLTestReachesProviderNodesThroughTheirProvider(t *testing.T) {
 	options := testOptions(t)
 	if err := Setup(options); err != nil {
@@ -439,9 +414,6 @@ func TestURLTestReachesProviderNodesThroughTheirProvider(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	// A second subscription that carries a node of the SAME name, plus one of
-	// its own. Same-named nodes across subscriptions are ordinary — two
-	// report a number that may belong to a different server.
 	const secondBody = `proxies:
   - name: 订阅节点甲
     type: socks5
@@ -508,9 +480,6 @@ rules:
 	}
 	t.Cleanup(client.Close)
 
-	// providers of the include-all group carry both — the group's shell must
-	// not win by map order, and a genuine collision must refuse rather than
-	// guess.
 	providerName, found := client.providerOf("订阅节点乙")
 	if !found || providerName != "订阅" {
 		t.Fatalf("providerOf = (%q, %v), want (订阅, true)", providerName, found)
@@ -525,7 +494,6 @@ rules:
 		t.Fatal("an unknown node was attributed to a provider")
 	}
 
-	// The probe itself: wrong answers 404, right answers anything else.
 	_, probeErr := client.URLTest("订阅节点乙", "")
 	if probeErr == nil {
 		t.Fatal("a node on a dead port measured successfully")
@@ -534,16 +502,11 @@ rules:
 		t.Fatalf("the probe never reached the node: %v", probeErr)
 	}
 
-	// A name that exists nowhere still says so.
 	_, missingErr := client.URLTest("从来没有过的名字", "")
 	if !isClashAPINotFound(missingErr) {
 		t.Fatalf("a missing name did not report not-found: %v", missingErr)
 	}
 
-	// A provider update changes exactly the fact the index caches, so the
-	// index must be forgotten on update rather than left to its TTL: within
-	// that minute a freshly added node keeps 404ing and a removed one would
-	// measure a ghost.
 	const updatedBody = `proxies:
   - name: 订阅节点甲
     type: socks5
@@ -570,14 +533,6 @@ rules:
 	}
 }
 
-// The route existed before anything could subscribe to it, which is this batch's fifth
-// half-a-surface: /hako/v1/mode was registered and served, and ClashAPIClient -- the only path
-// Swift has to the controller -- had no command that reached it and no callback to deliver it.
-// A producer with no consumer is as useless as a consumer with no producer, and it fails more
-// quietly, because the route answers 200 to anyone who happens to curl it.
-//
-// The consuming lane found it by preparing to USE the endpoint. That is the general lesson:
-// the missing half is visible from the other side, and only from there.
 func TestModeCommandDeliversRuntimeSwitchesToTheHandler(t *testing.T) {
 	previousMode, previousLan := tunnel.Mode(), listener.AllowLan()
 	t.Cleanup(func() {
@@ -628,14 +583,6 @@ func receiveWithin(t *testing.T, source <-chan string, wait time.Duration, what 
 	}
 }
 
-// URLTest hands the client an int and an error whose text is the whole answer,
-// so the App had to match a dozen substrings against this tree's English to
-// learn anything. Any rewording here moved a category there silently,
-// and causes a substring cannot separate arrived on screen as one word: a
-// loopback resolver.
-//
-// URLTestOutcome answers with the same shape the delay route now answers with,
-// so both ends read one contract.
 func TestURLTestOutcomeAnswersWithClassifiedFields(t *testing.T) {
 	options := testOptions(t)
 	if err := Setup(options); err != nil {
@@ -646,8 +593,6 @@ func TestURLTestOutcomeAnswersWithClassifiedFields(t *testing.T) {
 		t.Fatalf("NewService: %v", err)
 	}
 	t.Cleanup(func() { _ = service.Close() })
-	// Port 1 on loopback: nothing is listening, so the dial fails with a typed
-	// error rather than a timeout, and the test does not wait on the network.
 	configuration := `
 mode: rule
 log-level: info
@@ -700,7 +645,6 @@ rules:
 	if answer.Failure.Kind == "" || answer.Failure.Kind == "unknown" {
 		t.Errorf("kind = %q -- a refused dial has a type to read\n%s", answer.Failure.Kind, payload)
 	}
-	// the sentence survives beside the classification.
 	if answer.Failure.Message == "" {
 		t.Errorf("the verbatim sentence was dropped: %s", payload)
 	}

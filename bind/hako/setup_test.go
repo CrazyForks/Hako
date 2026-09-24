@@ -34,10 +34,6 @@ func TestAppOnlySetupKeepsPreflightOffPersistentCache(t *testing.T) {
 		if err := CheckConfig(helloYAML); err != nil {
 			t.Fatal(err)
 		}
-		// The App preflights final YAML before the candidate directory is
-		// atomically renamed to its published revision path. Typed parsing must
-		// validate the safe path without opening the provider; provider contents
-		// were already consumed from the staging path by FinalizeForIOS.
 		publishedProvider := filepath.Join(
 			opts.WorkingPath,
 			"store", "profiles", "11111111-1111-1111-1111-111111111111",
@@ -99,7 +95,7 @@ func TestSetupRejectsUnusablePath(t *testing.T) {
 	}
 	err := Setup(&SetupOptions{
 		BasePath:    base,
-		WorkingPath: filepath.Join(blocker, "working"), // parent is a file
+		WorkingPath: filepath.Join(blocker, "working"),
 		TempPath:    filepath.Join(base, "temp"),
 	})
 	if err == nil {
@@ -174,7 +170,6 @@ func TestSetupSelectsValidatedTunMTU(t *testing.T) {
 	}
 }
 
-// strings0 avoids importing strings just for Contains in this test file.
 func strings0(haystack, needle string) bool {
 	for i := 0; i+len(needle) <= len(haystack); i++ {
 		if haystack[i:i+len(needle)] == needle {
@@ -184,15 +179,9 @@ func strings0(haystack, needle string) bool {
 	return false
 }
 
-// The bbolt DoD ("HomeDir wired first => cache.db opens inside the
-// sandbox path") is asserted inside TestStartNoTunReachesRunning:
-// cachefile.Cache() is a process-wide sync.Once, so the one place that may
-// claim it is the first real core start.
 
-// DoD: Setup applies the memory trio when a budget is given, and
-// the iOS-tagged build reports the low-memory recipe.
 func TestSetupAppliesMemoryTrio(t *testing.T) {
-	origGC := debug.SetGCPercent(100) // read current, will restore
+	origGC := debug.SetGCPercent(100)
 	t.Cleanup(func() { debug.SetGCPercent(origGC) })
 
 	opts := testOptions(t)
@@ -200,11 +189,9 @@ func TestSetupAppliesMemoryTrio(t *testing.T) {
 	if err := Setup(opts); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
-	// SetGCPercent returns the previous value; after Setup it should be 10.
 	if prev := debug.SetGCPercent(10); prev != 10 {
 		t.Fatalf("GCPercent after Setup = %d, want 10", prev)
 	}
-	// with_low_memory is build-tag specific (iOS slice yes, macOS no); asserted in the tagged low_memory_test.go.
 }
 
 func TestEffectiveMaxProcs(t *testing.T) {
@@ -327,8 +314,6 @@ func TestNewServiceRedirectsLogrusToWriteLog(t *testing.T) {
 	}
 
 	logrus.Warnln("hako-log-redirect-probe")
-	// NewService arms monitors whose own lines can arrive first; only the
-	// probe's presence is this test's subject.
 	deadline := time.After(2 * time.Second)
 	for {
 		select {

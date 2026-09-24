@@ -13,8 +13,6 @@ import (
 )
 
 func TestRuleProviderQueriesDuringReplacement(t *testing.T) {
-	// Configuration belongs to the whole Core process. Keep this replacement
-	// stress test isolated from other route tests' configuration and listeners.
 	if os.Getenv("HAKO_RULE_PROVIDER_SNAPSHOT_CHILD") != "1" {
 		command := exec.Command(os.Args[0], "-test.run=^TestRuleProviderQueriesDuringReplacement$", "-test.count=1")
 		command.Env = append(os.Environ(), "HAKO_RULE_PROVIDER_SNAPSHOT_CHILD=1")

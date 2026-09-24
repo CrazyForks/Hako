@@ -12,10 +12,6 @@ const (
 	maximumSourceAppTeamIdentifierBytes    = 256
 )
 
-// SourceAppIdentity matches code-signing identity extracted atomically from
-// the Apple flow audit token. These fields are deliberately separate from the
-// executable name/path so a process cannot impersonate a signing rule merely
-// by choosing its filename.
 type SourceAppIdentity struct {
 	Base
 	pattern  string

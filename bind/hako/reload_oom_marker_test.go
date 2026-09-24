@@ -21,12 +21,6 @@ func readEvidenceFile(t *testing.T, path string) map[string]any {
 	return record
 }
 
-// A reload that dies leaves nothing behind: the pressure callback that writes the OOM
-// evidence never fires when the process is killed 116 ms into building the second core. So
-// the reload writes its own line into that same file before it parses -- phase, when it
-// started, what the judge computed -- and takes the line back when it finishes. If the
-// process is gone at the next start, the App reads what it was doing when it died, and the
-// judge's estimate gets its one piece of feedback: an accepted reload that still died.
 func TestReloadEvidenceMarkerLifecycle(t *testing.T) {
 	path := setupOOMEvidenceTest(t)
 	verdict := reloadMemoryVerdict{Reason: reloadAccepted, NeededBytes: 9 * testMiB, AvailableBytes: 36 * testMiB, FootprintBytes: 14 * testMiB}
@@ -63,9 +57,6 @@ func TestReloadEvidenceMarkerLifecycle(t *testing.T) {
 	}
 }
 
-// Evidence already on disk is worth more than a marker: it is either a pressure record the App
-// has not consumed yet or a previous reload's death. The marker never overwrites it, and
-// finishing does not remove it.
 func TestReloadEvidenceMarkerNeverOverwritesEvidenceAlreadyOnDisk(t *testing.T) {
 	path := setupOOMEvidenceTest(t)
 	if err := RecordMemoryPressureEvidence(); err != nil {
@@ -81,8 +72,6 @@ func TestReloadEvidenceMarkerNeverOverwritesEvidenceAlreadyOnDisk(t *testing.T) 
 	}
 }
 
-// A pressure record written while a reload is running wins, and it says what the reload was
-// doing -- that is the attribution the callback could give when it does fire.
 func TestReloadEvidenceMarkerYieldsToAPressureRecordWrittenMeanwhile(t *testing.T) {
 	path := setupOOMEvidenceTest(t)
 	ticket := beginReloadEvidence(reloadMemoryVerdict{Reason: reloadAccepted, NeededBytes: 5 * testMiB, AvailableBytes: 30 * testMiB})
@@ -103,18 +92,10 @@ func TestReloadEvidenceMarkerYieldsToAPressureRecordWrittenMeanwhile(t *testing.
 	}
 }
 
-// The App consumes the marker through the same door as a pressure record -- but only a DEAD
-// reload's marker is evidence. On the launch after a kill the new process has no reload in
-// flight, so the marker on disk is consumable; abandonReloadEvidenceStateForTest models that
-// next launch. While the reload that wrote it is still alive in this process, the marker is
-// working state, not evidence: consuming it would tell the App a previous extension died while
-// the reload is right here running, and would strip the tombstone from a build that may yet be
-// the thing that kills the process (adversarial review, round 2).
 func TestConsumeOOMEvidenceAcceptsAReloadMarkerOnlyOnceItsReloadIsDead(t *testing.T) {
 	path := setupOOMEvidenceTest(t)
 	beginReloadEvidence(reloadMemoryVerdict{Reason: reloadAccepted, NeededBytes: 1, AvailableBytes: 2})
 
-	// Alive: the marker is not evidence yet, and stays where it is.
 	if consumed, err := ConsumeOOMEvidence(); err == nil {
 		t.Fatalf("a live reload's marker must not be consumable, got %s", consumed.Value)
 	} else if !os.IsNotExist(err) {
@@ -124,7 +105,6 @@ func TestConsumeOOMEvidenceAcceptsAReloadMarkerOnlyOnceItsReloadIsDead(t *testin
 		t.Fatalf("the live marker must still be on disk, stat err = %v", err)
 	}
 
-	// Dead: the next launch (fresh in-process state) consumes it through the same door.
 	abandonReloadEvidenceStateForTest()
 	consumed, err := ConsumeOOMEvidence()
 	if err != nil {
@@ -142,8 +122,6 @@ func TestConsumeOOMEvidenceAcceptsAReloadMarkerOnlyOnceItsReloadIsDead(t *testin
 	}
 }
 
-// markerWatchingPlatform snapshots whether the marker is on disk at the moment the reload asks
-// the platform about its environment -- which happens after the judge and before the parse.
 type markerWatchingPlatform struct {
 	*recordingPlatform
 	path        string
@@ -163,8 +141,6 @@ func (p *markerWatchingPlatform) UnderNetworkExtension() bool {
 	return p.recordingPlatform.UnderNetworkExtension()
 }
 
-// The service-level shape: while a reload runs its marker is on disk, and once it has
-// finished -- well or badly -- the marker is gone.
 func TestReloadKeepsItsMarkerOnDiskOnlyWhileItRuns(t *testing.T) {
 	t.Cleanup(func() { logrus.SetOutput(os.Stdout) })
 	path := setupOOMEvidenceTest(t)
@@ -192,7 +168,6 @@ func TestReloadKeepsItsMarkerOnDiskOnlyWhileItRuns(t *testing.T) {
 		t.Fatalf("after a successful reload the marker must be gone, stat err = %v", err)
 	}
 
-	// A reload that fails after the judge -- unparsable YAML -- takes its marker back too.
 	platform.markerAtAsk = false
 	if err := svc.Reload("mode: [broken"); err == nil {
 		t.Fatal("broken YAML must fail")

@@ -13,13 +13,6 @@ import (
 	"github.com/metacubex/gvisor/pkg/waiter"
 )
 
-// Every TCP connection an application opens through the tunnel becomes a gVisor
-// endpoint on this side of the TUN. Forcing keepalive to idle 15 s / interval 15 s on
-// each of them meant every idle connection on the phone woke the extension four times
-// a minute for a probe and its answer that never left the device. sing-tun v0.8.12
-// dropped the forced values and left gVisor's own (idle 2 h, interval 75 s); mihomo's
-// fork still carries them. Keepalive itself stays on, so a peer that vanished is still
-// noticed -- at the pace the rest of the system uses, not twenty times faster.
 func TestForwardedTCPEndpointsKeepGVisorsOwnKeepalivePace(t *testing.T) {
 	ipStack, err := NewGVisorStack(channel.New(1, 1500, ""))
 	if err != nil {

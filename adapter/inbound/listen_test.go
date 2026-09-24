@@ -9,11 +9,6 @@ import (
 	"testing"
 )
 
-// The two injection points below exist for the Apple Network Extension: the
-// kernel gives a provider process's sockets an interface scope, so an inbound
-// listener left alone never receives loopback traffic (T-M2 family; the
-// System-stack NAT listener learned the same lesson in sing-tun's bindif
-// file). The hooks default to nil and must change nothing until installed.
 
 func TestDefaultListenerHookSeesListenerSocket(t *testing.T) {
 	var mu sync.Mutex
@@ -119,9 +114,6 @@ func TestDefaultListenerWrapperWrapsAndRelistens(t *testing.T) {
 	}
 	defer companion.Close()
 
-	// The companion listener must be built by the same configuration path as
-	// the primary, or a socket option applied through the hook would silently
-	// miss every companion.
 	mu.Lock()
 	defer mu.Unlock()
 	if len(hookAddresses) != 2 {

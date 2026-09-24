@@ -17,27 +17,6 @@ import (
 	"github.com/metacubex/tls"
 )
 
-// trojan, vless, vmess, the shadowsocks v2ray/gost plugins and shadow-tls all reach TLS
-// through TLSConfig.ToStdConfig, which builds a fresh *tls.Config inside the per-flow
-// dial. metacubex/tls disables resumption when ClientSessionCache is nil, so every
-// proxied flow ran a full handshake and re-verified the server certificate -- on iOS an
-// XPC round trip to trustd each time.
-//
-// Resumption needs a long-lived CACHE, not a long-lived config, so a fresh config per
-// dial is fine as long as the cache it points at outlives the dial.
-//
-// The scope of that cache is a security decision, not a performance one, and the naive
-// answer is wrong. metacubex/tls keys its cache on config.ServerName alone (falling back
-// to the remote address) -- handshake_client.go clientSessionCacheKey. The key does NOT
-// include InsecureSkipVerify, the pinning fields, the client certificate or the ALPN set.
-// So one process-wide cache is safe across DIFFERENT servers but not across different
-// security settings for the SAME server name: a session established by an outbound with
-// skip-cert-verify would be resumed by one that was supposed to verify, and a resumed
-// handshake does not re-send the certificate, so the verification would simply not
-// happen. That is a downgrade introduced by an optimisation.
-//
-// Caches are therefore bucketed by the full security-relevant identity of the config.
-// Same identity shares, anything different is isolated.
 
 func TestSessionCacheIsSharedForIdenticalSecurityIdentity(t *testing.T) {
 	first := &TLSConfig{Host: "example.com", NextProtos: []string{"h2"}}
@@ -49,9 +28,6 @@ func TestSessionCacheIsSharedForIdenticalSecurityIdentity(t *testing.T) {
 	}
 }
 
-// TestSessionCacheIsolatesDifferentSecurityIdentities is the assertion that matters. Each
-// case differs from the baseline in exactly one security-relevant field, and each must
-// get its own cache.
 func TestSessionCacheIsolatesDifferentSecurityIdentities(t *testing.T) {
 	baseline := sessionCacheFor(&TLSConfig{Host: "example.com", NextProtos: []string{"h2"}})
 
@@ -105,9 +81,6 @@ func TestSessionCacheIsolatesDifferentSecurityIdentities(t *testing.T) {
 	}
 }
 
-// TestSessionCacheSurvivesRepeatedConfigConstruction: the per-flow config is rebuilt on
-// every dial, so the cache must be found again rather than recreated, or resumption never
-// happens no matter how many flows there are.
 func TestSessionCacheSurvivesRepeatedConfigConstruction(t *testing.T) {
 	var first any
 	for i := 0; i < 50; i++ {
@@ -131,10 +104,6 @@ func repeat(unit string, times int) string {
 	return out
 }
 
-// TestBucketedCacheActuallyResumes closes the loop the identity tests cannot: that a
-// config rebuilt per dial, pointing at its bucket, really resumes and really stops
-// re-verifying. The verification counter is the quantity that matters -- a resumed
-// handshake does not re-send the certificate, so it cannot trigger one.
 func TestBucketedCacheActuallyResumes(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -175,14 +144,11 @@ func TestBucketedCacheActuallyResumes(t *testing.T) {
 	verifications := 0
 	resumed := make([]bool, 0, 6)
 	for i := 0; i < 6; i++ {
-		// A fresh TLSConfig every iteration: this is what the per-flow dial does.
 		flowConfig := &TLSConfig{Host: "flow.hako.test", SkipCertVerify: true}
 		config, err := flowConfig.ToStdConfig()
 		if err != nil {
 			t.Fatal(err)
 		}
-		// What StreamTLSConn's plain-TLS branch does: attach the bucket to the per-flow
-		// config just before handing it to tls.Client.
 		config.ClientSessionCache = sessionCacheFor(flowConfig)
 		config.MaxVersion = tls.VersionTLS12
 		config.VerifyPeerCertificate = func([][]byte, [][]*x509.Certificate) error {
@@ -210,15 +176,7 @@ func TestBucketedCacheActuallyResumes(t *testing.T) {
 	}
 }
 
-// The three assertions below came out of adversarial review, which found that arming the
-// cache inside ToStdConfig reached callers it must not and missed the ones it claimed.
 
-// TestToStdConfigDoesNotArmACacheForQUICCallers: ToStdConfig is not TCP-only. TrustTunnel's
-// QUIC round-tripper hands its result to http3.Transport.TLSClientConfig, and the VLESS
-// XHTTP/3 path builds one for a quic-go dial. quic-go manages its own session tickets --
-// the same reason forbids arming a cache inside ca.GetTLSConfig, where arming one
-// breaks TUIC v5 authentication deterministically. So the config ToStdConfig returns must
-// carry no cache; only the TCP handshake branch of StreamTLSConn attaches one.
 func TestToStdConfigDoesNotArmACacheForQUICCallers(t *testing.T) {
 	config, err := (&TLSConfig{Host: "quic.hako.test", NextProtos: []string{"h3"}}).ToStdConfig()
 	if err != nil {
@@ -230,11 +188,6 @@ func TestToStdConfigDoesNotArmACacheForQUICCallers(t *testing.T) {
 	}
 }
 
-// TestSessionCacheBucketsByECHIdentity: two outbounds fronting the same server name through
-// different ECH endpoints must not share a bucket. The resolved ECH configuration is
-// produced by a resolver invoked after ToStdConfig, so only the per-outbound config object
-// distinguishes them -- and because metacubex/tls indexes by ServerName alone, sharing a
-// bucket means each overwrites the other's ticket and both keep doing full handshakes.
 func TestSessionCacheBucketsByECHIdentity(t *testing.T) {
 	first := &ech.Config{}
 	second := &ech.Config{}

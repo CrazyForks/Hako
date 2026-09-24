@@ -64,13 +64,6 @@ func serveProxyShareStart(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if err := service.StartProxyShare(input.Port, input.Username, input.Password); err != nil {
-		// Credentials and listener details never cross the process boundary in
-		// an error. The App only needs a fail-closed result -- with one
-		// exception: an unavailable port is the single rejection the user can
-		// act on, and the App cannot predict it (the wildcard share collides
-		// with a config's loopback listener on iOS and not on macOS). So that
-		// one is named, by port number only; its cause stays wrapped and
-		// unrendered.
 		var portUnavailable proxySharePortUnavailableError
 		if errors.As(err, &portUnavailable) {
 			http.Error(writer, portUnavailable.Error(), http.StatusConflict)

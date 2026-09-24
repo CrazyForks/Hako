@@ -15,8 +15,6 @@ type PackageManager interface {
 type PackageManagerOptions struct {
 	Callback PackageManagerCallback
 
-	// Logger is the logger to log errors
-	// optional
 	Logger logger.Logger
 }
 

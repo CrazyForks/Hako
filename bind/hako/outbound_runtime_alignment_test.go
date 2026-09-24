@@ -4,26 +4,6 @@ import (
 	"testing"
 )
 
-// Upstream refuses none of these. Every field below is a bare int, uint64 or
-// string in upstream's own schema, handed straight to the transport, and where
-// a value is out of range upstream clamps it, substitutes a default, or reads
-// it as zero -- it never refuses the configuration:
-//
-//   - QUIC flow-control windows: quic-go clamps above quicvarint.Max itself
-//     (config.go:36-37), and adapter/outbound/hysteria.go:202 substitutes
-//     defaults for zero.
-//   - hysteria2 udp-mtu: adapter/outbound/hysteria2.go:227 uses 1200-3 for
-//     zero and takes any other value as given. The 272 floor was ours.
-//   - hysteria up/down: common/utils/mbps.go:11 StringToBps returns 0 for
-//     anything it cannot parse, and returns no error at all.
-//   - mekya, kcptun, TUIC, BBR: bare ints on the option structs, passed to the
-//     transport as they are.
-//   - keep-alive-idle / keep-alive-interval / cache-max-size / a group's or
-//     provider's interval: bare ints in config.RawConfig.
-//
-// A value that is genuinely bad costs the node that carries it, at dial time.
-// Refusing the whole configuration for it is the self-mutilation named:
-// the kernel starts, and we would not let it.
 func TestParseConfigAcceptsEveryValueUpstreamAccepts(t *testing.T) {
 	for name, proxy := range map[string]string{
 		"hysteria negative stream window":    "{name: P, type: hysteria, server: 10.0.0.1, port: 443, auth-str: x, up: 10, down: 50, recv-window-conn: -1}",
@@ -53,8 +33,6 @@ rules:
 	}
 }
 
-// The same question for the values that are not on an outbound: upstream reads
-// each of these off a bare int in config.RawConfig.
 func TestParseConfigAcceptsGlobalValuesUpstreamAccepts(t *testing.T) {
 	for name, document := range map[string]string{
 		"overflowing keep-alive": `
@@ -87,15 +65,7 @@ rules:
 	}
 }
 
-// xhttp's zero packet-up interval is NOT in the list above, and the reason is
-// worth recording: upstream refuses it too, in its own words -- "invalid
-// sc-min-posts-interval-ms: must be greater than zero", transport/xhttp/
-// config.go:232, raised while the outbound is built. Same verdict, same moment.
-// It was in an earlier draft of this test until the error text showed whose it
-// was. A value upstream refuses is not self-mutilation to refuse.
 
-// A remote provider may start without a local payload. The core loads it in
-// the background; parsing must preserve its definition for that first load.
 func TestParseConfigPreservesUnmaterializedRemoteProvider(t *testing.T) {
 	setupConfigPipelineTest(t)
 	configuration, err := parseConfigForIOS(`

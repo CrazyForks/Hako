@@ -226,8 +226,6 @@ func runControlledHysteria2SingBoxReferenceVariant(t *testing.T, binary, obfs, o
 			if err == nil {
 				t.Fatalf("Hysteria2 sing-box %s unexpectedly succeeded", failure.name)
 			}
-			// QUIC may withhold a peer TLS alert until the handshake context expires.
-			// The succeeding control request above and target count below still prove fail-closed isolation.
 			if failure.wantMessage != "" &&
 				!strings.Contains(strings.ToLower(err.Error()), failure.wantMessage) &&
 				!errors.Is(err, context.DeadlineExceeded) {

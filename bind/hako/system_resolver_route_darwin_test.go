@@ -10,8 +10,6 @@ import (
 	"testing"
 )
 
-// The routing socket answers for real on a Mac: loopback routes through lo0, and the
-// default route names a non-loopback interface (skipped on a machine with no default route).
 func TestRoutingSocketAnswersOnDarwin(t *testing.T) {
 	lo0, err := net.InterfaceByName("lo0")
 	if err != nil {
@@ -39,10 +37,6 @@ func TestRoutingSocketAnswersOnDarwin(t *testing.T) {
 	t.Logf("default route via %s; 1.1.1.1 via %s", iface.Name, interfaceNameByIndex(public))
 }
 
-// Where Tailscale runs, its MagicDNS address is routed through Tailscale's own utun and
-// the default route is the physical interface: the exact reading from the reader's Mac.
-// Skipped on a machine without that route, so it is evidence where it can be and silent
-// where it cannot.
 func TestMagicDNSIsDroppedWhereTailscaleRuns(t *testing.T) {
 	magic := netip.MustParseAddr("100.100.100.100")
 	index, err := routeInterfaceIndex(magic)
@@ -65,9 +59,6 @@ func TestMagicDNSIsDroppedWhereTailscaleRuns(t *testing.T) {
 	t.Logf("MagicDNS via %s dropped; primary %s; kept %v", interfaceNameByIndex(index), interfaceNameByIndex(primary), got)
 }
 
-// On a Mac the resolver library and /etc/resolv.conf read the same configuration, so the
-// two sources must agree -- the file is the oracle for the library here, and the library
-// is the only source on iOS.
 func TestTheResolverLibraryAgreesWithTheFileOnMacOS(t *testing.T) {
 	fromLibrary, err := libresolvResolvers()
 	if err != nil {

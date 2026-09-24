@@ -1,5 +1,3 @@
-// Package networkquality is adapted from sing-box common/networkquality at
-// 4bccd6fae19526425acf76efc263333c7aea6fce (GPL-3.0-or-later).
 package networkquality
 
 import (

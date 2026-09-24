@@ -8,8 +8,6 @@ import (
 	"github.com/metacubex/gvisor/pkg/tcpip/link/channel"
 )
 
-// The snapshot must read the range LIVE from the stack (wiring proof), not
-// restate configuration, and report an empty distribution with no endpoints.
 func TestGVisorWindowSnapshotReadsLiveRange(t *testing.T) {
 	prior := GVisorTCPBufferBytes
 	t.Cleanup(func() { GVisorTCPBufferBytes = prior })

@@ -18,28 +18,18 @@ import (
 	"fmt"
 )
 
-// Error represents an error in the netstack error space.
-//
-// The error interface is intentionally omitted to avoid loss of type
-// information that would occur if these errors were passed as error.
 type Error interface {
 	isError()
 
-	// IgnoreStats indicates whether this error should be included in failure
-	// counts in tcpip.Stats structs.
 	IgnoreStats() bool
 
 	fmt.Stringer
 }
 
-// ErrBadAddress indicates a bad address was provided.
-//
-// +stateify savable
 type ErrBadAddress struct{}
 
 func (*ErrBadAddress) isError() {}
 
-// IgnoreStats implements Error.
 func (*ErrBadAddress) IgnoreStats() bool {
 	return false
 }

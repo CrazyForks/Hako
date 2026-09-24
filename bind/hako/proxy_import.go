@@ -32,10 +32,6 @@ type proxyImportCapability struct {
 	Scheme        string `json:"scheme"`
 	CanonicalType string `json:"canonicalType,omitempty"`
 	Status        string `json:"status"`
-	// PasteRole is the routing decision for a pasted string: the registry owns it
-	// so a client never re-derives which scheme is a node and which is a link to
-	// fetch. Status answers "can the Core build it", PasteRole answers "which door
-	// does this belong to"; a scheme can be a node the Core cannot construct.
 	PasteRole string `json:"pasteRole"`
 }
 
@@ -48,25 +44,10 @@ type proxyImportIssue struct {
 	Index  int    `json:"index"`
 	Scheme string `json:"scheme"`
 	Code   string `json:"code"`
-	// Line and Offset locate a share-link record inside the text the reader
-	// pasted, counting from one and from zero respectively. Container formats
-	// (JSON, YAML, INI) leave both at zero: there Index is the array position,
-	// which is what locates an entry in that shape.
 	Line    int    `json:"line,omitempty"`
 	Offset  int    `json:"offset,omitempty"`
 	Message string `json:"message"`
-	// Which node this field belongs to, by the name the node ends up with.
-	// Index would have been the obvious key and is the wrong one: the client
-	// filters and sorts before it renders, and an index into the array it was
-	// handed stops meaning anything the moment it does. Names are unique inside
-	// one import -- makeProxyImportNameUnique guarantees it -- and are already
-	// this tree's identity for a proxy. Set only on NotHonoured entries.
 	Proxy string `json:"proxy,omitempty"`
-	// Fields the same record named that this build could not honour, on a
-	// record that was skipped for some other reason. They ride with the skip
-	// rather than going to NotHonoured, where they would name a node that does
-	// not exist. One link with two problems is one thing that happened to the
-	// person; two arrays each holding half of it is not.
 	AlsoNotHonoured []string `json:"alsoNotHonoured,omitempty"`
 }
 
@@ -87,34 +68,12 @@ type proxyImportReport struct {
 	Format  string           `json:"format"`
 	Context string           `json:"context"`
 	Proxies []map[string]any `json:"proxies"`
-	// Two outcomes, because there were never three. A record either became a
-	// node or it did not, and "recognized but unsupported" was a third name for
-	// the second one -- the only consumer of it, the client's import bridge,
-	// had been concatenating it with the rejections since the day it was
-	// written. The reader's ruling on 2026-08-28: parse what parses, skip what
-	// does not, and say what was skipped.
 	Skipped []proxyImportIssue `json:"skipped"`
-	// Fields that did not survive on a node that did. This is not a third
-	// outcome: every one of these belongs to a proxy in Proxies above, named by
-	// the Proxy field, and a client that ignores them still imports correctly.
 	NotHonoured []proxyImportIssue `json:"notHonoured"`
-	// One identity per node in Proxies, in the same order, produced in the same
-	// pass -- the two arrays cannot drift apart because neither is appended to
-	// without the other. Two entries with the same identity are the same node
-	// pasted twice, and the client decides what to do about that: collapsing
-	// belongs where the person's existing profile is visible, and this pass sees
-	// only what was pasted just now.
 	Identities   []string                 `json:"identities"`
 	PayloadShape *proxyImportPayloadShape `json:"payloadShape,omitempty"`
 }
 
-// proxyImportPayloadShape answers "what is this document" separately from "what
-// proxies did it yield". A configuration whose nodes all come from
-// `proxy-providers`, and one that only carries rules, are both valid and both
-// hold zero inline proxies -- and an expired subscription that answers
-// `{"code":401}` is valid YAML that holds zero inline proxies too. Reporting only
-// the proxy count makes those indistinguishable, and a caller that has to tell
-// them apart ends up keeping its own copy of mihomo's vocabulary.
 type proxyImportPayloadShape struct {
 	IsConfiguration   bool     `json:"isConfiguration"`
 	RecognizedKeys    []string `json:"recognizedKeys"`
@@ -123,11 +82,6 @@ type proxyImportPayloadShape struct {
 	HasProxyProviders bool     `json:"hasProxyProviders"`
 }
 
-// mihomoConfigurationKeys is every top-level key the kernel's own RawConfig
-// declares, read off its yaml tags by reflection. A second copy of upstream's
-// vocabulary maintained by hand goes stale the day upstream adds a field, and
-// nothing tells us: the client that asked for this had hand-written 24
-// of the 65 keys this returns.
 var mihomoConfigurationKeys = func() map[string]struct{} {
 	keys := make(map[string]struct{})
 	var collect func(reflect.Type)
@@ -149,7 +103,6 @@ var mihomoConfigurationKeys = func() map[string]struct{} {
 	return keys
 }()
 
-// describeProxyImportPayloadShape classifies a decoded top-level document.
 func describeProxyImportPayloadShape(document map[string]any) *proxyImportPayloadShape {
 	shape := &proxyImportPayloadShape{
 		RecognizedKeys:   make([]string, 0, len(document)),
@@ -191,9 +144,6 @@ const (
 	proxyImportPasteWrapper      = "wrapper"
 )
 
-// This is the single import registry. Its order follows Shadowrocket 2.2.90's
-// supportsSchemes output so drift is visible in one exact comparison rather
-// than being hidden by a set.
 var proxyImportCapabilities = []proxyImportCapability{
 	{Scheme: "vmess", CanonicalType: "vmess", Status: proxyImportSupported, PasteRole: proxyImportPasteNode},
 	{Scheme: "http", CanonicalType: "http", Status: proxyImportSupported, PasteRole: proxyImportPasteSubscription},
@@ -219,10 +169,6 @@ var proxyImportCapabilities = []proxyImportCapability{
 	{Scheme: "hy", CanonicalType: "hysteria", Status: proxyImportSupported, PasteRole: proxyImportPasteNode},
 	{Scheme: "hysteria2", CanonicalType: "hysteria2", Status: proxyImportSupported, PasteRole: proxyImportPasteNode},
 	{Scheme: "hy2", CanonicalType: "hysteria2", Status: proxyImportSupported, PasteRole: proxyImportPasteNode},
-	// Upstream builds a proxy from these too (common/convert/converter.go: the
-	// "+realm" suffix switches on realm-opts). Not Shadowrocket spellings, but
-	// the core we feed accepts them, so refusing them here would make the
-	// importer narrower than the thing it hands the payload to.
 	{Scheme: "hysteria2+realm", CanonicalType: "hysteria2", Status: proxyImportSupported, PasteRole: proxyImportPasteNode},
 	{Scheme: "hy2+realm", CanonicalType: "hysteria2", Status: proxyImportSupported, PasteRole: proxyImportPasteNode},
 	{Scheme: "tuic", CanonicalType: "tuic", Status: proxyImportSupported, PasteRole: proxyImportPasteNode},
@@ -239,11 +185,6 @@ var proxyImportCapabilities = []proxyImportCapability{
 	{Scheme: "brook", Status: proxyImportCoreUnsupported, PasteRole: proxyImportPasteNode},
 }
 
-// proxyImportQueryFieldLedger is the fail-closed input contract for share-link
-// query fields. Every accepted key must either be mapped into the canonical
-// mihomo proxy, be explicitly metadata-only, or be rejected later as a known
-// but unrepresentable field. The inventory includes the spellings emitted by
-// Shadowrocket 2.2.90 (3378), not just the spellings preferred by mihomo.
 var proxyImportQueryFieldLedger = map[string]map[string]struct{}{
 	"vmess": queryFieldSet(
 		"title", "remark", "remarks", "name", "tfo", "fastopen", "udp", "uot", "padding", "fragment",
@@ -258,15 +199,6 @@ var proxyImportQueryFieldLedger = map[string]map[string]struct{}{
 		"serverName", "tlsServerName", "allowInsecure", "allow_insecure", "insecure", "skip-cert-verify",
 		"fingerprint", "hpkp", "fragment", "pbk", "publicKey", "sid", "shortId",
 	),
-	// `security` sits beside `tls` here for the reason it already does on
-	// trojan, vless, vmess and snell: it is the spelling Shadowrocket emits and
-	// the one airports hand out. A user's real link --
-	// socks5://…@host:443?security=tls -- was refused with "recognized but
-	// unsupported", which reads as "this build cannot do TLS over socks5" and
-	// is not true: mihomo's socks5 outbound has a tls field and this tree has
-	// an interop test for it. The key was simply never registered, and only
-	// this one spelling of it. Reported by the iOS lane 2026-08-28 from the
-	// user's own subscription.
 	"socks5": queryFieldSet(
 		"title", "remark", "remarks", "name", "tfo", "fastopen", "tls", "security", "udp", "allowInsecure",
 		"allow_insecure", "insecure", "skip-cert-verify", "fingerprint", "hpkp",
@@ -277,10 +209,6 @@ var proxyImportQueryFieldLedger = map[string]map[string]struct{}{
 		"fingerprint", "fp", "hpkp", "pcs", "pbk", "publicKey", "sid", "shortId", "security",
 		"type", "proto", "network", "obfs", "obfsParam", "path", "host", "serviceName", "plugin",
 	),
-	// `udp` is on almost every airport ss link and was not here, so a real
-	// subscription came back "recognized but unsupported" -- for a field
-	// mihomo's ss outbound has. Registered and honoured, not merely tolerated:
-	// a node that imports with udp silently off fails differently and later.
 	"ss": queryFieldSet(
 		"title", "remark", "remarks", "name", "tfo", "fastopen", "udp", "udp-over-tcp", "uot", "plugin",
 		"obfs", "obfsParam", "path", "client-fingerprint",
@@ -308,10 +236,7 @@ var proxyImportQueryFieldLedger = map[string]map[string]struct{}{
 		"tlsServerName", "allowInsecure", "allow_insecure", "insecure", "skip-cert-verify", "up", "upmbps",
 		"down", "downmbps", "alpn", "obfs", "obfs-password", "obfsParam", "fingerprint", "hpkp",
 		"pinSHA256", "keepalive", "pbk", "publicKey", "sid", "shortId",
-		// Port hopping: Shadowrocket spells it mport, mihomo spells it ports, and the
-		// authority form is lifted into the same key before the URL is parsed.
 		"mport", "ports", "hop-interval", "hopInterval",
-		// The +realm spellings carry these; upstream reads them into realm-opts.
 		"auth", "stun",
 	),
 	"tuic": queryFieldSet(
@@ -364,9 +289,6 @@ func queryFieldSet(fields ...string) map[string]struct{} {
 
 var proxyImportURLPattern = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*)://`)
 
-// ProxyImportCapabilitiesForIOS exposes the Core-owned registry to Apple UI.
-// The client may use this snapshot for routing and copy, but must not maintain a
-// second scheme set.
 func ProxyImportCapabilitiesForIOS() *StringBox {
 	encoded, _ := json.Marshal(proxyImportCapabilitiesDocument{
 		Schemes:  proxyImportCapabilities,
@@ -375,9 +297,6 @@ func ProxyImportCapabilitiesForIOS() *StringBox {
 	return WrapString(string(encoded))
 }
 
-// A guessed context is reported the same way a dropped field is: the caller
-// gets what it asked for, and is told what part of the request was not taken at
-// face value.
 func addProxyImportContextNotice(report *proxyImportReport, notice string) {
 	if notice == "" {
 		return
@@ -387,15 +306,6 @@ func addProxyImportContextNotice(report *proxyImportReport, notice string) {
 	})
 }
 
-// InspectProxyPayloadForIOS reads a pasted payload and reports what became a
-// node and what did not, so a person can see it before anything is saved.
-//
-// Two outcomes, not three. A record either produced a proxy or it was skipped
-// with the reason; `notHonoured` is not a third one, it names fields that did
-// not survive on nodes that did. The doc comment that stood here described a
-// "recognized but unsupported" bucket, which stopped existing on 2026-08-28 --
-// and it had come adrift from this function entirely, sitting above an
-// unexported helper where nothing rendered it.
 func InspectProxyPayloadForIOS(payload []byte, context string) (*StringBox, error) {
 	if len(payload) == 0 {
 		return nil, bridgeSafeError(fmt.Errorf("hako: proxy payload is empty"))
@@ -404,16 +314,6 @@ func InspectProxyPayloadForIOS(payload []byte, context string) (*StringBox, erro
 		return nil, bridgeSafeError(fmt.Errorf("hako: proxy payload is %d bytes, over the %d-byte limit",
 			len(payload), maximumProviderResourceBytes))
 	}
-	// An unknown context is guessed at, not refused. What the person pasted is a
-	// fact only the content knows, and this parameter asks the call site to
-	// declare it -- so a wrong guess at the call site used to lose the whole
-	// payload, including the part that parsed cleanly. The parser will decide
-	// this for itself in a later release; until then a bad value costs a notice,
-	// not the import.
-	//
-	// nodeBundle is the guess because it is the one that constrains nothing:
-	// `configuration` sends the payload down the container path and `singleNode`
-	// refuses more than one record, while nodeBundle takes whatever arrives.
 	var contextNotice string
 	switch context {
 	case "singleNode", "nodeBundle", "subscriptionBody", "configuration":
@@ -430,13 +330,6 @@ func InspectProxyPayloadForIOS(payload []byte, context string) (*StringBox, erro
 		bridgedValue0, bridgedErr := encodeProxyImportReport(report)
 		return bridgedValue0, bridgeSafeError(bridgedErr)
 	}
-	// Upstream decodes the whole body before it looks at anything at all
-	// (common/convert/converter.go), so a subscription that base64s its body
-	// carries the same proxies as one that does not -- including when what it
-	// wrapped is a container rather than a list of links. Base64 is just a fifth
-	// spelling of the container, and a spelling is not a fact about the contents
-	// . The undecoded payload is tried first, so this only ever runs on
-	// something no detector recognised as it stands.
 	if decoded, decodeErr := convert.TryDecodeBase64(string(bytes.TrimSpace(payload))); decodeErr == nil {
 		if report, matched, containerErr := inspectProxyContainer(decoded, context); matched {
 			if containerErr != nil {
@@ -501,12 +394,6 @@ func InspectProxyPayloadForIOS(payload []byte, context string) (*StringBox, erro
 			})
 			continue
 		}
-		// The notices cannot be filed yet. Each one names a node, and the node
-		// does not have its final name until makeProxyImportNameUnique has run
-		// below -- two links called "HK" become "HK" and "HK-01", and a notice
-		// stamped with the name from the link would send both to the first one.
-		// If the record never becomes a node at all, they ride with the skip
-		// instead.
 		proxies, notHonoured, err := parseProxyShareLink(record.text, capability)
 		pending := make([]string, 0, len(notHonoured))
 		for _, notice := range notHonoured {
@@ -562,9 +449,6 @@ func InspectProxyPayloadForIOS(payload []byte, context string) (*StringBox, erro
 			pending = nil
 			report.Proxies = append(report.Proxies, proxy)
 		}
-		// A record that produced neither a node nor a skip leaves its notices
-		// with nowhere to go. Filing them under an empty name would put a notice
-		// in the report that points at no node in it.
 		for _, notice := range pending {
 			report.Skipped = append(report.Skipped, proxyImportIssue{
 				Index: index, Scheme: scheme, Line: record.line, Offset: record.offset,
@@ -573,9 +457,6 @@ func InspectProxyPayloadForIOS(payload []byte, context string) (*StringBox, erro
 		}
 		pending = nil
 	}
-	// singleNode does not collapse the outcome into one sentence. The caller
-	// decides whether one constructible proxy came back; the reasons the others
-	// did not are already in the report, and they are the only actionable part.
 	addProxyImportContextNotice(&report, contextNotice)
 	bridgedValue0, bridgedErr := encodeProxyImportReport(report)
 	return bridgedValue0, bridgeSafeError(bridgedErr)
@@ -589,12 +470,6 @@ func encodeProxyImportReport(report proxyImportReport) (*StringBox, error) {
 	return WrapString(string(encoded)), nil
 }
 
-// validateProxyImportRequiredFields enforces the authentication contract before
-// asking the Core to construct an outbound. Some upstream constructors accept
-// empty credentials and fail only when a connection is attempted; accepting
-// such a record here would turn an import success into a guaranteed runtime
-// failure. Keep this validation format-agnostic so URI, JSON, YAML and INI
-// imports receive the same result.
 func validateProxyImportRequiredFields(proxy map[string]any) error {
 	kind := strings.ToLower(strings.TrimSpace(anyString(proxy["type"])))
 	require := func(fields ...string) error {
@@ -655,14 +530,7 @@ func inspectProxyContainer(payload []byte, context string) (proxyImportReport, b
 		proxies []map[string]any
 		err     error
 		matched bool
-		// Records a container-format parser could not read. They are records, not
-		// a reason to throw the document away, so they travel here rather than in
-		// the error return.
 		containerSkipped []proxyImportIssue
-		// The fields each record named that this build does not map, parallel to
-		// proxies: containerNotHonoured[i] belongs to proxies[i]. Only the JSON
-		// dialects and SSD have whitelists, so only they produce any; the other
-		// parsers leave it nil, and a nil entry is no notices.
 		containerNotHonoured [][]string
 	)
 	switch {
@@ -704,12 +572,6 @@ func inspectProxyContainer(payload []byte, context string) (proxyImportReport, b
 	}
 	shape := classifyProxyImportDocument(trimmed)
 	if !matched {
-		// A configuration whose nodes all live in `proxy-providers`, and one that
-		// only carries rules, are both valid and both hold no inline proxies. Left
-		// to the detectors above they came back as `format is unknown` -- the same
-		// answer an HTML login page gets -- so a caller could not tell "valid, no
-		// nodes here" from "not a configuration". It ends up rebuilding mihomo's
-		// vocabulary to tell them apart, which is the kernel's to own.
 		if shape != nil && shape.IsConfiguration {
 			return proxyImportReport{
 				Format: mihomoDocumentFormat(trimmed), Context: context,
@@ -725,9 +587,6 @@ func inspectProxyContainer(payload []byte, context string) (proxyImportReport, b
 		return proxyImportReport{}, true, fmt.Errorf("hako: parse %s proxy payload: %w", format, err)
 	}
 	if len(proxies) == 0 && len(containerSkipped) > 0 {
-		// Every record was skipped. That is a report, not a failure to read the
-		// document: the person gets the reasons, one per record, instead of one
-		// sentence saying the payload had no proxies in it.
 		return proxyImportReport{
 			Format: format, Context: context,
 			Proxies:      make([]map[string]any, 0),
@@ -752,8 +611,6 @@ func inspectProxyContainer(payload []byte, context string) (proxyImportReport, b
 	report := proxyImportReport{
 		Format: format, Context: context,
 		Proxies: make([]map[string]any, 0, len(proxies)),
-		// The records the format's own parser could not read come first, because
-		// they were skipped before any of the rest existed.
 		Skipped:     append(make([]proxyImportIssue, 0, len(containerSkipped)), containerSkipped...),
 		NotHonoured: make([]proxyImportIssue, 0),
 		Identities:  make([]string, 0, len(proxies)),
@@ -761,9 +618,6 @@ func inspectProxyContainer(payload []byte, context string) (proxyImportReport, b
 	seenNames := make(map[string]int)
 	for index, proxy := range proxies {
 		scheme, _ := proxy["type"].(string)
-		// What this record named that we do not map. Filed under the node once
-		// the node has its final name; carried by the skip when there is no
-		// node -- the same shape the share-link door gives its notices.
 		var pending []string
 		if index < len(containerNotHonoured) {
 			pending = proxyImportNoticeMessages(containerNotHonoured[index])
@@ -801,8 +655,6 @@ func inspectProxyContainer(payload []byte, context string) (proxyImportReport, b
 	return report, true, nil
 }
 
-// classifyProxyImportDocument decodes a top-level mapping and says what it is.
-// YAML is a superset of JSON, so one decode covers both spellings.
 func classifyProxyImportDocument(payload []byte) *proxyImportPayloadShape {
 	var document map[string]any
 	if err := yaml.Unmarshal(payload, &document); err != nil || len(document) == 0 {
@@ -834,10 +686,6 @@ func parseMihomoProxyDocument(payload []byte) ([]map[string]any, error) {
 		raw = document["Proxy"]
 	}
 	if raw == nil {
-		// A configuration whose nodes all come from `proxy-providers` carries no
-		// `proxies:` key at all, and it is not malformed for that. The caller
-		// decides what an empty list means; refusing it here made a valid
-		// subscription look broken.
 		return []map[string]any{}, nil
 	}
 	items, ok := raw.([]any)
@@ -855,12 +703,6 @@ func parseMihomoProxyDocument(payload []byte) ([]map[string]any, error) {
 	return proxies, nil
 }
 
-// parseBareMihomoProxySequence accepts a YAML sequence of proxies pasted without
-// the `proxies:` key that would wrap them inside a full configuration. An excerpt
-// holds the same proxies as the document it was cut from, so it imports the same
-// way; requiring the wrapper would make the paste's shape a fact about its
-// contents. It reports false for anything it is not certain about, leaving the
-// payload to the share-link reader.
 func parseBareMihomoProxySequence(payload []byte) ([]map[string]any, bool) {
 	var items []any
 	if err := yaml.Unmarshal(payload, &items); err != nil || len(items) == 0 {
@@ -877,18 +719,6 @@ func parseBareMihomoProxySequence(payload []byte) ([]map[string]any, bool) {
 	return proxies, true
 }
 
-// One unreadable line does not cost the other two hundred.
-//
-// Every per-line failure here used to return an error that reached the caller
-// as "parse surge proxy payload: ..." with no report at all, so a person whose
-// configuration carried one line this build could not read got nothing back --
-// not the nodes that were fine, not the reason for the one that was not. The
-// reader's rule is parse what parses, skip what does not, and say what was
-// skipped, and a container format is where that matters most: share links
-// arrive a few at a time, a configuration arrives with hundreds of nodes in it.
-//
-// The returned error is now reserved for the document as a whole. A line is a
-// record like any other, and it is skipped with its line number.
 func parseSurgeProxySection(text string) ([]map[string]any, []proxyImportIssue, error) {
 	inProxySection := false
 	var proxies []map[string]any
@@ -1052,13 +882,6 @@ func validateStringMapKeys(prefix string, values map[string]string, allowed map[
 	return nil
 }
 
-// The skipped records travel beside the proxies rather than inside the error.
-// A JSON container is a document with many records in it, and an outbound this
-// build cannot read is one of them -- returning it as the function's error made
-// it the whole document's verdict.
-// parseJSONProxyContainer returns the dialect, the nodes, the not-mapped
-// notices parallel to the nodes (nil for the canonical mihomo shape, which has
-// no whitelist), and the records that were skipped.
 func parseJSONProxyContainer(payload []byte) (string, []map[string]any, [][]string, []proxyImportIssue, error) {
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.UseNumber()
@@ -1162,7 +985,6 @@ func parseJSONArrayProxyContainers(items []any) ([]map[string]any, [][]string, b
 			parsed, notices, outboundSkipped, err = parseJSONOutbounds(raw, format)
 			nestedSkipped = append(nestedSkipped, outboundSkipped...)
 		case jsonObjectIsCanonicalMihomoProxy(object):
-			// One object, already known to be one, so nothing is skipped.
 			parsed, _ = canonicalJSONProxyArray([]any{object})
 		default:
 			var (
@@ -1176,8 +998,6 @@ func parseJSONArrayProxyContainers(items []any) ([]map[string]any, [][]string, b
 			}
 		}
 		if err != nil {
-			// One item of a JSON array is a record. It used to be the array's
-			// verdict.
 			nestedSkipped = append(nestedSkipped, proxyImportIssue{
 				Index: index, Code: "malformedRecord",
 				Message: fmt.Sprintf("JSON item %d: %v", index, err),
@@ -1190,9 +1010,6 @@ func parseJSONArrayProxyContainers(items []any) ([]map[string]any, [][]string, b
 	return proxies, notHonoured, nested, nestedSkipped, nil
 }
 
-// paddedNotices keeps a notice list parallel to the nodes it belongs to when
-// the parser that produced the nodes had no notices to give (the canonical
-// mihomo shapes have no whitelist, so they have nothing to name).
 func paddedNotices(notices [][]string, count int) [][]string {
 	if len(notices) == count {
 		return notices
@@ -1200,8 +1017,6 @@ func paddedNotices(notices [][]string, count int) [][]string {
 	return make([][]string, count)
 }
 
-// parseJSONOutbounds returns the nodes, the not-mapped notices parallel to
-// them (see parseJSONServerArray), and the outbounds that were skipped.
 func parseJSONOutbounds(items []any, format string) ([]map[string]any, [][]string, []proxyImportIssue, error) {
 	proxies := make([]map[string]any, 0, len(items))
 	notHonoured := make([][]string, 0, len(items))
@@ -1227,12 +1042,6 @@ func parseJSONOutbounds(items []any, format string) ([]map[string]any, [][]strin
 			proxy, skip, notices, err = singBoxOutboundMapping(outbound)
 		}
 		if err != nil {
-			// Same rule as the surge section: an outbound this build cannot read
-			// is one record, and the other outbounds in the file are not its
-			// fault. This used to abort the document with `outbound 7: ...` and
-			// return no report, so a person whose sing-box file carried one field
-			// we do not map lost every node in it. The fields it named that we
-			// do not map ride with the skip: there is no node to file them under.
 			skipped = append(skipped, proxyImportIssue{
 				Index: index, Scheme: anyString(outbound["type"]),
 				Code: "malformedRecord", Message: err.Error(),
@@ -1248,10 +1057,6 @@ func parseJSONOutbounds(items []any, format string) ([]map[string]any, [][]strin
 	return proxies, notHonoured, skipped, nil
 }
 
-// singBoxOutboundMapping reads one sing-box outbound. The third result is the
-// fields the outbound named that this build did not map; it comes back with an
-// error too, so the notices ride with the skip when the record produces no
-// node.
 func singBoxOutboundMapping(outbound map[string]any) (map[string]any, bool, []string, error) {
 	kind := strings.ToLower(anyString(outbound["type"]))
 	switch kind {
@@ -1353,29 +1158,6 @@ func mergeFieldSet(fields map[string]struct{}, additions ...string) {
 	}
 }
 
-// unmappedObjectKeys names the keys of a JSON object this build has nowhere to
-// put, as "<prefix>.<key>: not mapped by this importer build", sorted so a
-// report reads the same on every run.
-//
-// It refused until 2026-09-02. The first key it did not list threw the whole
-// record away as `recognized but unsupported`, which was wrong on both counts:
-// nobody had recognised the key, and the node connects without it -- the
-// key asked for something this build cannot give, which is what the notice
-// says, not a reason to withhold the node.
-// A person's subscription found it -- seven vmess nodes, each carrying
-// `"class": 0`, none of them imported, all seven built by upstream, which
-// decodes the same body and reads only the keys it knows. The query keys had
-// stopped refusing on 2026-08-28 for exactly this reason; the twenty-two JSON
-// whitelists calling this function had not, because the parity gate that
-// forced that change cannot see them -- mihomo does not read sing-box or v2ray
-// files, so there is nothing to measure them against. The reader's ruling:
-// one rule for every key this importer reads. The node arrives; the key is
-// named, under the node, as not honoured. Louder than upstream, no longer
-// stricter.
-//
-// Empty values do not count. An exporter that writes `"flow": ""` on every
-// node is not naming a field. A number does count -- `"class": 0` is a value,
-// and it is the one that was reported.
 func unmappedObjectKeys(prefix string, object map[string]any, allowed map[string]struct{}) []string {
 	var notices []string
 	for key, value := range object {
@@ -1388,14 +1170,10 @@ func unmappedObjectKeys(prefix string, object map[string]any, allowed map[string
 	return notices
 }
 
-// unmappedProxyImportFieldNotice is the one sentence for a field nobody maps,
-// so a query key, an SSR body key and a JSON body key all say it the same way.
 func unmappedProxyImportFieldNotice(path string) string {
 	return path + ": not mapped by this importer build"
 }
 
-// proxyImportNoticeMessages turns the raw notices a parser collected into the
-// messages the report carries, spelled the way the share-link door spells them.
 func proxyImportNoticeMessages(notices []string) []string {
 	if len(notices) == 0 {
 		return nil
@@ -1418,13 +1196,6 @@ func importObject(prefix string, raw any) (map[string]any, bool, error) {
 	return object, true, nil
 }
 
-// isAbsentImportValue is the naming predicate: a key whose value is nothing
-// -- nil, blank, [] or {} -- asked for nothing and is not named. A `false` is
-// not nothing. `"verify_cert": false` asks for a node that does not check the
-// certificate, and this build has nowhere to put that; building a checking
-// node and saying so is the ruling, building one in silence is not. The
-// mapping predicate below still folds `false` away, because for the keys it
-// reads a `false` means "leave the default", which is exactly what happens.
 func isAbsentImportValue(value any) bool {
 	switch typed := value.(type) {
 	case nil:
@@ -1574,18 +1345,11 @@ func applySingBoxTransport(proxy map[string]any, raw any) ([]string, error) {
 		proxy["network"] = "h2"
 		proxy["h2-opts"] = map[string]any{"host": anyStringSlice(transport["host"]), "path": anyString(transport["path"])}
 	default:
-		// The field path is an identifier the client looks up, not a sentence --
-		// but this one names another product inside it, and the path is what the
-		// error prints. Renamed to the dialect rather than the product: the
-		// client's table keys off this string, so it stays stable and stays
-		// legible without carrying a competitor's name to a screen.
 		return nil, unsupportedProxyImportField("json.outbound.transport.type", fmt.Sprintf("unsupported transport %q", network))
 	}
 	return notHonoured, nil
 }
 
-// v2rayOutboundMapping reads one v2ray outbound; the third result is what
-// singBoxOutboundMapping's is.
 func v2rayOutboundMapping(outbound map[string]any) (map[string]any, bool, []string, error) {
 	protocol := strings.ToLower(anyString(outbound["protocol"]))
 	switch protocol {
@@ -1869,10 +1633,6 @@ func ensureJSONEOF(decoder *json.Decoder) error {
 	return nil
 }
 
-// proxyImportDialectOnlyJSONKeys names the spellings jsonServerMapping translates
-// away from. An object carrying any of them is a dialect document whatever its
-// `type` says, and handing it to the kernel verbatim would drop the very fields
-// the mapping exists to carry.
 var proxyImportDialectOnlyJSONKeys = queryFieldSet(
 	"host", "server_port", "protocol", "remarks", "remark", "title", "id", "group", "ratio",
 	"encryption", "method", "alter_id", "security", "peer", "serverName", "tlsServerName",
@@ -1880,21 +1640,7 @@ var proxyImportDialectOnlyJSONKeys = queryFieldSet(
 	"shortId", "fastopen",
 )
 
-// jsonObjectIsCanonicalMihomoProxy reports whether a bare JSON object is already
-// written in mihomo's own proxy vocabulary. Such an object reaches the kernel
-// verbatim -- the same treatment it would get inside `{"proxies": [...]}` --
-// because a field ledger in front of the engine we feed makes this importer
-// narrower than the engine itself. Which container the caller happened
-// to wrap the proxy in is not a fact about the proxy.
 func jsonObjectIsCanonicalMihomoProxy(object map[string]any) bool {
-	// The type is not checked against this build's capability registry. That
-	// registry owns share-link schemes, and the kernel's outbound set is wider
-	// than it -- shadowquic, gost-relay, sudoku, openvpn, tailscale and zerotier
-	// are proxies mihomo builds and no share link spells. Consulting it here put
-	// our narrower table in front of the engine again, which is the defect
-	// exists to prevent, only with a different table: the same six types imported
-	// from `{"proxies": [...]}` and came back as an unknown format from a bare
-	// array. Whether a type is a proxy is the kernel's answer to give.
 	if strings.TrimSpace(anyString(object["type"])) == "" {
 		return false
 	}
@@ -1909,9 +1655,6 @@ func jsonObjectIsCanonicalMihomoProxy(object map[string]any) bool {
 	return true
 }
 
-// canonicalJSONProxyArray returns the proxies and the entries it skipped. An
-// entry that is not an object is one record, not the array's verdict: the
-// outbound parser learned that on 2026-08-28 and this one had not.
 func canonicalJSONProxyArray(items []any) ([]map[string]any, []proxyImportIssue) {
 	proxies := make([]map[string]any, 0, len(items))
 	var skipped []proxyImportIssue
@@ -1929,13 +1672,6 @@ func canonicalJSONProxyArray(items []any) ([]map[string]any, []proxyImportIssue)
 	return proxies, skipped
 }
 
-// parseJSONServerArray returns the nodes, the fields each server named that
-// this build did not map parallel to them (notHonoured[i] belongs to
-// proxies[i]; they stay parallel rather than being filed here because a notice
-// is filed under the name the node ends up with, and that is decided later),
-// and the servers it could not read. A server with no port is one record, not
-// the document's verdict; the keys it named ride with its skip because there
-// is no node to file them under.
 func parseJSONServerArray(items []any, defaults map[string]any) ([]map[string]any, [][]string, []proxyImportIssue) {
 	proxies := make([]map[string]any, 0, len(items))
 	notHonoured := make([][]string, 0, len(items))
@@ -1983,7 +1719,6 @@ func jsonServerMapping(server, defaults map[string]any) (map[string]any, []strin
 	kind := strings.ToLower(firstAnyString(server, "type", "protocol"))
 	if kind == "" && defaults != nil {
 		candidate := strings.ToLower(firstAnyString(defaults, "type", "protocol"))
-		// `type: Shadowrocket` names the container, not every server in it.
 		if candidate != "shadowrocket" {
 			kind = candidate
 		}
@@ -2213,8 +1948,6 @@ func parseWireGuardINI(text string) (map[string]any, error) {
 	}
 	if err := validateINISectionKeys(
 		"wireguard.ini.peer", peer,
-		// AllowedIPs belongs to the source routing policy. A proxy outbound
-		// receives routing from mihomo, so it is explicitly metadata-only here.
 		queryFieldSet("publickey", "presharedkey", "endpoint", "persistentkeepalive", "allowedips"),
 	); err != nil {
 		return nil, err
@@ -2289,8 +2022,6 @@ func firstINIValue(section map[string][]string, key string) string {
 type proxyImportRecord struct {
 	scheme string
 	text   string
-	// line counts from one and offset from zero, both into the text the reader
-	// pasted. A reader cannot count records; they can find line 3.
 	line   int
 	offset int
 }
@@ -2303,10 +2034,6 @@ func extractProxyImportRecords(text string) []proxyImportRecord {
 		if index+1 < len(matches) {
 			end = matches[index+1][0]
 		}
-		// Human-facing share sheets commonly wrap a URI in prose. A URI record
-		// never crosses a line boundary; without this bound the next explanatory
-		// line becomes part of the preceding fragment. The next scheme remains a
-		// second bound so multiple records separated by a pipe still work.
 		if lineEnd := strings.IndexAny(text[match[0]:end], "\r\n"); lineEnd >= 0 {
 			end = match[0] + lineEnd
 		}
@@ -2324,35 +2051,13 @@ func extractProxyImportRecords(text string) []proxyImportRecord {
 	return records
 }
 
-// proxyImportRecordClosers pairs each closing mark this trims with the opener
-// that has to be there for it to be prose rather than part of the link.
 var proxyImportRecordClosers = map[rune]rune{
 	')': '(', ']': '[', '}': '{', '>': '<', '"': '"', '\'': '\'', '`': '`',
 	'）': '（', '］': '［', '｝': '｛', '》': '《', '」': '「', '』': '『', '】': '【', '”': '“', '’': '‘',
 }
 
-// proxyImportRecordEdgeTrim is what comes off a record's end regardless of what
-// precedes it: whitespace and the punctuation prose puts after a link.
 const proxyImportRecordEdgeTrim = " \t\r\n|,;.，。、"
 
-// trimProxyImportRecordEdges peels prose off a share link without eating the
-// link's own name.
-//
-// A person's clipboard often carries the URI inside a sentence -- "(use
-// ss://… )" -- so trailing brackets and punctuation come off. The plain trim
-// this replaced took `)` unconditionally, and an airport that ends a node's
-// `…(hy2`. Shadowrocket writes those brackets unencoded and `(hy2)`, `(IEPL)`,
-// `(BGP)` are ordinary airport naming, so this was quietly renaming nodes --
-// and renaming without saying so is the thing the client lanes ruled against,
-// except here nobody knew it was happening.
-//
-// A closing bracket is prose only if an opening one is waiting for it. The
-// check looks at what came before the link on the same line, which is where the
-// opener would be, and keeps the bracket otherwise.
-//
-// Found by the macOS lane on a real airport link. Its first sweep missed it
-// because the fixtures were built with url.QueryEscape, so every bracket in
-// them was percent-encoded -- and a percent-encoded one was never at risk.
 func trimProxyImportRecordEdges(text string, start, end int) string {
 	before := text[:start]
 	if lineStart := strings.LastIndexAny(before, "\r\n"); lineStart >= 0 {
@@ -2374,9 +2079,6 @@ func trimProxyImportRecordEdges(text string, start, end int) string {
 }
 
 func normalizeProxyImportAlias(link, scheme, canonicalType string) string {
-	// CanonicalType is the outbound type, not necessarily the URI spelling.
-	// https and mierus carry semantics/spellings understood by the upstream
-	// converter and therefore must not be rewritten to http/mieru.
 	if scheme == canonicalType || canonicalType == "" || scheme == "https" || scheme == "mierus" ||
 		strings.HasSuffix(scheme, "+realm") {
 		return link
@@ -2388,46 +2090,6 @@ func normalizeProxyImportAlias(link, scheme, canonicalType string) string {
 	return canonicalType + link[separator:]
 }
 
-// makeProxyImportNameUnique gives every imported node a name that is its own.
-//
-// It used to return early on an empty name, and five of the ten schemes reach
-// here with one: ss, trojan, vless, tuic and hysteria2 build their map in this
-// file, while anytls, socks5, http, snell and ssh come back from upstream's
-// converter already carrying host:port. Two unnamed links of the first kind
-// produced a configuration the kernel then refused outright --
-// `proxy  is the duplicate name` (config.go:960) -- so a person who pasted two
-// links without a #fragment got a profile that would not load, and nothing in
-// the import said why.
-//
-// The fallback is the same host:port the other five already use, so the five
-// that were empty now look like the five that were not. That also makes the
-// name usable as identity: the import report names which node a dropped field
-// belonged to, and an empty name would have pointed every notice at whichever
-// blank-named node came first.
-//
-// Found by the iOS lane sampling four schemes and the macOS lane sampling five.
-// This tree's own check had sampled one -- anytls, the scheme where it worked.
-// proxyImportIdentity answers "are these two links the same node" for the
-// client, which is where duplicate collapsing belongs: this function sees only
-// what was pasted just now, while the duplicate a person actually meets is the
-// one already in their profile from last week.
-//
-// The identity is every field the node carries, name included, over the map as
-// it stands before renaming. Both halves of that matter and they pull in
-// opposite directions:
-//
-//   - Including the name keeps two links that differ only in what the airport
-//     called them apart. Same server, same port, same password, one labelled
-//     "HK" and one "TW" is two exits behind one front door, and collapsing them
-//     would take away a choice the person was given.
-//   - Using the name from the link rather than the final one is what lets exact
-//     duplicates collapse at all. makeProxyImportNameUnique turns the second
-//     "HK" into "HK-01", so an identity computed afterwards would find no two
-//     nodes alike and collapse nothing.
-//
-// So this is computed before the rename, and the notices are stamped after it.
-// Nothing here decides what happens to a duplicate; it hands the client the one
-// piece of the judgement that needs to know what a field means to an outbound.
 func proxyImportIdentity(proxy map[string]any) string {
 	canonical, err := json.Marshal(canonicalProxyImportValue(proxy))
 	if err != nil {
@@ -2437,9 +2099,6 @@ func proxyImportIdentity(proxy map[string]any) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// canonicalProxyImportValue rewrites a decoded proxy into a form whose JSON
-// encoding is stable. Go's encoder already sorts map keys, but a value that
-// arrived as a YAML map is map[any]any, which it refuses outright.
 func canonicalProxyImportValue(value any) any {
 	switch typed := value.(type) {
 	case map[string]any:
@@ -2485,10 +2144,6 @@ func makeProxyImportNameUnique(proxy map[string]any, seen map[string]int) {
 	}
 }
 
-// convertProxyShareLinks is the Hako-owned compatibility boundary in front of
-// mihomo's share-link converter. Ecosystem clients have emitted URI dialects
-// that the upstream converter does not reconstruct correctly; normalize those
-// dialects here instead of carrying an Apple-client parser or patching upstream.
 func convertProxyShareLinks(payload []byte, tolerateUnmappedFields bool) ([]map[string]any, error) {
 	text := string(normalizeLegacyVlessPayload(payload))
 	if !proxyImportURLPattern.MatchString(text) {
@@ -2501,12 +2156,6 @@ func convertProxyShareLinks(payload []byte, tolerateUnmappedFields bool) ([]map[
 	for _, record := range records {
 		capability, ok := capabilities[strings.ToLower(record.scheme)]
 		if !ok {
-			// Subscription context: upstream's converter skips a line whose
-			// scheme it does not know (common/convert/converter.go cuts on
-			// "://" and falls through unknown cases), so a subscription that
-			// mixes in one new protocol still yields every other node.
-			// Refusing the whole payload here is what turned one unknown
-			// line into an empty provider.
 			if tolerateUnmappedFields {
 				continue
 			}
@@ -2522,8 +2171,6 @@ func convertProxyShareLinks(payload []byte, tolerateUnmappedFields bool) ([]map[
 			record.text, capability, tolerateUnmappedFields,
 		)
 		if err != nil {
-			// A line of a supported scheme that still does not parse is also
-			// a skipped line upstream, not a dead subscription.
 			if tolerateUnmappedFields {
 				continue
 			}
@@ -2548,55 +2195,14 @@ func proxyImportCapabilityMap() map[string]proxyImportCapability {
 	return capabilities
 }
 
-// parseProxyShareLink is the inspect path's entry, and it tolerates unmapped
-// keys for the same reason ConvertProxiesForIOS does -- which it did not until
-// 2026-08-28, so the two doors disagreed about the same link.
-//
-// This is the door a person actually stands at: the client calls inspect first,
-// to show what was pasted before anything is saved. A link carrying one key
-// this build's whitelist does not list came back with the node skipped, so the
-// report said "nothing imported" while the other entry point, given the same
-// bytes, produced the node. The fix to that whitelist landed on the other door
-// only, and the gate written to hold it measured only that door.
-//
-// The whitelist is not the judgement, it is a lookup. Upstream reads the keys
-// it knows and ignores the rest; a key nobody registered is a key nobody
-// registered, not a broken link.
 func parseProxyShareLink(link string, capability proxyImportCapability) ([]map[string]any, []string, error) {
 	return parseProxyShareLinkTolerating(link, capability, true)
 }
 
-// dropEmptyProxyImportValues removes the keys this importer would otherwise
-// write as an empty string.
-//
-// An absent key and an empty one are the same thing to mihomo's decoder --
-// except where the outbound seeds a default before decoding, and then they are
-// opposites. `simpleObfsOption{Host: "bing.com"}` (adapter/outbound/snell.go:172
-// and shadowsocks.go:322) is the case that showed it: a snell link with
-// `obfs=http` and no host came out carrying `obfs-opts.host: ""`, which
-// replaced upstream's bing.com with nothing, and an HTTP obfs sending an empty
-// Host header is the shape a middlebox drops. Seven of seven probe links wrote
-// at least one empty value; ws-opts.path, grpc-opts.grpc-service-name,
-// plugin-opts.host and hysteria2's sni were the others.
-//
-// Omitting is never worse than writing empty: where no default exists the
-// decoder produces the same zero value either way, and where one exists the
-// person keeps it. So this is a blanket sweep rather than a list of the fields
-// that were found, which would go stale the next time a constructor writes one.
-//
-// The macOS lane found this by printing what the importer produced rather than
-// by reading it. In source, `obfs-opts` with a `host` key looks entirely
-// correct.
 func dropEmptyProxyImportValues(value any) {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, inner := range typed {
-			// `name` is the exception, and it is one because it is filled in
-			// later rather than because an empty one is wanted. A link with no
-			// #fragment reaches here nameless and gets host:port from
-			// makeProxyImportNameUnique -- but adapter.ParseProxy runs first, and
-			// mihomo requires the key to be present: sweeping it away turned five
-			// schemes' unnamed links into `'' has unset fields: name`.
 			if key == "name" {
 				continue
 			}
@@ -2613,40 +2219,10 @@ func dropEmptyProxyImportValues(value any) {
 	}
 }
 
-// certificatePinOrNothing returns the value only when mihomo can use it as a
-// certificate pin, and "" otherwise.
-//
-// `fingerprint` means two different things across this family. On vless and
-// vmess an exporter writes a uTLS browser name into it and this importer maps
-// it to client-fingerprint; on hysteria, hysteria2, tuic and trojan the field
-// mihomo calls `fingerprint` is a certificate pin and wants sha256 hex.
-// Exporters paste the same `fingerprint=chrome` onto every scheme, and mapping
-// it onto the pin field made adapter.ParseProxy refuse the node -- upstream
-// ignored the key entirely and imported a working one.
-//
-// The check is upstream's own verifier rather than a shape test written here,
-// so it cannot drift from what the outbound will accept: it is the function
-// that produces the refusal being avoided.
-// proxyTypesThatVerifyTheirFingerprint is the set of outbounds that run
-// mihomo's pin verifier while the node is being parsed, so a value it cannot
-// use costs the node instead of being ignored.
-//
-// The rest accept anything in the field: trojan, vmess, vless, anytls and ss
-// all load with `fingerprint: chrome`. Filtering there would be this tree
-// refusing what the kernel accepts, which is the defect this whole family is,
-// so the check is scoped to where not filtering loses the node.
-//
-// The set is measured, not asserted: TestOnlySomeOutboundsVerifyTheirFingerprint
-// drives adapter.ParseProxy for every type here and every type not here, so the
-// day upstream starts or stops verifying one, the list is wrong out loud.
 var proxyTypesThatVerifyTheirFingerprint = map[string]struct{}{
 	"hysteria": {}, "hysteria2": {}, "tuic": {},
 }
 
-// hysteria2CertificatePin is the alias normaliser's view of the same check.
-// The branch it sits in is hysteria2's, and at that point there is no proxy map
-// to read a type from -- the query is still being rewritten for upstream's
-// converter to read.
 func hysteria2CertificatePin(value string) string {
 	return certificatePinOrNothing("hysteria2", value)
 }
@@ -2664,17 +2240,6 @@ func certificatePinOrNothing(proxyType, value string) string {
 	return value
 }
 
-// realityPublicKeyOrNothing returns the value only when mihomo can build a
-// REALITY config from it.
-//
-// Same shape as the pin: `pbk` arrives on schemes whose outbound has no Reality
-// transport at all (registered as not honoured), and on the ones that do it can
-// still be a key an exporter invented. Writing it anyway cost the node, while
-// upstream -- which does not read the key on these schemes -- imported it.
-//
-// This is the distinction to keep when reading the not-honoured table: a
-// missing Reality key is tolerated, a malformed one is not silently accepted.
-// It is not that Reality stopped being validated.
 func realityPublicKeyOrNothing(value string) string {
 	if value == "" {
 		return ""
@@ -2696,11 +2261,6 @@ func parseProxyShareLinkTolerating(
 	for _, proxy := range proxies {
 		dropEmptyProxyImportValues(proxy)
 	}
-	// A key in a vmess base64-JSON body that this build does not map is named
-	// the way an unmapped query key is, and it is never a refusal: the query
-	// keys answer to tolerateUnmapped because one self-test still asks for the
-	// strict reading, but the body keys were released outright on 2026-09-02
-	// (see unmappedObjectKeys), and nothing asks for them to refuse.
 	notHonoured = append(notHonoured, bodyNotHonoured...)
 	if portRange != "" {
 		notHonoured = append(notHonoured, capability.Scheme+".authority.ports="+portRange+
@@ -2709,9 +2269,6 @@ func parseProxyShareLinkTolerating(
 	return proxies, notHonoured, parseErr
 }
 
-// parseProxyShareLinkRecord returns the nodes, the port range a hopping link
-// carried, and the keys of a vmess base64-JSON body this build did not map
-// (nil for every other spelling).
 func parseProxyShareLinkRecord(link string, capability proxyImportCapability) ([]map[string]any, string, []string, error) {
 	var (
 		vmessJSON       map[string]any
@@ -2752,10 +2309,6 @@ func parseProxyShareLinkRecord(link string, capability proxyImportCapability) ([
 		return proxies, "", nil, err
 	}
 
-	// From here on every failure returns bodyNotHonoured with it. A vmess body
-	// with no `ps` is dropped by upstream's converter and yields no node; the
-	// keys it named that nobody maps then ride with the skip, the way a
-	// container record's do, instead of vanishing with the record.
 	normalized, parsed, portRange, err := normalizeProxyShareLinkDialect(link, capability)
 	if err != nil {
 		return nil, "", bodyNotHonoured, err
@@ -2778,9 +2331,6 @@ func parseProxyShareLinkRecord(link string, capability proxyImportCapability) ([
 	return proxies, portRange, bodyNotHonoured, nil
 }
 
-// parseVMessJSONShareLinkFields reads the base64-JSON body of a vmess link.
-// The second result names the body keys this build does not map; the third
-// says whether the link was that spelling at all.
 func parseVMessJSONShareLinkFields(link string) (map[string]any, []string, bool, error) {
 	trimmed := strings.TrimSpace(link)
 	if !strings.HasPrefix(strings.ToLower(trimmed), "vmess://") {
@@ -2839,35 +2389,18 @@ func applyVMessJSONShareLinkFields(proxy map[string]any, values map[string]any) 
 	}
 }
 
-// proxyImportUnhonouredFields names, per canonical type, the exporter fields this
-// build accepts and then does not act on, and why. Refusing the whole record over
-// one of these costs the reader a node that would have worked; honouring it is not
-// possible because the kernel has nowhere to put it. So the record imports and the
-// field is named in the report instead.
-//
-// Membership is the registration the ruling requires: a field reaches this table
-// only after being looked up in the kernel's option struct and found to have no
-// equivalent, with that finding written next to it. Anything not in the table --
-// including a field nobody has looked up yet -- still refuses the whole record,
-// because the one that bit us (mport) was connection-critical and a blanket
-// pass-through would have produced a node that looks complete and cannot connect.
 const proxyImportMasqueNoWireGuardFields = "mihomo's masque outbound authenticates with a key pair and has no equivalent for these WireGuard-shaped fields"
 
 const proxyImportSnellNoTLS = "mihomo's snell outbound has no TLS, so there is nothing for this field to configure"
 
 const proxyImportMieruNoTLS = "mihomo's mieru outbound has no TLS, so there is nothing to configure with it"
 
-// The sentence is generated rather than written out per scheme so that the nine
-// entries above cannot drift into nine slightly different explanations of the
-// same fact.
 func proxyImportNoRealityTransport(display string) string {
 	return "mihomo's " + display + " outbound has no Reality transport"
 }
 
 var proxyImportUnhonouredFields = map[string]map[string]string{
 	"socks5": {
-		// adapter/outbound/socks5.go: Socks5Option carries tls, skip-cert-verify,
-		// fingerprint and certificate, and no server-name or alpn field.
 		"alpn":          "mihomo's socks5 outbound has no alpn field",
 		"peer":          "mihomo's socks5 outbound has no server-name field",
 		"sni":           "mihomo's socks5 outbound has no server-name field",
@@ -2884,13 +2417,8 @@ var proxyImportUnhonouredFields = map[string]map[string]string{
 		"mux": proxyImportMuxNotHonoured,
 	},
 	"snell": {
-		// adapter/outbound/snell.go: SnellOption carries psk, version, reuse and
-		// obfs-opts -- no TLS. The exporter writes these when TLS parameters were
-		// fed to a snell node; they mean nothing here.
 		"security": "mihomo's snell outbound has no TLS or security field",
 		"alpn":     "mihomo's snell outbound has no TLS, so there is no ALPN to set",
-		// The same fact, reached from the other direction: these arrive on snell
-		// links from exporters that write a TLS block onto every scheme.
 		"keepalive":   "mihomo's snell outbound has no keepalive field",
 		"fingerprint": proxyImportSnellNoTLS,
 		"hpkp":        proxyImportSnellNoTLS,
@@ -2898,28 +2426,6 @@ var proxyImportUnhonouredFields = map[string]map[string]string{
 		"sid":         proxyImportSnellNoTLS,
 		"shortId":     proxyImportSnellNoTLS,
 	},
-	// The nine families below were refusing the whole node from inside their
-	// constructors, and the fix is where they are written, not how loudly.
-	//
-	// Ask the macOS lane's question of each: drop this field, and is the rest
-	// still the same usable node? A keepalive is a local timer that never
-	// reaches the wire. A `sni` on WireGuard names a TLS layer WireGuard does
-	// not have. Reality keys on a protocol whose outbound has no Reality
-	// transport cannot be acted on either way. In every one of them the answer
-	// is yes, and refusing cost the user a node that would have worked.
-	//
-	// Reality deserves the argument spelled out, because refusing looks
-	// defensible: if the server really is Reality, a node built without it will
-	// not connect. But nothing in the link distinguishes "this server is
-	// Reality" from "the airport's template leaked a key it pastes into every
-	// scheme", and the user's own subscription tonight carried exactly that
-	// kind of leaked key. Upstream ignores these and connects. So refusing wins
-	// nothing when the key is real (both sides fail to connect) and loses a
-	// working node when it is not. It can only lose.
-	//
-	// What stays a refusal is a different shape entirely: a document that
-	// describes several distinct servers when only one is representable. That
-	// is not a dropped field, it is picking a server the user did not pick.
 	"anytls": {
 		"keepalive": "mihomo's anytls outbound has no keepalive field",
 		"pbk":       proxyImportNoRealityTransport("AnyTLS"),
@@ -2949,9 +2455,6 @@ var proxyImportUnhonouredFields = map[string]map[string]string{
 		"sid":       proxyImportNoRealityTransport("HTTP proxy"),
 		"shortId":   proxyImportNoRealityTransport("HTTP proxy"),
 	},
-	// adapter/outbound/mieru.go: MieruOption has transport, multiplexing and
-	// handshake-mode, and no TLS of any kind. Every TLS-shaped key an airport
-	// pastes onto a mieru link names a layer that is not there.
 	"mieru": {
 		"peer":             proxyImportMieruNoTLS,
 		"sni":              proxyImportMieruNoTLS,
@@ -2971,10 +2474,6 @@ var proxyImportUnhonouredFields = map[string]map[string]string{
 		"sni":  "mihomo's wireguard outbound has no TLS, so there is no server name to set",
 		"peer": "mihomo's wireguard outbound has no TLS, so there is no server name to set",
 	},
-	// adapter/outbound/masque.go: MasqueOption authenticates with a key pair and
-	// has no pre-shared key, no password and no reserved bytes. Every one of
-	// these is WireGuard-shaped, and an exporter that fed a WireGuard node into
-	// a masque link left them behind.
 	"masque": {
 		"presharedKey":   proxyImportMasqueNoWireGuardFields,
 		"preSharedKey":   proxyImportMasqueNoWireGuardFields,
@@ -2983,66 +2482,18 @@ var proxyImportUnhonouredFields = map[string]map[string]string{
 		"keepalive":      proxyImportMasqueNoWireGuardFields,
 		"reserved":       proxyImportMasqueNoWireGuardFields,
 	},
-	// adapter/outbound/ssh.go: SSHOption has no keepalive, and no path -- the
-	// key travels in private-key, not as a filename this process could read.
 	"ssh": {
 		"keepalive": "mihomo's ssh outbound has no keepalive field",
 		"path":      "mihomo's ssh outbound takes the key itself in private-key, not a path to read it from",
 	},
 	"ss": {
-		// adapter/outbound/shadowsocks.go: ShadowSocksOption carries no TLS of any
-		// kind. The exporter writes security=1 when a reality/TLS input was fed to
-		// an ss node; it means nothing on ss and there is nowhere to put it.
 		"security": "mihomo's ss outbound has no TLS or security field",
 		"alpn":     "mihomo's ss outbound has no TLS, so there is no ALPN to set",
 	},
 }
 
-// proxyImportMuxNotHonoured is why `mux=1` is accepted and not acted on for the
-// three protocols the exporter writes it for. mihomo does have a top-level
-// `smux` block (adapter/parser.go), but it speaks sing-mux; the exporter's mux is
-// v2ray's mux.cool. They are not the same wire protocol, so translating the flag
-// would build a node that negotiates a multiplexer the server does not run.
 const proxyImportMuxNotHonoured = "mihomo's multiplexer (smux / sing-mux) is not the v2ray mux the exporter means, so the flag is not translated"
 
-// tolerateUnmapped decides what an unmapped query key means.
-//
-// Every product door passes true. It started as two answers for two callers
-// -- a reader pasting one link was refused so the field got named, a
-// subscription was tolerated because nobody is watching and upstream's own
-// converter ignores query keys it does not know (common/convert/converter.go;
-// the reader's ruling, 2026-08-25: aligning with upstream is the baseline,
-// being stricter than it is a defect unless a platform requirement forces it,
-// and nothing about an unknown query key touches the Network Extension
-// guards). On 2026-08-28 the pasted link stopped refusing too: parse what
-// parses, skip what does not, say what was skipped. The strict reading is
-// kept only because provider_subscription_tolerance_test.go still asks for
-// it; nothing a person reaches does. Tolerating still reports the field as
-// not honoured, so this stays louder than upstream rather than quieter.
-//
-// The JSON body keys -- sing-box, v2ray, Shadowrocket/SIP008/SSD servers, the
-// vmess base64-JSON body -- do not consult this flag at all since 2026-09-02:
-// they are named and never refused (unmappedObjectKeys).
-// unbuildableProxyImportPlugin names the plugin this build cannot construct, or
-// returns "" when there is nothing to say.
-//
-// One predicate, read twice: here for the notice, and by the constructors for
-// the decision to leave the plugin unset. Two copies of "can this be built"
-// would be two answers the day one of them learns a new plugin.
-// proxyImportPluginMode normalises a plugin's mode to the spelling mihomo
-// accepts, and returns "" when there is no such spelling.
-//
-// Measured against adapter.ParseProxy rather than read off the source: simple
-// obfs takes http and tls, v2ray-plugin takes websocket and nothing else -- not
-// even `ws`, which is what exporters write. Case is folded because
-// `OBFS-LOCAL;OBFS=HTTP` is the same plugin as `obfs-local;obfs=http` written
-// by a different tool, and `ws` is mapped because it is the same transport
-// under the name every other part of this format uses for it.
-//
-// A mode with no accepted spelling makes the plugin unbuildable. Writing it
-// through would produce a node the kernel then refuses -- this tree emitting a
-// value it knows will not load, which is the failure it spent the day removing
-// in the other direction.
 func proxyImportPluginMode(pluginName, raw string) string {
 	mode := strings.ToLower(strings.TrimSpace(raw))
 	switch {
@@ -3080,9 +2531,6 @@ func unbuildableProxyImportPlugin(canonicalType, raw string) string {
 		return ""
 	}
 	if strings.Contains(lower, "obfs") {
-		// trojan carries obfs over websocket only; simple-obfs takes http or tls.
-		// Either way a mode with no accepted spelling means no plugin, not no
-		// node.
 		if canonicalType == "trojan" {
 			if mode := strings.ToLower(firstQueryValue(values, "obfs", "mode")); mode == "websocket" || mode == "ws" {
 				return ""
@@ -3104,7 +2552,7 @@ func validateProxyShareLinkQueryFields(link string, capability proxyImportCapabi
 	if capability.CanonicalType == "trusttunnel" {
 		parsed, err := url.Parse(strings.TrimSpace(link))
 		if err == nil && parsed.Hostname() == "" {
-			return nil, nil // The raw query is the official base64url TLV payload.
+			return nil, nil
 		}
 	}
 	parsed, err := url.Parse(strings.TrimSpace(link))
@@ -3118,22 +2566,10 @@ func validateProxyShareLinkQueryFields(link string, capability proxyImportCapabi
 	}
 	unhonoured := proxyImportUnhonouredFields[capability.CanonicalType]
 	var notHonoured []string
-	// The plugin is judged here rather than where it is built, because this is
-	// the side of the parse that can say something. A name this build cannot
-	// construct leaves the node without a plugin -- upstream's own answer -- and
-	// silence there would hand back a node that looks whole and behaves
-	// differently.
 	if reason := unbuildableProxyImportPlugin(capability.CanonicalType, parsed.Query().Get("plugin")); reason != "" {
 		notHonoured = append(notHonoured, capability.Scheme+".query.plugin: "+reason)
 	}
 	for key := range parsed.Query() {
-		// The unhonourable table is consulted first, and the order is the whole
-		// point. A key can be both registered and unhonourable: registered means
-		// "this importer knows the key", unhonourable means "the outbound has
-		// nowhere to put it". Judging the ledger first made the second table
-		// unreachable for every key in both, which is exactly the population it
-		// exists for -- nine such families were instead refusing the whole node
-		// from inside their constructors.
 		if reason, registered := unhonoured[key]; registered {
 			notHonoured = append(notHonoured, capability.Scheme+".query."+key+": "+reason)
 			continue
@@ -3154,14 +2590,6 @@ func validateProxyShareLinkQueryFields(link string, capability proxyImportCapabi
 	return notHonoured, nil
 }
 
-// SSR keeps its own whitelist because its query lives inside the base64 body,
-// and it tolerates an unlisted key for the reason every other scheme does.
-//
-// It was missed when the rest of the import surface stopped refusing over
-// unmapped keys, which is what a second copy of a rule does: the rule moved and
-// the copy did not. It is still a separate function -- the query is not where
-// url.Parse would look for it -- but the tolerance is now the caller's decision
-// rather than this function's.
 func validateSSRShareLinkFields(link string, tolerateUnmapped bool) ([]string, error) {
 	_, payload, ok := strings.Cut(strings.TrimSpace(link), "://")
 	if !ok {
@@ -3205,25 +2633,8 @@ func singletonProxy(proxy map[string]any, err error) ([]map[string]any, error) {
 	return []map[string]any{proxy}, nil
 }
 
-// Hysteria 2 accepts a hopping list where a port would go -- "443,5000-6000" or
-// a bare range -- and url.Parse refuses it, because a port must be numeric. This
-// mirrors upstream's own splitHysteria2Ports (common/convert/v.go): the port
-// becomes the first entry of the spec and the spec itself moves to mihomo's
-// `ports` key, so the kernel stays the validator for the exact grammar. Reading
-// it here rather than letting the upstream converter do it keeps the ledger able
-// to grade the query, and keeps the two answers identical -- verified against
-// TestConvertsV2Ray_hysteria2PortHopping.
-//
-// IPv6 literals are left alone, exactly as upstream leaves them: it returns
-// early on any authority containing "]", so honouring them here would make the
-// importer disagree with the core it feeds.
-// proxyImportPortHoppingTypes are the outbounds whose option struct actually has
-// a `ports` field (adapter/outbound/hysteria.go, hysteria2.go). Everything else
-// can only use the first port of a range.
 var proxyImportPortHoppingTypes = map[string]struct{}{"hysteria": {}, "hysteria2": {}}
 
-// normalizeEncodedAuthorityPortRange rewrites a base64-wrapped authority whose
-// endpoint carries a port range, leaving the wrapping intact.
 func normalizeEncodedAuthorityPortRange(link string) (string, string, bool) {
 	separator := strings.Index(link, "://")
 	if separator < 0 {
@@ -3249,10 +2660,6 @@ func normalizeEncodedAuthorityPortRange(link string) (string, string, bool) {
 	return head + base64.RawURLEncoding.EncodeToString([]byte(credentials+"@"+rewritten)) + tail, spec, true
 }
 
-// splitHostPortRange takes the first port out of `host:START-END`, which is how
-// the exporter writes a port range once the authority has been decoded. It
-// returns the rewritten host:port and the range it found; an ordinary host:port
-// comes back unchanged with an empty range.
 func splitHostPortRange(hostPort string) (string, string) {
 	if strings.Contains(hostPort, "]") {
 		return hostPort, ""
@@ -3269,15 +2676,6 @@ func splitHostPortRange(hostPort string) (string, string) {
 	return host + ":" + spec[:cut], spec
 }
 
-// normalizeShareLinkPortRange lifts the exporter's port range out of the
-// authority. Shadowrocket normalises `?mport=40000-50000` into `host:40000-50000`
-// for every protocol alike, while url.Parse rejects that as a port -- so reading
-// it per-protocol left six of seven refusing a link the exporter routinely emits.
-// The range belongs to the authority, not to hysteria2.
-//
-// It returns the rewritten link and the range it found. Only hysteria and
-// hysteria2 can act on the range; for the rest the first port is the node and the
-// caller names the range as not honoured.
 func normalizeShareLinkPortRange(link string, supportsHopping bool) (string, string, bool) {
 	separator := strings.Index(link, "://")
 	if separator < 0 {
@@ -3323,7 +2721,6 @@ func normalizeShareLinkPortRange(link string, supportsHopping bool) (string, str
 	if err != nil {
 		return link, "", false
 	}
-	// An explicit query spelling wins: the reader wrote it on purpose.
 	if supportsHopping && firstQueryValue(values, "ports", "mport") == "" {
 		values.Set("ports", spec)
 	}
@@ -3334,8 +2731,6 @@ func normalizeShareLinkPortRange(link string, supportsHopping bool) (string, str
 	return rewritten + fragment, spec, true
 }
 
-// appendShareLinkQueryDefault adds a query key only when the link does not
-// already carry it, so an explicit value from the exporter always wins.
 func appendShareLinkQueryDefault(link, key, value string) string {
 	parsed, err := url.Parse(link)
 	if err != nil {
@@ -3369,29 +2764,16 @@ func normalizeProxyShareLinkDialect(link string, capability proxyImportCapabilit
 		if normalized, ok := normalizeEncodedUserinfo(canonicalLink); ok {
 			canonicalLink = normalized
 		}
-		// adapter/outbound/mieru.go rejects anything but TCP or UDP, and the
-		// exporter drops the key from its own output -- it carries the value in
-		// only one direction because TCP is the only transport it offers. Reading
-		// the omission as "unset" refuses a link it produces by default.
 		canonicalLink = appendShareLinkQueryDefault(canonicalLink, "transport", "TCP")
 	}
 	if scheme == "ssocks" || scheme == "ssocks5" {
-		// The exporter spells "SOCKS5 over TLS" in the scheme, not in a query key:
-		// it emits ssocks:// for both aliases and carries `tls=1` only when the
-		// user typed it. The scheme is the statement, so the alias rewrite to
-		// socks5:// has to carry it or the TLS half is lost with the spelling.
 		canonicalLink = appendShareLinkQueryDefault(canonicalLink, "tls", "1")
 	}
 	if scheme == "ss" {
-		// ss wraps its whole authority in base64, so the range is invisible to the
-		// scheme-agnostic reader below and goes straight to the upstream converter,
-		// which refuses it. Unwrap, take the first port, wrap again.
 		if normalized, spec, ok := normalizeEncodedAuthorityPortRange(canonicalLink); ok {
 			canonicalLink, portRange = normalized, spec
 		}
 	}
-	// Every scheme, not just the hopping ones: the exporter writes the range into
-	// the authority for all of them alike, and url.Parse refuses it as a port.
 	_, supportsHopping := proxyImportPortHoppingTypes[capability.CanonicalType]
 	if normalized, spec, ok := normalizeShareLinkPortRange(canonicalLink, supportsHopping); ok {
 		canonicalLink = normalized
@@ -3405,9 +2787,6 @@ func normalizeProxyShareLinkDialect(link string, capability proxyImportCapabilit
 	}
 	normalizeShadowrocketRawQuery(parsed)
 	query := parsed.Query()
-	// The exporter fills an unset field with `none` instead of omitting the key.
-	// Left in, it reaches the kernel as a literal protocol or congestion-control
-	// name; the snell spelling of the same habit refused the record outright.
 	for _, key := range proxyImportUnsetPlaceholderKeys[capability.CanonicalType] {
 		if strings.EqualFold(query.Get(key), "none") {
 			query.Del(key)
@@ -3432,8 +2811,6 @@ func normalizeProxyShareLinkDialect(link string, capability proxyImportCapabilit
 			query.Set("flow", "xtls-rprx-vision")
 		}
 		setQueryAlias(query, "fp", "fingerprint")
-		// vmess and vless do not verify this field, so nothing is gained by
-		// filtering it and a value the kernel accepts would be lost.
 		setQueryAlias(query, "pcs", "hpkp")
 		setUsableQueryAlias(query, "pbk", realityPublicKeyOrNothing, "publicKey")
 		setQueryAlias(query, "sid", "shortId")
@@ -3477,11 +2854,6 @@ func normalizeProxyShareLinkDialect(link string, capability proxyImportCapabilit
 	return parsed.String(), parsed, portRange, nil
 }
 
-// normalizeEncodedUserinfo unwraps a base64 `user:password` that the exporter
-// wrote into the username position with an empty password after it. Upstream
-// reads User.Username() and User.Password() raw, so the whole encoded pair became
-// the username and the password came out empty -- the same shape as the authority
-// prefix it writes for vless, one field over.
 func normalizeEncodedUserinfo(link string) (string, bool) {
 	parsed, err := url.Parse(link)
 	if err != nil || parsed.User == nil {
@@ -3511,12 +2883,6 @@ func normalizeEncodedProxyAuthority(link string) (string, bool) {
 	if err != nil {
 		return link, false
 	}
-	// The question is whether what decoded is an authority, and the host-and-port
-	// check below answers it. An `@` is only the half that appears when there are
-	// credentials, and requiring it refused every unauthenticated socks node the
-	// exporter writes -- it base64s `host:port` the same way it base64s
-	// `user:pass@host:port`, and both are legal (socks.en.md lists username and
-	// password as optional).
 	authority, err := url.Parse(parsed.Scheme + "://" + string(decoded))
 	if err != nil || authority.Hostname() == "" || authority.Port() == "" {
 		return link, false
@@ -3539,7 +2905,6 @@ func parseLegacyVMessShareLink(link string) (map[string]any, string, bool, error
 	}
 	if decoded, decodeErr := convert.TryDecodeBase64(parsed.Host); decodeErr == nil {
 		if trimmed := bytes.TrimSpace(decoded); len(trimmed) > 0 && trimmed[0] == '{' {
-			// The JSON payload spelling belongs to another reader.
 			return nil, "", false, nil
 		}
 	}
@@ -3613,24 +2978,9 @@ func parseLegacyVMessShareLink(link string) (map[string]any, string, bool, error
 	return proxy, droppedPorts, true, nil
 }
 
-// applyWebsocketDialect translates the one spelling Shadowrocket uses for
-// websocket, whatever protocol carries it: obfs names the transport, obfsParam
-// carries the Host header, path carries the path. It used to live inside the
-// legacy VMess reader alone, so the same link imported as vmess got ws and as
-// vless got tcp -- a node that looks complete and cannot connect. The dialect
-// belongs to the exporter, not to one protocol's branch.
-// applyTransportDialect maps the exporter's `obfs=` transport spelling onto the
-// kernel's `network` plus its per-transport options. The exporter states the
-// transport in `obfs` for every protocol that can carry one, so this is one
-// reader for all of them -- and it covers every value it emits, not just
-// websocket: grpc arrives the same way, with `path` holding the service name
-// rather than a URL path.
 func applyTransportDialect(proxy map[string]any, query url.Values) {
 	obfs := strings.ToLower(query.Get("obfs"))
 	if obfs == "" && query.Get("obfsParam") != "" {
-		// The exporter drops `obfs=websocket` from its own canonical output and
-		// leaves `obfsParam` and `path` behind, so requiring the key missed the
-		// most common websocket node there is: one exported from Shadowrocket.
 		obfs = "websocket"
 	}
 	switch obfs {
@@ -3663,11 +3013,6 @@ func applyProxyShareLinkDialect(proxy map[string]any, parsed *url.URL) error {
 		if pin := certificatePinOrNothing(anyString(proxy["type"]), firstQueryValue(query, "hpkp", "pcs")); pin != "" {
 			proxy["fingerprint"] = pin
 		}
-		// Neither the upstream converter nor this branch read these, so a node
-		// exported with either came back without it -- accepted by the ledger,
-		// dropped on the floor. `fingerprint` here is the uTLS profile the exporter
-		// means, which is mihomo's `client-fingerprint`; its certificate pin
-		// arrives as hpkp/pcs and is handled above.
 		if alpn := splitListValues(query["alpn"]); len(alpn) > 0 {
 			if _, present := proxy["alpn"]; !present {
 				proxy["alpn"] = alpn
@@ -3700,24 +3045,6 @@ func applyProxyShareLinkDialect(proxy map[string]any, parsed *url.URL) error {
 			return err
 		}
 	case "ss":
-		// `udp` is registered above but deliberately NOT read here, and the
-		// distinction matters. Upstream sets ss["udp"] = true unconditionally
-		// (common/convert/converter.go:452) and never looks at the query, so the
-		// key carries no meaning on this protocol -- reading it would invent a
-		// semantics upstream does not have, and reading it as a switch would let
-		// `udp=0` turn off something upstream leaves on. Measured against
-		// convert.ConvertsV2Ray for three shapes: absent, udp=0, and plain
-		// trojan all come back with udp true on both sides.
-		//
-		// Registration alone is the right answer here: the key stops refusing
-		// the link and changes nothing else. That is a third disposition beside
-		// "honour it" and "refuse it" -- the field is simply not a field on this
-		// protocol. Raised by the macOS lane while reading upstream's converter.
-		// The exporter spells an ss obfuscation two ways, and upstream reads the
-		// `plugin=` one only on the plain-authority path: an ss link whose whole
-		// authority is base64 -- its default for ss -- reached the kernel with no
-		// plugin at all, websocket or http alike. So both spellings are mapped here
-		// and written onto the proxy, whatever path the authority took.
 		if plugin := query.Get("plugin"); plugin != "" {
 			name, values, err := parseShadowrocketPlugin(plugin)
 			if err != nil {
@@ -3730,14 +3057,6 @@ func applyProxyShareLinkDialect(proxy map[string]any, parsed *url.URL) error {
 			lowerName := strings.ToLower(name)
 			switch {
 			case strings.Contains(lowerName, "obfs"):
-				// This overwrites whatever upstream's converter already put here
-				// rather than deferring to it, and the reason is narrow:
-				// upstream reads the plugin's subfields case sensitively
-				// (common/convert/converter.go:303), so `OBFS=http` leaves it
-				// writing an empty mode -- a node the kernel then refuses with
-				// `obfs mode error:`. Deferring meant passing that through. What
-				// is written here is normalised against what adapter.ParseProxy
-				// accepts, so it is either usable or absent.
 				mode := proxyImportPluginMode(name, firstQueryValue(values, "obfs", "mode"))
 				if mode == "" {
 					delete(proxy, "plugin")
@@ -3771,24 +3090,10 @@ func applyProxyShareLinkDialect(proxy map[string]any, parsed *url.URL) error {
 					proxy["plugin-opts"] = opts
 				}
 			default:
-				// A plugin this build cannot construct leaves the node without
-				// one, which is exactly what upstream does: its converter looks
-				// the name up, finds nothing, and hands back a map with no
-				// plugin key at all -- measured, and the kernel loads it. The
-				// refusal here was stricter than the whole chain below it.
-				//
-				// The reader's ruling on 2026-08-28 settles the argument that
-				// kept it: a node missing its obfs will not reach a server that
-				// expects one, and that is true, but it is equally true of the
-				// node upstream produces, and refusing costs the person a node
-				// that would have worked whenever the plugin was junk an
-				// exporter left behind. The field is named in the report.
 				delete(proxy, "plugin")
 				delete(proxy, "plugin-opts")
 			}
 		} else if obfs := strings.ToLower(query.Get("obfs")); obfs == "websocket" || obfs == "ws" {
-			// The same websocket dialect vmess, vless and trojan already read
-			// on ss it maps to v2ray-plugin, per upstream's ss.md.
 			opts := map[string]any{"mode": "websocket"}
 			if host := firstQueryValue(query, "obfsParam", "obfs-host", "host"); host != "" {
 				opts["host"] = host
@@ -3839,16 +3144,10 @@ func applyProxyShareLinkDialect(proxy map[string]any, parsed *url.URL) error {
 		if pin := certificatePinOrNothing(anyString(proxy["type"]), firstQueryValue(query, "hpkp", "fingerprint")); pin != "" {
 			proxy["fingerprint"] = pin
 		}
-		// Same spelling, same meaning, same reason as socks5 below.
 		if strings.EqualFold(firstQueryValue(query, "security"), "tls") {
 			proxy["tls"] = true
 		}
 	case "socks5":
-		// security=tls means the same thing as tls=1, and security=none means
-		// the same as its absence. Reading only the boolean spelling accepted
-		// the key and then dropped what it said, which is worse than refusing:
-		// the node would import as plaintext and fail at dial time with nothing
-		// pointing back at the link.
 		if queryBoolean(query, "tls") || strings.EqualFold(firstQueryValue(query, "security"), "tls") {
 			proxy["tls"] = true
 		}
@@ -3875,10 +3174,6 @@ func applyShadowrocketTrojanPlugin(proxy map[string]any, raw string) error {
 		return err
 	}
 	if !strings.Contains(strings.ToLower(name), "obfs") {
-		// Same as ss: upstream drops the plugin key and the kernel loads the
-		// node. Measured, not assumed. Returning here rather than falling
-		// through matters -- the checks below read the plugin's own options,
-		// which a plugin that is not obfs does not have.
 		return nil
 	}
 	allowed := queryFieldSet("pluginName", "obfs", "obfs-host", "obfs-uri", "mode", "host", "path")
@@ -3887,10 +3182,6 @@ func applyShadowrocketTrojanPlugin(proxy map[string]any, raw string) error {
 	}
 	mode := strings.ToLower(firstQueryValue(values, "obfs", "mode"))
 	if mode != "websocket" && mode != "ws" {
-		// mihomo's trojan has no simple-obfs transport, only websocket, so an
-		// obfs mode that is not websocket has nowhere to go -- and refusing over
-		// it costs a node upstream imports. The plugin is left off and the field
-		// is named, the same answer as an unbuildable plugin name.
 		return nil
 	}
 	proxy["network"] = "ws"
@@ -3903,19 +3194,6 @@ func applyShadowrocketTrojanPlugin(proxy map[string]any, raw string) error {
 	return nil
 }
 
-// parseShadowrocketPlugin reads `name;key=value;key=value`, and folds the
-// subfield names to lower case.
-//
-// Exporters do not agree on case: `obfs-local;obfs=http`,
-// `OBFS-LOCAL;OBFS=HTTP` and `Obfs-Local;Obfs=Http` are the same plugin
-// written three ways, and this build recognised the plugin name in all three
-// (it already lowered that) and then refused the record over the subfield
-// spelling. Upstream never gets that far -- its own plugin lookup is case
-// sensitive, so an upper-case name simply drops the plugin and the node loads
-// without one -- which means refusing was worse than upstream on input
-// upstream handles, while mapping it is better than upstream on the same
-// input. The values are left exactly as written; only the names are folded,
-// because a name is a spelling and a value is the person's data.
 func parseShadowrocketPlugin(raw string) (string, url.Values, error) {
 	values, err := url.ParseQuery("pluginName=" + strings.ReplaceAll(raw, ";", "&"))
 	if err != nil {
@@ -3932,40 +3210,16 @@ func parseShadowrocketPlugin(raw string) (string, url.Values, error) {
 	return name, folded, nil
 }
 
-// validateNestedQueryFields no longer refuses over a subfield it does not know,
-// for the reason nothing else on this surface does: upstream drops the whole
-// plugin rather than reading its parts, so a subfield spelling cannot be worth
-// a node here when it is worth nothing there.
-//
-// It is kept as a function rather than deleted at the call sites because the
-// plugin's own name and mode are still judged -- see
-// unbuildableProxyImportPlugin -- and this is where a future subfield check
-// would go if one is ever needed for a reason other than tidiness.
 func validateNestedQueryFields(prefix string, values url.Values, allowed map[string]struct{}) error {
 	return nil
 }
 
-// proxyImportUnsetPlaceholderKeys lists, per canonical type, the query keys whose
-// value space does not contain "none", so a `none` there is the exporter saying
-// the user set nothing. Keys where `none` is a real value -- vless `encryption`,
-// `obfs` -- are deliberately absent.
 var proxyImportUnsetPlaceholderKeys = map[string][]string{
 	"hysteria": {"protocol"},
 	"tuic":     {"congestion_control", "congestion-controller"},
 	"snell":    {"version", "v"},
 }
 
-// firstConfiguredQueryValue is firstQueryValue for keys whose value space does
-// not contain the word "none". The exporter fills an unset field with `none`
-// rather than omitting the key -- `version=none` on a snell node it exported with
-// no version set, `protocol=none` on hysteria, `congestion_control=none` on tuic
-// -- so reading it literally turns "the user set nothing" into a value. It cost a
-// whole snell record: strconv.Atoi("none") refused the link Shadowrocket produces
-// by default.
-//
-// This is deliberately not applied everywhere: `encryption=none` on vless and
-// `obfs=none` are real values, and blanking them would be the same mistake in the
-// other direction.
 func firstConfiguredQueryValue(query url.Values, keys ...string) string {
 	if value := firstQueryValue(query, keys...); !strings.EqualFold(value, "none") {
 		return value
@@ -3986,20 +3240,6 @@ func setQueryAlias(query url.Values, canonical string, aliases ...string) {
 	setUsableQueryAlias(query, canonical, nil, aliases...)
 }
 
-// setUsableQueryAlias copies a spelling into the key upstream reads, and
-// declines to copy a value that key cannot use.
-//
-// Normalising an alias is this tree's own act, and it is the act that has to be
-// judged. `setUsableQueryAlias(query, "pinSHA256", hysteria2CertificatePin, "hpkp", "fingerprint")` copies
-// whatever an exporter wrote as `fingerprint` into the certificate-pin key that
-// upstream's converter reads -- so a hysteria2 link carrying the uTLS name
-// `fingerprint=chrome`, which upstream ignores entirely and imports fine, came
-// out of here with `pinSHA256=chrome` and was refused by the outbound. Upstream
-// never wrote that; we did, on the way past.
-//
-// The check runs at the copy rather than at the read because by the time
-// upstream's converter has the query, the alias is indistinguishable from a
-// value the person wrote themselves.
 func setUsableQueryAlias(query url.Values, canonical string, usable func(string) string, aliases ...string) {
 	if query.Get(canonical) != "" {
 		return
@@ -4052,10 +3292,6 @@ func proxyName(parsed *url.URL) string {
 }
 
 func parseSnellShareLink(link string) (map[string]any, error) {
-	// The exporter writes snell two ways: `base64(cipher:psk)@host:port`, and --
-	// when the link came in with `psk=` -- the whole authority in base64 with the
-	// password position empty and the key moved to `pbk=`. Unwrap the second so
-	// url.Parse sees a host and port at all.
 	if normalized, ok := normalizeEncodedProxyAuthority(link); ok {
 		link = normalized
 	}
@@ -4070,19 +3306,10 @@ func parseSnellShareLink(link string) (map[string]any, error) {
 	}
 	if decoded, decodeErr := convert.TryDecodeBase64(psk); decodeErr == nil {
 		if _, password, ok := strings.Cut(string(decoded), ":"); ok {
-			// Taken even when empty: the exporter writes `cipher:` with nothing
-			// after it for a node whose key it did not carry, and keeping the
-			// undecoded base64 as the key made that node import with a psk that is
-			// the word "chacha20-ietf-poly1305:" in base64. An empty key falls
-			// through to the query spellings below, which is the honest answer.
 			psk = password
 		}
 	}
 	if psk == "" {
-		// The exporter carries the PSK as `pbk=` when a link was imported with
-		// `psk=` -- its own output for the same node -- and leaves the authority's
-		// password position empty. `pbk` is the reality public-key spelling on
-		// vless; on snell it is the only place the key survives.
 		psk = firstQueryValue(query, "psk", "password", "pbk")
 	}
 	if psk == "" {
@@ -4113,10 +3340,6 @@ func parseSnellShareLink(link string) (map[string]any, error) {
 			return nil, parseErr
 		}
 		if !strings.Contains(strings.ToLower(name), "obfs") {
-			// snell share links are not something upstream's converter reads at
-			// all, so there is no upstream answer to match here. This follows ss
-			// and trojan rather than inventing a third behaviour for the same
-			// situation.
 			return proxy, nil
 		}
 		allowed := queryFieldSet("pluginName", "obfs", "obfs-host", "obfs-uri", "mode", "host", "path")
@@ -4141,12 +3364,6 @@ func parseSnellShareLink(link string) (map[string]any, error) {
 	if queryBoolean(query, "tfo", "fastopen") {
 		proxy["tfo"] = true
 	}
-	// `pbk` is not in this list: on vless it is the reality public key, but on
-	// snell it is where the exporter carries the PSK, and it was taken as the key
-	// above. `alpn` and `security` are not here either: the exporter writes them
-	// onto a snell node when TLS parameters were fed to it, and mihomo's snell
-	// carries no TLS at all -- they are registered as not honoured, not
-	// grounds to refuse the node.
 	return proxy, nil
 }
 
@@ -4552,17 +3769,6 @@ func normalizeLegacyVlessPayload(payload []byte) []byte {
 	return []byte(strings.Join(lines, "\n"))
 }
 
-// splitLegacyCredentialAuthority reads the `method:id@host:port` authority that
-// Shadowrocket and older clients emit for both vmess and vless. It arrives in two
-// spellings -- base64-wrapped in the host, or plain, in which case url.Parse has
-// already moved `method:id` into User -- and each protocol used to read it in its
-// own function, so fixing one left the other reading the method half as the id
-// . One reader, both protocols, both spellings.
-//
-// `matched` separates "not this dialect" from "this dialect, malformed": the
-// wrapped spelling is an authoritative signature, so a broken one has to be an
-// error rather than a silent fall-through to a parser that would build a node
-// that looks complete and cannot connect.
 func splitLegacyCredentialAuthority(parsed *url.URL) (method, id, hostPort string, matched bool, err error) {
 	var methodAndID string
 	if decoded, decodeErr := convert.TryDecodeBase64(parsed.Host); decodeErr == nil {
@@ -4574,19 +3780,12 @@ func splitLegacyCredentialAuthority(parsed *url.URL) (method, id, hostPort strin
 	} else if parsed.User != nil {
 		password, hasPassword := parsed.User.Password()
 		if !hasPassword {
-			// `scheme://id@host:port` is the modern spelling, not this dialect.
 			return "", "", "", false, nil
 		}
 		methodAndID, hostPort = parsed.User.Username()+":"+password, parsed.Host
 	} else {
 		return "", "", "", false, nil
 	}
-	// The exporter writes three different things in the position before the colon
-	// -- `auto:` (its vmess cipher name, reused), `none:`, and an empty string --
-	// and also omits the position entirely. All four are the same node: vless has
-	// no encryption negotiation, so that slot is a placeholder, and for vmess an
-	// absent cipher means the default. Only the id is required. Splitting on the
-	// last colon keeps a future value that contains one from eating the id.
 	if separator := strings.LastIndex(methodAndID, ":"); separator >= 0 {
 		method, id = methodAndID[:separator], methodAndID[separator+1:]
 	} else {
@@ -4598,11 +3797,6 @@ func splitLegacyCredentialAuthority(parsed *url.URL) (method, id, hostPort strin
 	return method, id, hostPort, true, nil
 }
 
-// vlessEncryptionIsConstructible mirrors transport/vless/encryption.NewClient:
-// the kernel accepts an empty string, `none`, and the mlkem768x25519plus family,
-// and rejects everything else. Shadowrocket puts `auto` there -- a vmess cipher
-// name -- so passing the slot through verbatim turned its default vless export
-// into a refusal over a field vless does not negotiate at all.
 func vlessEncryptionIsConstructible(encryption string) bool {
 	switch encryption {
 	case "", "none":
@@ -4611,13 +3805,6 @@ func vlessEncryptionIsConstructible(encryption string) bool {
 	return strings.HasPrefix(encryption, "mlkem768x25519plus.")
 }
 
-// normalizeLegacyVlessLink handles the authority dialect emitted by
-// Shadowrocket and older clients:
-//
-//	vless://base64("none:uuid@host:port")?type=tcp#name
-//
-// The decoded bytes are an authority, not a hostname. Reparse all four pieces
-// so userinfo can never leak into the server field.
 func normalizeLegacyVlessLink(link string) (string, bool) {
 	parsed, err := url.Parse(link)
 	if err != nil || !strings.EqualFold(parsed.Scheme, "vless") || parsed.Host == "" {
@@ -4640,10 +3827,6 @@ func normalizeLegacyVlessLink(link string) (string, bool) {
 	authority.Fragment = parsed.Fragment
 	rebuilt := authority.String()
 	if portRange != "" {
-		// The range goes back into the authority rather than being dropped here:
-		// the scheme-agnostic reader downstream owns both taking the first port and
-		// naming the range it could not honour, so this decoder must not silently
-		// consume it. The first port was only borrowed to get past url.Parse.
 		rebuilt = strings.Replace(rebuilt, firstPortHostPort, strings.TrimSuffix(firstPortHostPort[:strings.LastIndex(firstPortHostPort, ":")+1], "")+portRange, 1)
 	}
 	return rebuilt, true

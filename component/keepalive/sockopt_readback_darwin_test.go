@@ -9,9 +9,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// readKeepAliveSockopts reads back the two values darwin's own
-// net/tcpsockopt_darwin.go writes, so a test can assert what the kernel actually holds
-// rather than what an accessor returns. Both are expressed in seconds by the kernel.
 func readKeepAliveSockopts(conn *net.TCPConn) (idleSeconds, intervalSeconds int, err error) {
 	raw, err := conn.SyscallConn()
 	if err != nil {

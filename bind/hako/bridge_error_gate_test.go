@@ -1,6 +1,5 @@
 package hako
 
-// go_seq_to_objc_string → NSString initWithBytesNoCopy(NSUTF8StringEncoding)，
 
 import (
 	"fmt"
@@ -14,9 +13,6 @@ import (
 	"testing"
 )
 
-// bridgeReturnViolations parses the given files and reports every exported
-// bridge surface (exported function, or exported method on an exported
-// receiver type) whose error results can escape without bridgeSafeError.
 func bridgeReturnViolations(fset *token.FileSet, files []*ast.File) []string {
 	var violations []string
 	for _, file := range files {
@@ -159,8 +155,6 @@ func hasNamedResultOfType(results *ast.FieldList, typeName string) bool {
 	return false
 }
 
-// ownReturns collects the return statements that belong to the function body
-// itself, not to closures nested inside it.
 func ownReturns(body *ast.BlockStmt) []*ast.ReturnStmt {
 	var returns []*ast.ReturnStmt
 	ast.Inspect(body, func(node ast.Node) bool {
@@ -175,9 +169,6 @@ func ownReturns(body *ast.BlockStmt) []*ast.ReturnStmt {
 	return returns
 }
 
-// A plain string literal is compliant: source files are valid UTF-8, so the
-// literal's value is too (escape sequences like \xfe only enter through a
-// deliberate edit, which review owns).
 func isSanitizedStringExpr(expr ast.Expr) bool {
 	switch e := expr.(type) {
 	case *ast.BasicLit:
@@ -200,13 +191,6 @@ func isSanitizedErrorExpr(expr ast.Expr) bool {
 	return false
 }
 
-// bridgeCallbackClassification is the conscious classification of every
-// exported interface that carries a string parameter in a method. An
-// interface Swift implements needs a sanitizing decorator (its string
-// parameters cross Go→ObjC through the same nil-on-invalid decode); an
-// interface Go implements consumes strings and needs none. A new interface
-// showing up here unclassified fails the gate until someone decides which
-// side of the bridge implements it.
 var bridgeCallbackClassification = map[string]string{
 	"PlatformInterface":         "decorated",
 	"ClashAPIClientHandler":     "decorated",
@@ -216,13 +200,6 @@ var bridgeCallbackClassification = map[string]string{
 	"InterfaceUpdateListener":   "go-implemented",
 }
 
-// bridgeCallbackDecorators names the decorator type behind each interface
-// classified "decorated". The fifth arm below checks the decorator overrides
-// every string-parameter method of its interface explicitly: embedding
-// forwards any method it does not override, so a method added to the
-// interface later would satisfy the compiler, satisfy the tests, and cross
-// the bridge unsanitized -- the classification arm alone cannot see that
-// (found by a live poison: a planted extra string method rode through green).
 var bridgeCallbackDecorators = map[string]string{
 	"PlatformInterface":         "bridgeSafePlatformDecorator",
 	"ClashAPIClientHandler":     "bridgeSafeClashHandlerDecorator",
@@ -347,8 +324,6 @@ func embeddedTypeName(expr ast.Expr) string {
 	return ""
 }
 
-// Embedded stdlib-ish lowercase selectors (pkg.Type) return "" above; this
-// hook exists for in-package names that are deliberately fine to embed.
 func isBridgeStdlibName(string) bool { return false }
 
 func interfaceHasStringParam(iface *ast.InterfaceType) bool {
@@ -372,9 +347,6 @@ func interfaceStringParamMethods(iface *ast.InterfaceType) []string {
 	return names
 }
 
-// bridgeDecoratorCoverageViolations is the fifth arm: every string-parameter
-// method of a decorated interface must be overridden by name on its
-// decorator. Missing one means the embedded value forwards it raw.
 func bridgeDecoratorCoverageViolations(fset *token.FileSet, files []*ast.File) []string {
 	interfaces := map[string][]string{}
 	overrides := map[string]map[string]bool{}
@@ -464,8 +436,6 @@ func TestExportedErrorReturnsPassBridgeSafeError(t *testing.T) {
 	}
 }
 
-// The checker itself is under test: a gate that cannot see a planted violation
-// is not a gate. Each fixture is a tiny source with a known verdict.
 func TestBridgeGateCheckerSeesPlantedShapes(t *testing.T) {
 	cases := []struct {
 		name       string

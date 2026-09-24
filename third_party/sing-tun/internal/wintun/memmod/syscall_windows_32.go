@@ -7,7 +7,6 @@
 
 package memmod
 
-// Optional header format
 type IMAGE_OPTIONAL_HEADER struct {
 	Magic                       uint16
 	MajorLinkerVersion          uint8

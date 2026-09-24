@@ -7,8 +7,6 @@ import (
 	P "github.com/TokenPLS/Hako/constant/provider"
 )
 
-// fakeRuleProvider satisfies P.RuleProvider; only Name/VehicleType are read by
-// the validator (the rest is the embedded nil interface, never called here).
 type fakeRuleProvider struct {
 	P.RuleProvider
 	vehicle P.VehicleType
@@ -26,8 +24,6 @@ func (f *fakeProxyProvider) Name() string               { return "remote-proxies
 func (f *fakeProxyProvider) VehicleType() P.VehicleType { return f.vehicle }
 
 func TestValidateProvidersAcceptsRemote(t *testing.T) {
-	// a remote provider is accepted as written; the core fetches it in the
-	// background instead of the app being asked to pre-download it.
 	http := &config.Config{
 		DNS:           &config.DNS{Enable: false},
 		RuleProviders: map[string]P.RuleProvider{"remote-rules": &fakeRuleProvider{vehicle: P.HTTP}},

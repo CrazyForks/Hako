@@ -7,20 +7,6 @@ import (
 	"github.com/TokenPLS/Hako/component/pause"
 )
 
-// Pause stops health checks; Wake resumes them, on every profile. iOS additionally arms a
-// one-minute backstop, because the failure that timer guards is a wake callback that never
-// arrives -- which would leave the core paused, and health checking silently off, for the rest
-// of the session.
-//
-// This used to be written as a platform SPLIT copied from sing-box's CommandServer, where Wake
-// resumed only off iOS and the timer was the sole resume path on iOS. That made the platform
-// the pausing was measured on the one where a delivered wake did nothing.: sing-box is
-// never the authority on what behaviour should be, and no measurement was offered for the
-// split. Apple documents wake as delivered "immediately after the system wakes up"
-// (NEProvider.h), with no iOS exception.
-//
-// The runtime profile is the discriminator rather than a build constant, because the same
-// binary carries the macOS profiles.
 
 func withRuntimeProfile(t *testing.T, profile runtimeProfile) {
 	t.Helper()
@@ -29,8 +15,6 @@ func withRuntimeProfile(t *testing.T, profile runtimeProfile) {
 	t.Cleanup(func() { setupRuntimeProfile.Store(uint32(original)) })
 }
 
-// leaveAwake keeps one test's pause state from leaking into the next: the manager is
-// process-wide.
 func leaveAwake(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
@@ -95,9 +79,6 @@ func TestPauseAndWakeDriveTheDevicePauseManager(t *testing.T) {
 	}
 }
 
-// TestIOSEndPauseTimerActuallyFires: an armed timer that never runs would leave the core paused
-// for the session, which is strictly worse than never pausing. One second is substituted for
-// the shipped minute so the test observes the real timer rather than asserting a field.
 func TestIOSEndPauseTimerActuallyFires(t *testing.T) {
 	withRuntimeProfile(t, runtimeProfileIOSPacketTunnel)
 	leaveAwake(t)
@@ -111,8 +92,6 @@ func TestIOSEndPauseTimerActuallyFires(t *testing.T) {
 		t.Fatal("no end-pause timer was armed on iOS")
 	}
 
-	// Shorten the armed timer instead of waiting a minute. Reset on a live timer replaces its
-	// deadline, which is the same call path Pause uses when it re-arms.
 	service.endPauseMu.Lock()
 	service.endPauseTimer.Reset(50 * time.Millisecond)
 	service.endPauseMu.Unlock()
@@ -128,9 +107,6 @@ func TestIOSEndPauseTimerActuallyFires(t *testing.T) {
 		"it, so health checking would stay off for the rest of the session")
 }
 
-// TestRepeatedSleepExtendsTheWindow: iOS delivers sleep() repeatedly while a device stays
-// asleep, and each one has to push the expiry out. Otherwise the first minute ends and the
-// URL tests resume for the rest of the night, which is the behaviour being fixed.
 func TestRepeatedSleepExtendsTheWindow(t *testing.T) {
 	withRuntimeProfile(t, runtimeProfileIOSPacketTunnel)
 	leaveAwake(t)

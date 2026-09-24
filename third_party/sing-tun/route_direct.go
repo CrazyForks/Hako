@@ -15,8 +15,6 @@ type DirectRouteDestination interface {
 }
 
 type DirectRouteSession struct {
-	// IPVersion uint8
-	// Network     uint8
 	Source      netip.Addr
 	Destination netip.Addr
 }

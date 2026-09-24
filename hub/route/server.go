@@ -52,22 +52,10 @@ func SetEmbedMode(embed bool) {
 	embedMode = embed
 }
 
-// geoUpdaterAllowed decides whether the two routes that download geo databases inside the
-// process are served. It is separate from embedMode because the reason for closing them is
-// separate: not "an embedded core must not reconfigure itself", but a measured memory ceiling
-// that belongs to ONE platform.
 //
-// An iOS packet tunnel was measured dying at 49.5 MiB, and GeoIP.dat is 17 MB to fetch and
-// unpack. A macOS app extension was measured living steadily at 62.4 MiB with no limit
-// configured, which does not prove the download fits -- it proves the iOS ceiling is not there.
-// The product rule this follows is explicit: implement every upstream capability, and where iOS
-// cannot, implementing it on macOS alone is an acceptable outcome.
 //
-// Default false, so a caller that never speaks keeps today's behaviour on every platform.
 var geoUpdaterAllowed = false
 
-// SetGeoUpdaterAllowed permits the in-process geo updater routes. The binding sets it from the
-// runtime profile.
 func SetGeoUpdaterAllowed(allowed bool) {
 	geoUpdaterAllowed = allowed
 }
@@ -88,9 +76,6 @@ type Memory struct {
 var memoryFootprintMu sync.RWMutex
 var memoryFootprintReader func() int64
 
-// SetMemoryFootprintReader optionally adds the current process's physical
-// footprint to the native memory stream. A nil reader preserves the upstream
-// shape; a registered reader reports zero when no reading is available.
 func SetMemoryFootprintReader(reader func() int64) {
 	memoryFootprintMu.Lock()
 	memoryFootprintReader = reader
@@ -104,7 +89,6 @@ func currentMemoryFootprint() *int64 {
 	if reader == nil {
 		return nil
 	}
-	// Do not hold registration's lock while sampling process state.
 	value := reader()
 	if value < 0 {
 		value = 0
@@ -145,10 +129,6 @@ func (c Cors) Apply(r chi.Router) {
 }
 
 func ReCreateServer(cfg *Config) {
-	// Listener replacement is one synchronous control-plane transaction. Each
-	// start helper only launches Serve after publishing its new server, so a
-	// following recreate cannot race an older stop goroutine over the global
-	// pointers or Unix pathname (important for in-process NE restart).
 	serverMu.Lock()
 	defer serverMu.Unlock()
 	start(cfg)
@@ -170,14 +150,6 @@ func router(isDebug bool, secret string, dohServer string, cors Cors) *chi.Mux {
 		if secret != "" {
 			r.Use(authentication(secret))
 		}
-		// Inside the authenticated group, not beside it. A pprof heap profile
-		// carries proxy server addresses, subscription URLs and whatever
-		// credential material is resident, and this fork wires isDebug to the
-		// configuration's own log-level (bind/hako/external_controller.go) --
-		// so leaving it outside meant a subscription could write `log-level:
-		// debug` plus an external-controller on 0.0.0.0 and publish a profiler
-		// to the local network, secret or no secret. It stays exactly as
-		// available to whoever holds the secret as it was.
 		if isDebug {
 			r.Mount("/debug", func() http.Handler {
 				r := chi.NewRouter()
@@ -216,9 +188,6 @@ func router(isDebug bool, secret string, dohServer string, cors Cors) *chi.Mux {
 		r.Group(func(r chi.Router) {
 			uiFS := http.FileSystem(http.Dir(uiPath))
 			if embedMode {
-				// A sandboxed extension answers EPERM to the sendfile upgrade
-				// and Go kills the copy mid-file; see hako_ui_fs.go. Ordinary
-				// mihomo keeps the upstream fast path.
 				uiFS = hakoUserspaceFileSystem{uiFS}
 			}
 			fs := http.StripPrefix("/ui", http.FileServer(uiFS))

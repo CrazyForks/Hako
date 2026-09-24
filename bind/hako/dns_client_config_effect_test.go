@@ -11,23 +11,7 @@ import (
 	D "github.com/miekg/dns"
 )
 
-// The client's DNS editor writes a `dns:` block; this proves the kernel then
-// asks the servers it names.
-//
-// Everything above this line in the client is editor and generator coverage:
-// the UI round-trips its own draft, and `ProfileRuntimeConfigBuilder` is
-// asserted to put those values in the generated YAML. Neither says the
-// resolution a user gets actually goes to those servers — that claim needs
-// the kernel, a controlled resolver, and an observed query.
-//
-// The config shape is the one our editor produces: enable + nameserver +
-// default-nameserver (pure IP, config/config.go:1460-1470) + a
-// nameserver-policy entry, which is exactly the trio the DNS hub saves.
 func TestClientDNSConfigDecidesWhoResolves(t *testing.T) {
-	// No Setup(): the persistent cache is a process-wide sync.Once that the
-	// first real core start claims (setup_test.go:189), and this test needs
-	// none of it — the executor path parses and applies a config on its own,
-	// which is precisely the layer under test.
 	general, generalAddress, generalQueries := startControlledDNSServer(t, "udp")
 	defer func() { _ = general.Shutdown() }()
 	policy, policyAddress, policyQueries := startControlledDNSServer(t, "udp")
@@ -62,13 +46,9 @@ rules:
 		t.Fatal("applying a dns block must install a resolver")
 	}
 
-	// Drain anything the apply itself provoked, so each assertion below is
-	// about its own query.
 	drain(generalQueries)
 	drain(policyQueries)
 
-	// 1. An ordinary name goes to the configured nameserver, and the answer
-	//    the user gets is the one that server returned.
 	answer := exchange(t, "a.controlled.test.")
 	if len(answer.Answer) != 1 {
 		t.Fatalf("answer count = %d, want 1", len(answer.Answer))
@@ -80,8 +60,6 @@ rules:
 		t.Fatal("the query never reached the configured nameserver")
 	}
 
-	// 2. A name covered by nameserver-policy goes to that policy's server
-	//    instead — the editor's policy rows are not decoration.
 	if _, err := resolver.DefaultResolver.ExchangeContext(
 		contextWithTimeout(t), question("policy.controlled.test."),
 	); err != nil {

@@ -14,19 +14,6 @@ import (
 	"github.com/TokenPLS/Hako/log"
 )
 
-// the false all-clear.
-//
-// On a device, Start published four rows for the reader's file; a later parse of a document
-// that already carried the forced values published zero; the endpoint served the zero --
-// correct for that document -- and the client rendered "every field in your file was
-// honoured". Nothing had red: no gate compared what was served with what was published, no
-// gate ran two publishes in a row, and a zero-row publish logged nothing, so it left no trace.
-//
-// This is that gate, without a device. Two documents through the real runtime entry point,
-// and after each one three things must hold: the endpoint serves exactly the rows that were
-// published, the served report names the document it describes (length and SHA-256, the two
-// numbers the client can compute over the text it handed over), and the publish is in the
-// log -- rows or no rows.
 type servedDeviationReport struct {
 	SchemaVersion int                        `json:"schemaVersion"`
 	Sequence      uint64                     `json:"sequence"`
@@ -62,8 +49,6 @@ func TestTheServedReportIsThePublishedOneAndNamesItsDocument(t *testing.T) {
 	subscription := log.Subscribe()
 	t.Cleanup(func() { log.UnSubscribe(subscription) })
 
-	// A: the reader's file. Written values the profile forces elsewhere, and a rule kind it
-	// cannot execute -- rows of more than one category.
 	const readersFile = "tun:\n  enable: true\n  mtu: 1500\n  auto-route: true\nrules:\n  - PROCESS-NAME,curl,DIRECT\n  - MATCH,DIRECT\nproxies: []\n"
 	if _, _, err := parseConfigForIOSRuntime(readersFile, true, deviationEntryStart); err != nil {
 		t.Fatalf("start parse: %v", err)
@@ -84,9 +69,6 @@ func TestTheServedReportIsThePublishedOneAndNamesItsDocument(t *testing.T) {
 		t.Fatalf("served report does not name the reader's file: %+v (want %dB %s)", first.Document, len(readersFile), sha256Hex(readersFile))
 	}
 
-	// B: a document that already says what the guards would write. Zero rows is the truth
-	// about B -- and the report must say it is about B, not leave the reader to assume it is
-	// still about A.
 	const alreadyForced = "dns:\n  enable: true\nprofile:\n  store-fake-ip: true\nfind-process-mode: 'off'\nunified-delay: true\nproxies: []\nrules:\n  - MATCH,DIRECT\n"
 	if _, _, err := parseConfigForIOSRuntime(alreadyForced, true, deviationEntryReload); err != nil {
 		t.Fatalf("reload parse: %v", err)
@@ -102,8 +84,6 @@ func TestTheServedReportIsThePublishedOneAndNamesItsDocument(t *testing.T) {
 		t.Fatalf("the zero-row report does not name the document it is about: %+v", second.Document)
 	}
 
-	// Both publishes are in the log, the zero-row one included. The log is asynchronous to the
-	// caller, so collect until both lines have arrived or the deadline passes.
 	wantFirst := "entry=start seq=" + strconv.FormatUint(first.Sequence, 10) + " "
 	wantSecond := "entry=reload seq=" + strconv.FormatUint(second.Sequence, 10) + " "
 	var sawFirst, sawSecond string
@@ -135,9 +115,6 @@ func TestTheServedReportIsThePublishedOneAndNamesItsDocument(t *testing.T) {
 	}
 }
 
-// Before the first publish there is no document to name, and the report must not invent one:
-// an identity that matches nothing the client holds is exactly as useful as none, and worse
-// if a client treats "present" as "about my file".
 func TestBeforeTheFirstPublishTheReportNamesNoDocument(t *testing.T) {
 	previous := publishedDeviations.Load()
 	t.Cleanup(func() { publishedDeviations.Store(previous) })
@@ -152,7 +129,6 @@ func TestBeforeTheFirstPublishTheReportNamesNoDocument(t *testing.T) {
 	}
 }
 
-// The offline report names its document too, so one describes(text) works on both kinds.
 func TestTheOfflineReportNamesItsDocument(t *testing.T) {
 	const document = "tun:\n  mtu: 1500\nproxies: []\nrules:\n  - MATCH,DIRECT\n"
 	box, err := ConfigDeviationsJSON(document, RuntimeProfileIOSPacketTunnel)

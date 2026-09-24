@@ -110,13 +110,10 @@ type Options struct {
 	FileDescriptor                        int
 	Logger                                logger.Logger
 
-	// No work for TCP, do not use.
 	_TXChecksumOffload bool
 
-	// For library usages.
 	EXP_DisableDNSHijack bool
 
-	// For darwin tun
 	EXP_RecvMsgX bool
 	EXP_SendMsgX bool
 }

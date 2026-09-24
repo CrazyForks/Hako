@@ -286,7 +286,6 @@ func (r *autoRedirect) setupNFTables() error {
 	return nil
 }
 
-// TODO; test is this works
 func (r *autoRedirect) nftablesUpdateLocalAddressSet() error {
 	newLocalAddresses := common.FlatMap(r.interfaceFinder.Interfaces(), func(it control.Interface) []netip.Prefix {
 		return common.Filter(it.Addresses, func(prefix netip.Prefix) bool {

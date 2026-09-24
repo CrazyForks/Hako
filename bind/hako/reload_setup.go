@@ -15,13 +15,6 @@ const (
 	maxReloadLogMaxLines     = 5000
 )
 
-// RuntimeSetupOptions contains only process policy that may be requested at
-// runtime. Zero means "leave unchanged" for the three mutable fields.
-//
-// The restart-only fields are deliberately present at the mobile boundary so
-// callers get an explicit requires-restart error instead of a silent no-op.
-// Hako never rewires paths, the App Group Unix socket, timezone, GOMAXPROCS,
-// link MTU or core identity underneath a live Network Extension.
 type RuntimeSetupOptions struct {
 	SoftMemoryLimit int64
 	GCPercent       int
@@ -39,13 +32,6 @@ type RuntimeSetupOptions struct {
 
 type runtimeSetupState struct {
 	softMemoryLimit int64
-	// softMemoryLimitIsPacingDefault marks a softMemoryLimit that was derived
-	// by the service-time NE pacing default rather than configured. The
-	// distinction keeps a hypothetical second NewService without an
-	// intervening Setup from treating the derived value as an explicit one
-	// and feeding it to the threshold machine as its limit -- the unit error
-	// this batch fixed. Today the Swift call order (Setup, then NewService)
-	// makes that unreachable; this keeps the guard on our side of the bridge.
 	softMemoryLimitIsPacingDefault bool
 	gcPercent                      int
 	logMaxLines                    int
@@ -55,9 +41,6 @@ var currentRuntimeSetup = runtimeSetupState{
 	logMaxLines: defaultLogMaxLines,
 }
 
-// ReloadSetupOptions applies the safe live subset of SetupOptions. Validation
-// is completed before any runtime global is changed, so every error preserves
-// the previous memory, GC and diagnostic-retention policy.
 func ReloadSetupOptions(options *RuntimeSetupOptions) error {
 	setupMu.Lock()
 	defer setupMu.Unlock()
@@ -76,11 +59,6 @@ func ReloadSetupOptions(options *RuntimeSetupOptions) error {
 		debug.SetMemoryLimit(options.SoftMemoryLimit)
 		currentRuntimeSetup.softMemoryLimit = options.SoftMemoryLimit
 		currentRuntimeSetup.softMemoryLimitIsPacingDefault = false
-		// An explicit limit re-arms the threshold machine too; without this
-		// the machine would keep judging against the previous limit until the
-		// next Setup or NewService. The machine gets the budget the pacing
-		// value describes, not the pacing value itself -- see
-		// machineBudgetForPacing.
 		startPressureThresholdMonitor(machineBudgetForPacing(options.SoftMemoryLimit), pressureThresholdShedEnabled.Load())
 	}
 	if options.GCPercent != 0 {

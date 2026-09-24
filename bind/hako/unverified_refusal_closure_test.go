@@ -8,25 +8,7 @@ import (
 	"github.com/TokenPLS/Hako/config"
 )
 
-// Two entries were registered on 2026-08-27 with the honest label "unverified"
-// or "reachability-unknown". A label like that is a promise to go and measure,
-// not a place to leave something. These are the measurements.
 
-// ConfigPipeline.providerHealthCheckInterval was kept while its sibling,
-// health-check.timeout, was released -- on the ground that upstream accepting a
-// value at parse says nothing about what its ticker does with it. Now measured,
-// and it is the same shape as the proxy-group regex: upstream accepts the
-// document and dies later.
-//
-//	interval: -1
-//	  -> adapter/provider/parser.go:69   uint(-1) = 18446744073709551615
-//	  -> healthcheck.go:243              time.Duration(that) * time.Second overflows to -1s
-//	  -> healthcheck.go:47               time.NewTicker(-1s) panics
-//
-// Inside a packet-tunnel extension that panic is not a failed health check, it
-// is the extension dying and the user's network going with it. Refusing a value
-// upstream crashes on is not being stricter than upstream; there is no upstream
-// behaviour to be stricter than.
 func TestNegativeHealthCheckIntervalWouldPanicUpstream(t *testing.T) {
 	negative := -1
 	converted := time.Duration(uint(negative)) * time.Second
@@ -46,8 +28,6 @@ func TestNegativeHealthCheckIntervalWouldPanicUpstream(t *testing.T) {
 		ticker.Stop()
 	}()
 
-	// And mihomo accepts the document, which is why the plan has to be the one
-	// to catch it.
 	y := "proxies:\n  - {name: n, type: ss, server: e.com, port: 8388, cipher: aes-128-gcm, password: p}\n" +
 		"proxy-providers:\n  p:\n    type: inline\n    payload:\n" +
 		"      - {name: m, type: ss, server: e.com, port: 8388, cipher: aes-128-gcm, password: p}\n" +
@@ -61,11 +41,6 @@ func TestNegativeHealthCheckIntervalWouldPanicUpstream(t *testing.T) {
 	}
 }
 
-// Validate.dnsNameserverRequired was registered as reachability-unknown:
-// upstream accepts a dns section with no nameserver, and this tree's own repair
-// refills it before validation, which SHOULD make the refusal unreachable.
-// "Should" was doing the work. This drives every runtime profile, in and out of
-// the extension, and asks whether any of them can reach it.
 func TestNoRuntimeProfileReachesTheNameserverRefusal(t *testing.T) {
 	document := "proxies:\n  - {name: n, type: ss, server: e.com, port: 8388, cipher: aes-128-gcm, password: p}\n" +
 		"dns:\n  enable: true\n  enhanced-mode: fake-ip\n"

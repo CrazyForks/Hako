@@ -13,14 +13,6 @@ type exporterEmittedCorpus struct {
 	} `json:"records"`
 }
 
-// TestEveryLineTheExporterEmitsLandsWhereTheCorpusSays is the scheme-wide half
-// of the Shadowrocket oracle: forty lines the exporter itself replied with, across
-// every scheme it accepts, each with one of three expected outcomes. `accepted`
-// must import as one proxy; `coreUnsupported` must be named as such by the
-// registry; `rejected` covers replies whose own content lacks what the kernel
-// requires -- a tuic with no password, a snell whose key the exporter dropped --
-// and refusing those is the correct reading, not a gap. Every cell is exercised
-// against the kernel's own parser, not only this importer's map.
 func TestEveryLineTheExporterEmitsLandsWhereTheCorpusSays(t *testing.T) {
 	raw, err := os.ReadFile("testdata/shadowrocket-2.2.90-3378-emitted-corpus.json")
 	if err != nil {

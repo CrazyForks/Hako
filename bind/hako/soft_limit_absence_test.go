@@ -5,14 +5,6 @@ import (
 	"testing"
 )
 
-// The same zero, on the two surfaces a reader looks at more often than a failure card.
-//
-// Removing the ceiling was a ruling about the product. It left softMemoryLimit at its
-// zero value, and three places went on reporting that zero as though it were a measured
-// quantity. The breadcrumb was the one that could mislead a judgement; these two are the
-// ones that sit on screen: the Core Runtime page renders runtimeDiagnostics, and the
-// evidence file is what a diagnosis is reconstructed from. "Soft memory limit: 0" reads
-// as a limit of zero, which is the one thing it does not mean.
 
 func TestRuntimeDiagnosticsOmitsASoftLimitThatWasNeverSet(t *testing.T) {
 	setRuntimeSetupSoftMemoryLimitForTest(t, 0)
@@ -36,8 +28,6 @@ func TestRuntimeDiagnosticsStillReportsALimitThatExists(t *testing.T) {
 	}
 }
 
-// runtimeSetupDiagnosticsForTest reads the map the Core Runtime page renders, through the
-// exported entry the client actually calls.
 func runtimeSetupDiagnosticsForTest(t *testing.T) map[string]any {
 	t.Helper()
 	service := &BoxService{tunFd: -1, liveTunFd: -1}

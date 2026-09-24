@@ -7,19 +7,6 @@ import (
 	"github.com/metacubex/http/httptest"
 )
 
-// /debug mounts pprof and PUT /debug/gc. Upstream mounts it beside the
-// authenticated group rather than inside it, so a configured secret protected
-// every route except this one. On a desktop that is a debug switch nobody
-// reaches from outside; in this fork the switch is wired to the configuration
-// itself -- the RESTful controller turns it on whenever log-level is debug
-// (bind/hako/external_controller.go) -- and the controller's listen address is
-// configuration too. A subscription that writes `log-level: debug` plus
-// `external-controller: 0.0.0.0:9090` therefore publishes a heap profiler to
-// the local network: pprof output carries proxy server addresses, subscription
-// URLs and whatever credential material is resident.
-//
-// Threat model: the subscription author sets it up, anyone on the same network
-// collects.
 
 func debugRequest(t *testing.T, handler http.Handler, method, path, secret string) int {
 	t.Helper()
@@ -41,17 +28,11 @@ func TestDebugRoutesRequireTheSecret(t *testing.T) {
 	if code := debugRequest(t, handler, http.MethodPut, "/debug/gc", ""); code != http.StatusUnauthorized {
 		t.Fatalf("PUT /debug/gc without the secret returned %d, want 401", code)
 	}
-	// With the secret it still works -- this is a debugging surface, not a
-	// removed one.
 	if code := debugRequest(t, handler, http.MethodPut, "/debug/gc", "s3cr3t"); code == http.StatusUnauthorized {
 		t.Fatal("PUT /debug/gc with the correct secret was rejected; the surface must stay usable")
 	}
 }
 
-// With no secret configured nothing on this controller is authenticated, which
-// is upstream's own default and the reader's choice. The debug surface must
-// still behave exactly as the rest of the API does in that mode -- no more
-// exposed, no less.
 func TestDebugRoutesFollowTheControllerWhenNoSecretIsSet(t *testing.T) {
 	handler := router(true, "", "", Cors{})
 	if code := debugRequest(t, handler, http.MethodPut, "/debug/gc", ""); code == http.StatusUnauthorized {

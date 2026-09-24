@@ -11,18 +11,6 @@ import (
 	"github.com/TokenPLS/Hako/config"
 )
 
-// The TestParseConfigForIOSRejectsUnsafe* family that stood here is gone
-// . Seventeen tests, each pinning a refusal of a transport-option value
-// upstream reads as given: QUIC flow-control windows, hysteria rates and hop
-// intervals, hysteria2's udp-mtu, mekya and kcptun timings, TUIC datagram
-// sizes and stream counts, BBR windows, xhttp ranges, and the global,
-// per-group and per-provider durations. They were faithful tests of the wrong
-// contract.
-//
-// What replaces them is not nothing: outbound_runtime_alignment_test.go pins
-// the opposite property from the same inputs (these configurations start), and
-// upstream_doc_conformance_test.go asks the wider question -- that nothing
-// upstream publishes as an example is refused here.
 
 func TestNormalizeRawConfigForIOS(t *testing.T) {
 	raw := config.DefaultRawConfig()
@@ -77,25 +65,17 @@ func TestNormalizeRawNetworkExtensionSurfacesBeforeParse(t *testing.T) {
 
 	normalizeRawConfigForIOS(raw, true)
 
-	// The local proxy surface is honoured now: mixed-port, allow-lan and the inbound socket
-	// options belong to the user, and hub/executor opens them. What still goes is the
-	// controller surface and the protocol servers -- different decisions, different reasons.
 	if raw.MixedPort != 10801 || !raw.InboundTfo || !raw.InboundMPTCP {
 		t.Fatalf("the local proxy surface was stripped: mixed-port=%d tfo=%v mptcp=%v",
 			raw.MixedPort, raw.InboundTfo, raw.InboundMPTCP)
 	}
-	// allow-lan alone is gated: the app has not permitted local-network exposure here, and the
-	// zero value of that permission is the safe one on purpose.
 	if raw.AllowLan {
 		t.Fatal("allow-lan survived without the app permitting local-network exposure")
 	}
-	// The API itself is the user's to ask for now; the dashboard is not, because it would
-	// start a download inside the extension (executor.go:457 -> AutoDownloadUI).
 	if raw.ExternalController == "" || raw.Secret == "" {
 		t.Fatalf("the RESTful API surface was stripped: controller=%q secret set=%v",
 			raw.ExternalController, raw.Secret != "")
 	}
-	// external-ui is honoured: the hold was, not a platform fact.
 	if raw.ExternalUI == "" {
 		t.Fatal("external-ui was stripped; upstream keeps it and the platform permits it")
 	}
@@ -113,7 +93,6 @@ func TestNormalizeRawNetworkExtensionSurfacesBeforeParse(t *testing.T) {
 		len(raw.Tun.IncludeMACAddress) != 0 || len(raw.Tun.ExcludeMACAddress) != 0 {
 		t.Fatalf("host-route filter survived NE normalization: %#v", raw.Tun)
 	}
-	// The listener catalogue is honoured now: upstream allows it, the platform allows it.
 	if len(raw.Listeners) == 0 {
 		t.Fatal("the listener catalogue was stripped; upstream allows it and so do we")
 	}
@@ -160,7 +139,6 @@ rule-providers:
 		"DOMAIN,first.example,DIRECT",
 		"PROCESS-NAME,curl,REJECT",
 		"DOMAIN,second.example,REJECT",
-		// UID is gone on purpose -- see uid_construction_gate.go. Everything else stays.
 		"IN-USER,alice,REJECT",
 		"SOURCE-APP-SIGNING-ID,com.example.cli,REJECT",
 		"MATCH,DIRECT",
@@ -184,7 +162,6 @@ rule-providers:
 	if !ok || !reflect.DeepEqual(payload, wantPayload) {
 		t.Fatalf("inline provider after normalize = %#v, want every entry kept", raw.RuleProvider["inline"]["payload"])
 	}
-	// Nothing was removed, so every affected rule still has to be findable.
 	if summaries := summarizeMetadataRuleOccurrences(raw, nePolicy().processMetadata()); len(summaries) == 0 {
 		t.Fatal("the kept metadata rules must still be reported to the reader")
 	}
@@ -197,10 +174,6 @@ func TestNormalizeStripsNEIncompatibleNameservers(t *testing.T) {
 	raw.DNS.Fallback = []string{"system://", "8.8.8.8"}
 	raw.DNS.ProxyServerNameserver = []string{"system"}
 	raw.DNS.DirectNameServer = []string{"114.114.114.114", "dhcp://system"}
-	// default-nameserver is the bootstrap resolver: system/dhcp is stripped like
-	// the query slots WHILE a usable pure-IP resolver remains. An all-system/dhcp
-	// bootstrap (no usable IP left) is kept verbatim with a kept-warning; what
-	// happens then is mihomo's call (system loads, dhcp fails its pure-IP check).
 	raw.DNS.DefaultNameserver = []string{"223.5.5.5", "system"}
 
 	normalizeRawConfigForIOS(raw, true)
@@ -223,8 +196,6 @@ func TestNormalizeStripsNEIncompatibleNameservers(t *testing.T) {
 }
 
 func TestNormalizeRealBootstrapStripsSystemKeepsIPs(t *testing.T) {
-	// A widespread real shape: system leads a list of usable bootstrap IPs.
-	// Strip the system entry, keep every IP including IPv6.
 	raw := &config.RawConfig{}
 	raw.DNS.Enable = true
 	raw.DNS.NameServer = []string{"223.5.5.5"}
@@ -245,14 +216,6 @@ func TestNormalizeRealBootstrapStripsSystemKeepsIPs(t *testing.T) {
 }
 
 func TestAllSystemBootstrapPassesStripSilentlyThenRepairReports(t *testing.T) {
-	// Two stages, one story. The strip declines to touch an all-system
-	// bootstrap (stripping to [] would trip mihomo's "at least one nameserver"
-	// rule, config/config.go:1453-1454) and says NOTHING about it -- the "kept
-	// as written, your nameservers may fail" warning that used to fire here was
-	// falsified one line later by the repair, every time, because the repair
-	// runs for every Apple packet tunnel and removes exactly those entries.
-	// The repair's own description is the user-facing report,'s
-	// no-silent-no-op requirement is satisfied by it.
 	raw := &config.RawConfig{}
 	raw.DNS.Enable = true
 	raw.DNS.NameServer = []string{"223.5.5.5"}
@@ -285,21 +248,15 @@ func TestAllSystemBootstrapPassesStripSilentlyThenRepairReports(t *testing.T) {
 }
 
 func TestNormalizeKeepsNECompatibleDNSTypes(t *testing.T) {
-	// mihomo has 10 DNS server types (config.go parseNameServer): udp, tcp, tls,
-	// http/https, quic, system, ts/tailscale, dhcp, rcode, and bare. Only system
-	// and dhcp are NE-incompatible; every other type resolves through the core
-	// and must survive the tolerate+strip pass unchanged. This locks that the
-	// scheme strip never over-reaches.
 	raw := &config.RawConfig{}
 	raw.DNS.Enable = true
 	compatible := []string{
 		"1.1.1.1", "udp://8.8.8.8", "tcp://9.9.9.9", "tls://223.5.5.5",
 		"https://1.1.1.1/dns-query", "quic://8.8.4.4", "tailscale://ts-node",
 		"rcode://success", "https://dns.google/dns-query",
-		"https://1.1.1.1/dns-query#system", // fragment contains "system", NOT the scheme
+		"https://1.1.1.1/dns-query#system",
 	}
 	raw.DNS.NameServer = append([]string(nil), compatible...)
-	// Only system + dhcp are stripped; the tls entry between them survives.
 	raw.DNS.Fallback = []string{"system", "tls://1.1.1.1", "dhcp://en0"}
 	normalizeRawConfigForIOS(raw, true)
 	if strings.Join(raw.DNS.NameServer, ",") != strings.Join(compatible, ",") {
@@ -315,11 +272,8 @@ func TestIsUsableBootstrapNameserver(t *testing.T) {
 		"223.5.5.5": true, "223.5.5.5:53": true, "8.8.8.8": true,
 		"2400:3200::1": true, "[2400:3200::1]:53": true,
 		"tls://223.5.5.5": true, "udp://8.8.8.8:53": true,
-		// scheme forms whose host is an IP — mihomo accepts these (a path or
-		// port must not defeat the check):
 		"https://1.1.1.1/dns-query": true, "tls://1.1.1.1:853": true,
 		"quic://[2400:3200::1]:853": true, "https://[2606:4700:4700::1111]/dns-query": true,
-		// not a usable pure-IP bootstrap:
 		"system": false, "system://": false, "dhcp://en0": false,
 		"": false, "   ": false, ":53": false, "udp://:53": false,
 		"dns.google": false, "https://dns.google/dns-query": false,
@@ -332,14 +286,6 @@ func TestIsUsableBootstrapNameserver(t *testing.T) {
 }
 
 func TestNormalizeBootstrapRequiresUsableIP(t *testing.T) {
-	// A bootstrap of system + only junk has nothing a packet tunnel can
-	// bootstrap from. filterBootstrap still keeps it verbatim rather than
-	// stripping to [] — that would trip mihomo's "at least one nameserver"
-	// rule (config/config.go:1453-1454) — but the repair then removes the
-	// system/dhcp entries and, if nothing is left, substitutes mihomo's own
-	// explicit defaults. Junk that is not system/dhcp survives both stages and
-	// mihomo passes its own verdict on it, which is the point: we predict
-	// upstream's answer, we do not invent one.
 	defaults := config.DefaultRawConfig().DNS.DefaultNameserver
 	for _, tc := range []struct {
 		in   []string
@@ -359,7 +305,6 @@ func TestNormalizeBootstrapRequiresUsableIP(t *testing.T) {
 			t.Errorf("bootstrap %v became %v, want %v", tc.in, raw.DNS.DefaultNameserver, tc.want)
 		}
 	}
-	// system + junk + a usable IP: strip the incompatible entry, keep the IP.
 	raw := &config.RawConfig{}
 	raw.DNS.Enable = true
 	raw.DNS.NameServer = []string{"223.5.5.5"}
@@ -405,7 +350,6 @@ proxy-providers:
 	if _, ok := payload[0]["routing-mark"]; ok {
 		t.Fatalf("provider payload routing-mark not stripped: %v", payload[0])
 	}
-	// The proxy itself must survive — only the egress override is stripped.
 	if len(raw.Proxy) != 1 || raw.Proxy[0]["name"] != "node" {
 		t.Fatalf("proxy must survive egress-override strip: %v", raw.Proxy)
 	}
@@ -448,8 +392,6 @@ rules:
 	if err != nil {
 		t.Fatalf("a valid listener catalogue must parse: %v", err)
 	}
-	// mixed-port and allow-lan reach the parsed config now: the local proxy is the user's to
-	// ask for. The DNS server surface and the Apple-owned egress fields still close.
 	if cfg.General.MixedPort == 0 {
 		t.Fatalf("the local proxy surface did not reach the parsed config: general=%+v", cfg.General)
 	}
@@ -459,17 +401,12 @@ rules:
 	if cfg.General.Interface != "" || cfg.General.RoutingMark != 0 || cfg.DNS.ListenRoutingMark != 0 {
 		t.Fatalf("parsed NE surface not closed: general=%+v dns=%+v", cfg.General, cfg.DNS)
 	}
-	// dns.listen is honoured now. What closes here is only what has nowhere to land on Darwin.
 	if cfg.DNS.Listen != "0.0.0.0:53" {
 		t.Fatalf("dns.listen did not reach the parsed config: %q", cfg.DNS.Listen)
 	}
 	if cfg.NTP == nil || !cfg.NTP.Enable || cfg.NTP.WriteToSystem {
 		t.Fatalf("NTP offset service must survive without system-clock writes: %+v", cfg.NTP)
 	}
-	// Listeners and tunnels reach the parsed config now: upstream allows them and the platform
-	// allows them, so this core does too. What the parser still refuses is what upstream
-	// refuses -- an unknown listener type, a tunnel naming a proxy that does not exist -- and
-	// that is parity, not a rule of ours.
 	if len(cfg.Listeners) == 0 || len(cfg.Tunnels) == 0 {
 		t.Fatalf("the listener/tunnel catalogue was stripped: %v / %v", cfg.Listeners, cfg.Tunnels)
 	}
@@ -649,11 +586,6 @@ rules:
 
 func TestParseConfigForIOSHonorsExplicitStoreFakeIPFalse(t *testing.T) {
 	setupConfigPipelineTest(t)
-	// A user who sets store-fake-ip:false wants a bounded in-memory fake-ip pool,
-	// not an unbounded on-disk record of every resolved domain. Upstream defaults
-	// it false and honors an explicit value; forcing it true would silently
-	// override a deliberate privacy choice. Restart-consistency is a soft UX
-	// preference, not a platform requirement, so an explicit value wins.
 	cfg, err := parseConfigForIOS(`
 mode: rule
 profile:
@@ -696,8 +628,6 @@ rules:
 }
 
 func TestParseConfigForIOSAcceptsARemoteProvider(t *testing.T) {
-	// the definition parses as written; the core starts it empty and
-	// fetches it in the background, so nothing here touches the network.
 	setupConfigPipelineTest(t)
 	if _, err := parseConfigForIOS(`
 proxy-providers:
@@ -713,16 +643,6 @@ rules:
 }
 
 func TestParseConfigForIOSRejectsUnsafeProviderHealthCheckDurations(t *testing.T) {
-	// timeout came off this list on 2026-08-27. Upstream accepts a negative or
-	// overflowing one (measured against config.ParseRawConfig) and
-	// adapter/provider/parser.go:71 converts it to uint before NewHealthCheck,
-	// so it becomes a very long timeout rather than a failure -- it costs that
-	// provider's health results, not the configuration.
-	//
-	// interval stays for a reason that is NOT "upstream refuses it": upstream
-	// accepts it too. It reaches time.NewTicker (healthcheck.go:47) through the
-	// same conversion, and what a huge duration does there is unmeasured. This
-	// list is what the tree currently refuses, not what it has proven it must.
 	tests := map[string]string{
 		"negative interval":    "interval: -1",
 		"overflowing interval": "interval: 9223372037",
@@ -927,25 +847,6 @@ func setupConfigPipelineTest(t *testing.T) string {
 	return working
 }
 
-// A dhcp:// or system:// nameserver must not refuse the configuration. Upstream
-// carries both as ordinary transports and reports their failure per query, never
-// at load: a DHCP probe that gets no answer returns ErrNotResponding
-// (component/dhcp/dhcp.go:15) from the resolver, and dns.ParseNameServer accepts
-// both schemes without consulting the platform. sing-box, which does compile its
-// DHCP transport into the Apple build (cmd/internal/build_libbox/main.go:67 adds
-// with_dhcp to darwinTags), takes the same line the other way round: its Start()
-// logs a failed interface fetch from a goroutine and returns nil regardless
-// (dns/transport/dhcp/dhcp.go:95-113), and the build without the tag errors at
-// transport CONSTRUCTION with "rebuild with -tags with_dhcp"
-// (include/dhcp_stub.go) -- an actionable message at the point of use, not a
-// refusal to load the profile.
-//
-// Neither scheme is a platform prohibition, which is what our message claimed.
-// What is true is narrower and belongs to the transport, not the sandbox:
-// mihomo's DHCP client binds 0.0.0.0:68 (component/dhcp/conn.go:13), a
-// privileged port that no unprivileged Apple process can bind -- the containing
-// App as much as the extension. That is a reason to strip and warn, which the
-// packet-tunnel path already does; it was never a reason to refuse to start.
 func TestDHCPAndSystemNameserversDoNotRefuseTheConfig(t *testing.T) {
 	const content = `
 dns:
@@ -954,10 +855,6 @@ dns:
 rules:
   - MATCH,DIRECT
 `
-	// Outside the extension nothing is stripped, so validation sees both schemes
-	// verbatim. This is the seam that used to refuse: service.go:174 passes
-	// platform.UnderNetworkExtension(), and a packet-tunnel profile evaluated
-	// from the App process has networkExtension false and so never strips.
 	outside, err := parseConfigForIOS(content, false)
 	if err != nil {
 		t.Fatalf("dhcp://+system:// refused the config outside the extension: %v", err)
@@ -966,8 +863,6 @@ rules:
 		t.Errorf("outside the extension the resolvers should be kept verbatim, got %d of 3", got)
 	}
 
-	// Inside the extension they are stripped with a warning and the config still
-	// starts -- tolerate + strip, unchanged.
 	inside, err := parseConfigForIOS(content, true)
 	if err != nil {
 		t.Fatalf("dhcp://+system:// refused the config inside the extension: %v", err)
@@ -980,11 +875,6 @@ rules:
 	}
 }
 
-// The privacy ruling that store-fake-ip's explicit value wins used to cost a
-// second full YAML parse of the whole configuration -- 18ms of a 529ms
-// startup on a 578KB profile -- because RawProfile.StoreFakeIP is a bool and
-// an absent key is indistinguishable from an explicit false once decoded.
-// RawProfile now records presence during the one parse that already happens.
 func TestRawProfileRecordsWhetherStoreFakeIPWasWritten(t *testing.T) {
 	for _, item := range []struct {
 		name  string
@@ -996,11 +886,6 @@ func TestRawProfileRecordsWhetherStoreFakeIPWasWritten(t *testing.T) {
 		{"profile without the key", "profile:\n  store-selected: true\n", false, false},
 		{"explicit false", "profile:\n  store-fake-ip: false\n", true, false},
 		{"explicit true", "profile:\n  store-fake-ip: true\n", true, true},
-		// A merge key can carry the field in from an anchor, and resolving
-		// that here would mean walking the document again. Presence is
-		// assumed instead: the cost of guessing wrong is forcing persistence
-		// over a deliberate privacy choice, and the cost of assuming is one
-		// profile that keeps mihomo's own default.
 		{"merge key", "defaults: &d\n  store-fake-ip: false\nprofile:\n  <<: *d\n", true, false},
 	} {
 		t.Run(item.name, func(t *testing.T) {
@@ -1018,8 +903,6 @@ func TestRawProfileRecordsWhetherStoreFakeIPWasWritten(t *testing.T) {
 	}
 }
 
-// The defaults DefaultRawConfig installs must survive a profile block that
-// names only its sibling.
 func TestRawProfileKeepsDefaultsForKeysTheDocumentOmits(t *testing.T) {
 	base, err := config.UnmarshalRawConfig([]byte("mode: rule\n"))
 	if err != nil {

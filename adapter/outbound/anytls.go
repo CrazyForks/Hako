@@ -21,11 +21,6 @@ import (
 
 type AnyTLS struct {
 	*Base
-	// The session client is built on the first dial, not at load. An idle
-	// node used to pay its whole client here -- including the idle-cleanup
-	// goroutine session.NewClient starts -- multiplied by every node of a
-	// subscription while exactly one is active. Validation stays in
-	// NewAnyTLS; only the construction waits.
 	client      *anytls.Client
 	clientOnce  sync.Once
 	buildClient func() *anytls.Client
@@ -96,7 +91,6 @@ func (t *AnyTLS) ProxyInfo() C.ProxyInfo {
 
 // Close implements C.ProxyAdapter
 func (t *AnyTLS) Close() error {
-	// Only a client that was actually built holds sessions or a goroutine.
 	if t.clientBuilt() {
 		return t.client.Close()
 	}
@@ -197,8 +191,6 @@ func (t *AnyTLS) lazyClient() *anytls.Client {
 
 func (t *AnyTLS) clientBuilt() bool {
 	built := true
-	// Once.Do runs at most one function ever; if ours runs, the client was
-	// never built before this Close and there is nothing to close.
 	t.clientOnce.Do(func() { built = false })
 	return built
 }

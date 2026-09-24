@@ -6,14 +6,6 @@ import (
 	"testing"
 )
 
-// TestTheExportersUnsetPlaceholderIsNotReadAsAValue covers the habit behind two
-// different symptoms: the exporter writes `none` into a field the user left
-// alone instead of omitting the key. Read literally it refused a snell record
-// outright (strconv.Atoi("none")) and, more quietly, handed mihomo "none" as a
-// hysteria protocol and a tuic congestion controller -- accepted, and wrong.
-//
-// The last case is the guard rail: `encryption=none` on vless is a real value,
-// and blanking it would be the same mistake pointing the other way.
 func TestTheExportersUnsetPlaceholderIsNotReadAsAValue(t *testing.T) {
 	read := func(t *testing.T, link string) map[string]any {
 		t.Helper()
@@ -54,12 +46,6 @@ func TestTheExportersUnsetPlaceholderIsNotReadAsAValue(t *testing.T) {
 	})
 }
 
-// TestTheExporterOmitsWhatItConsidersImplicit covers the other half of the same
-// habit: rather than writing a placeholder, the exporter drops a key whose value
-// it treats as the only possible one. mieru is the case -- the kernel refuses
-// anything but TCP or UDP and the exporter carries the transport in only one
-// direction -- and snell is the counter-case, where an empty credential must stay
-// empty rather than be back-filled from the encoding around it.
 func TestTheExporterOmitsWhatItConsidersImplicit(t *testing.T) {
 	t.Run("mieru transport is recovered", func(t *testing.T) {
 		box, err := InspectProxyPayloadForIOS([]byte("mierus://user:sample@e.invalid?port=443&profile=p"), "singleNode")
@@ -79,9 +65,6 @@ func TestTheExporterOmitsWhatItConsidersImplicit(t *testing.T) {
 	})
 
 	t.Run("an empty snell key is reported, not invented", func(t *testing.T) {
-		// The authority decodes to "chacha20-ietf-poly1305:" -- a cipher and no
-		// key. Keeping the undecoded base64 imported a node whose PSK was the
-		// encoding of its own cipher name.
 		box, err := InspectProxyPayloadForIOS(
 			[]byte("snell://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTo@198.51.100.10:443?version=4#n"), "singleNode")
 		if err != nil {
@@ -101,12 +84,6 @@ func TestTheExporterOmitsWhatItConsidersImplicit(t *testing.T) {
 	})
 }
 
-// TestTheExporterMovesCredentialsAndWeFollowThem is the mieru instance of the
-// family the vless authority prefix belongs to: the exporter puts a base64
-// `user:password` in the username position and leaves the password empty, and
-// upstream reads both halves raw, so the whole encoded pair became the username.
-// Paired with socks5h, which upstream's converter accepts and this registry did
-// not list at all.
 func TestTheExporterMovesCredentialsAndWeFollowThem(t *testing.T) {
 	read := func(t *testing.T, link string) map[string]any {
 		t.Helper()
@@ -125,7 +102,6 @@ func TestTheExporterMovesCredentialsAndWeFollowThem(t *testing.T) {
 	}
 
 	t.Run("mieru userinfo is decoded", func(t *testing.T) {
-		// dTpw is base64 for "u:p".
 		proxy := read(t, "mierus://dTpw:@example.invalid?port=2999&profile=p")
 		if got := anyString(proxy["username"]); got != "u" {
 			t.Errorf("username = %q, want u -- the encoded pair was taken whole", got)

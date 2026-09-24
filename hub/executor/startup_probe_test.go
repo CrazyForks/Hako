@@ -7,14 +7,6 @@ import (
 	P "github.com/TokenPLS/Hako/constant/provider"
 )
 
-// A provider that dies while it is being built has to have been named first.
-//
-// The per-provider probe was emitted after Initial returned, which is the one moment a
-// process killed inside Initial never reaches. On a device this was not academic: a
-// 4.7 MB domain rule-set took the extension from 25 MiB to the 50 MiB ceiling inside
-// Initial, and the only account that survived named the step before it -- so the
-// provider that spent the memory could be identified solely by re-running the tunnel
-// against cut-down subsets until one of them lived.
 
 type probedProvider struct {
 	name         string
@@ -38,7 +30,6 @@ func probeStepsAround(t *testing.T, providerType P.ProviderType, name string) (d
 	t.Helper()
 	var steps []string
 	StartupProbe = func(step string) { steps = append(steps, step) }
-	// One at a time, so the steps this reads are this provider's and nobody else's.
 	SerializeProviderLoads = func() bool { return true }
 	t.Cleanup(func() {
 		StartupProbe = nil
@@ -73,8 +64,6 @@ func TestAProxyProviderIsNamedBeforeItIsBuilt(t *testing.T) {
 	}
 }
 
-// The seams are nil everywhere but the Apple binding, and a build that installs neither
-// must behave exactly as upstream does.
 func TestLoadProviderWithoutTheSeamsInstalledDoesNotPanic(t *testing.T) {
 	StartupProbe = nil
 	SerializeProviderLoads = nil

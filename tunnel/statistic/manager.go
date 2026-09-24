@@ -47,7 +47,6 @@ type Manager struct {
 	proxyDownloadBlip  atomic.Int64
 	proxyUploadTotal   atomic.Int64
 	proxyDownloadTotal atomic.Int64
-	// Session-long buckets the widget reads; the proxy bucket is the pair above.
 	directUploadTotal   atomic.Int64
 	directDownloadTotal atomic.Int64
 	rejectUploadTotal   atomic.Int64
@@ -58,8 +57,6 @@ type Manager struct {
 	pid                 int32
 	memory              atomic.Uint64
 
-	// lastReadAt is when a caller last asked for a rate, as Unix nanoseconds. The sampler
-	// stops when nobody has asked recently and the next read wakes it. See handle().
 	lastReadAt atomic.Int64
 	sampleWake chan struct{}
 }
@@ -87,21 +84,6 @@ func (m *Manager) Range(f func(c Tracker) bool) {
 	})
 }
 
-// reservedNonProxyOutbounds are the built-in egress names (adapter/outbound)
-// whose bytes are not real proxy traffic and must be excluded from the
-// proxy-only counters used as release evidence: the direct/reject/
-// pass/compatible pseudo-outbounds. finalOutbound is the real egress name
-// (Chain.Last()). A user-named direct-type outbound is not covered here — the
-// egress adapter's type is not reachable from this package without an import
-// cycle, so type-exact classification would have to be threaded from the dial
-// site.
-// OutboundBucket is where a connection's bytes are counted by the outbound it finally
-// left through: a real proxy, the device's own network, or nowhere. It is decided once,
-// when the tracker is built, from the outbound's name -- the reserved names are the
-// built-in egresses, everything else is a proxy -- which is the same line the proxy-only
-// counters have drawn since, so a widget reading the proxy bucket reads the
-// figure the release evidence reads. A user-defined outbound of type direct with a name
-// of its own counts as a proxy here, exactly as it does there.
 type OutboundBucket uint8
 
 const (
@@ -118,7 +100,6 @@ var reservedOutboundBuckets = map[string]OutboundBucket{
 	"REJECT-DROP": BucketReject,
 }
 
-// BucketForOutbound names the bucket a final outbound's bytes and connection belong to.
 func BucketForOutbound(finalOutbound string) OutboundBucket {
 	if bucket, reserved := reservedOutboundBuckets[finalOutbound]; reserved {
 		return bucket
@@ -130,8 +111,6 @@ func isProxyOutbound(finalOutbound string) bool {
 	return BucketForOutbound(finalOutbound) == BucketProxy
 }
 
-// PushUploaded counts bytes by outbound name. Trackers decide the bucket once and call
-// pushUploaded; this entry point stays for callers that only hold a name.
 func (m *Manager) PushUploaded(finalOutbound string, size int64) {
 	m.pushUploaded(BucketForOutbound(finalOutbound), size)
 }
@@ -168,15 +147,11 @@ func (m *Manager) pushDownloaded(bucket OutboundBucket, size int64) {
 	m.downloadTotal.Add(size)
 }
 
-// BucketTotal is one bucket's session-long byte totals.
 type BucketTotal struct {
 	Up   int64
 	Down int64
 }
 
-// OutboundTotals is what the widget asks for: bytes per bucket and connection counts,
-// all since this process started. Active is the number of tracked connections open
-// right now; Rejected counts connections handed to a reject outbound.
 type OutboundTotals struct {
 	Proxy    BucketTotal
 	Direct   BucketTotal
@@ -197,8 +172,6 @@ func (m *Manager) OutboundTotals() OutboundTotals {
 	}
 }
 
-// noteJoin and noteLeave keep the connection counts beside the byte counters, on the
-// open/close path rather than the byte path.
 func (m *Manager) noteJoin(bucket OutboundBucket) {
 	m.opened.Add(1)
 	m.active.Add(1)
@@ -211,12 +184,6 @@ func (m *Manager) noteLeave() {
 	m.active.Add(-1)
 }
 
-// Now returns the transfer rate over the last sampled second.
-//
-// Reading it is what keeps the sampler running: it stops when nobody has asked for
-// sampleIdleTimeout, so a caller that wants rates has to ask for them. Snapshot deliberately does
-// NOT mark a read -- it returns totals and connections, not rates, so waking the sampler for it
-// would put the ticker back for callers that never look at a rate.
 func (m *Manager) Now() (up int64, down int64) {
 	m.noteRateRead()
 	return m.uploadBlip.Load(), m.downloadBlip.Load()
@@ -283,27 +250,8 @@ func (m *Manager) ResetStatistic() {
 	m.proxyDownloadTotal.Store(0)
 }
 
-// sampleIdleTimeout is how long the sampler keeps running after the last time anyone asked for
-// a rate. It only has to outlast a once-per-second poller comfortably; sing-box's equivalent
-// stops the instant its HTTP client disconnects, and "nobody has asked for five seconds" is the
-// closest thing to a disconnect an on-demand API has.
 const sampleIdleTimeout = 5 * time.Second
 
-// handle samples the per-second transfer rate, and only while someone is reading it.
-//
-// This used to be an unconditional 1 Hz ticker started at package init and never stopped: it ran
-// for the life of every process that imported this package, with no reader and no tunnel
-// required. sing-box has no process-lifetime accounting ticker at all -- its equivalents live
-// inside the clash-api HTTP handlers with defer tick.Stop(), so they exist only while a client is
-// attached (experimental/clashapi/server.go, api_meta.go).
-//
-// Our readers are one-shot calls rather than long-lived subscriptions, so "while a client is
-// attached" becomes "while someone has asked recently".
-//
-// The subtle part is RESUMING. The temp counters keep accumulating while the sampler is stopped,
-// so publishing that accumulation as a one-second rate would display a spike that never happened
-// -- a whole idle span reported as one second of traffic. On resume the accumulation is therefore
-// DISCARDED, and the first published rate covers a real second of sampling.
 func (m *Manager) handle() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -312,8 +260,6 @@ func (m *Manager) handle() {
 		if m.sampleIdle() {
 			ticker.Stop()
 			<-m.sampleWake
-			// Throw away everything that accumulated while nothing was sampling. Publishing it
-			// would be a rate spike for a second that never carried that traffic.
 			m.uploadTemp.Store(0)
 			m.downloadTemp.Store(0)
 			m.proxyUploadTemp.Store(0)
@@ -325,7 +271,6 @@ func (m *Manager) handle() {
 		select {
 		case <-ticker.C:
 		case <-m.sampleWake:
-			// A read arrived; keep sampling on the existing cadence.
 			continue
 		}
 
@@ -336,24 +281,19 @@ func (m *Manager) handle() {
 	}
 }
 
-// sampleIdle reports whether nobody has asked for a rate recently.
 func (m *Manager) sampleIdle() bool {
 	last := m.lastReadAt.Load()
 	if last == 0 {
-		// Nobody has ever read a rate in this process. Common in the Network Extension, where
-		// the containing App may never open a traffic view.
 		return true
 	}
 	return time.Since(time.Unix(0, last)) > sampleIdleTimeout
 }
 
-// noteRateRead records that someone wants rates and wakes the sampler if it stopped.
 func (m *Manager) noteRateRead() {
 	m.lastReadAt.Store(time.Now().UnixNano())
 	select {
 	case m.sampleWake <- struct{}{}:
 	default:
-		// A wake is already pending, or the sampler is running and will see lastReadAt.
 	}
 }
 

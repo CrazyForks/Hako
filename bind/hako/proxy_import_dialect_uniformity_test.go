@@ -9,13 +9,6 @@ import (
 	"github.com/TokenPLS/Hako/adapter"
 )
 
-// One Shadowrocket dialect, one answer. The exporter spells websocket the same
-// way for every protocol that has it -- obfs=websocket, obfsParam for the Host,
-// path for the path -- so a reader who pastes the trojan form and the vless form
-// of the same node must get the same transport out. Before this gate the dialect
-// lived in two layers times one branch per protocol, and each branch had copied
-// however much of it its author needed: vmess complete, vless dropping obfs in
-// silence, trojan refusing obfsParam outright.
 func TestShadowrocketWebsocketDialectIsUniformAcrossProtocols(t *testing.T) {
 	const host, path = "cdn.example.invalid", "/ray"
 	dialect := "?obfs=websocket&obfsParam=" + host + "&path=" + path + "&tls=1&peer=sni.example.invalid"
@@ -48,11 +41,6 @@ func TestShadowrocketWebsocketDialectIsUniformAcrossProtocols(t *testing.T) {
 			if got, _ := headers["Host"].(string); got != host {
 				t.Fatalf("ws-opts.headers.Host = %q, want %q (obfsParam carries it)", got, host)
 			}
-			// tls is asserted only where mihomo has the field. trojan carries TLS
-			// implicitly and its option struct has no tls key (adapter/outbound:
-			// only sni and skip-cert-verify), so tls=1 there is a dialect key that
-			// is accepted and deliberately ignored -- the third case the ledger's
-			// own comment names and the implementation never had a place for.
 			if name != "trojan" {
 				if tls, _ := proxy["tls"].(bool); !tls {
 					t.Fatalf("tls = false, want true")
@@ -106,15 +94,8 @@ func TestLegacyCredentialAuthorityKeepsTheIDNotTheMethod(t *testing.T) {
 	}
 }
 
-// TestShadowrocketObfuscationDialectReachesShadowsocks is the ss cell of the same
-// dialect: the exporter writes `obfs=websocket&obfsParam=…&path=…` on ss exactly
-// as on vmess, and lands it in plugin/plugin-opts because that is where mihomo
-// keeps an ss obfuscation (ss.md: v2ray-plugin for websocket, obfs for http/tls).
-// The authority is the exporter's default whole-authority base64, which is the
-// path on which upstream reads no plugin at all -- so the `plugin=` spelling is
-// covered too, and both are handed to adapter.ParseProxy.
 func TestShadowrocketObfuscationDialectReachesShadowsocks(t *testing.T) {
-	const authority = "YWVzLTEyOC1nY206c2FtcGxlQDE5OC41MS4xMDAuNTA6ODM4OA" // aes-128-gcm:sample@198.51.100.50:8388
+	const authority = "YWVzLTEyOC1nY206c2FtcGxlQDE5OC41MS4xMDAuNTA6ODM4OA"
 	for name, want := range map[string]struct {
 		link   string
 		plugin string
@@ -154,18 +135,13 @@ func TestShadowrocketObfuscationDialectReachesShadowsocks(t *testing.T) {
 	}
 }
 
-// TestUnauthenticatedSocksSurvivesTheExportersBase64Authority: the exporter
-// base64s `host:port` for a socks node with no credentials exactly as it base64s
-// `user:pass@host:port` for one with them, and the unwrapping used to require an
-// `@` -- so the credential-free node, legal per socks.en.md, never unwrapped and
-// upstream refused it as format invalid.
 func TestUnauthenticatedSocksSurvivesTheExportersBase64Authority(t *testing.T) {
 	for name, want := range map[string]struct {
 		link     string
 		username string
 	}{
-		"no credentials": {"socks://MTk4LjUxLjEwMC41MDoxMDgw?remarks=S-noauth", ""},                   // 198.51.100.50:1080
-		"credentials":    {"socks://dXNlcjpzYW1wbGVAMTk4LjUxLjEwMC41MDoxMDgw?remarks=S-auth", "user"}, // user:sample@198.51.100.50:1080
+		"no credentials": {"socks://MTk4LjUxLjEwMC41MDoxMDgw?remarks=S-noauth", ""},
+		"credentials":    {"socks://dXNlcjpzYW1wbGVAMTk4LjUxLjEwMC41MDoxMDgw?remarks=S-auth", "user"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			report := inspectProxyPayloadReport(t, want.link, "singleNode")

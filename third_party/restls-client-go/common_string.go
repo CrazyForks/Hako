@@ -5,8 +5,6 @@ package tls
 import "strconv"
 
 func _() {
-	// An "invalid array index" compiler error signifies that the constant values have changed.
-	// Re-run the stringer command to generate them again.
 	var x [1]struct{}
 	_ = x[PKCS1WithSHA256-1025]
 	_ = x[PKCS1WithSHA384-1281]
@@ -64,8 +62,6 @@ func (i SignatureScheme) String() string {
 	}
 }
 func _() {
-	// An "invalid array index" compiler error signifies that the constant values have changed.
-	// Re-run the stringer command to generate them again.
 	var x [1]struct{}
 	_ = x[CurveP256-23]
 	_ = x[CurveP384-24]
@@ -94,8 +90,6 @@ func (i CurveID) String() string {
 	}
 }
 func _() {
-	// An "invalid array index" compiler error signifies that the constant values have changed.
-	// Re-run the stringer command to generate them again.
 	var x [1]struct{}
 	_ = x[NoClientCert-0]
 	_ = x[RequestClientCert-1]

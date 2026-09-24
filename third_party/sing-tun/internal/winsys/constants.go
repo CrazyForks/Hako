@@ -16,7 +16,6 @@ const (
 	MAX_PATH          = 260
 )
 
-// https://docs.microsoft.com/en-us/windows/desktop/api/tlhelp32/nf-tlhelp32-createtoolhelp32snapshot
 const (
 	TH32CS_SNAPHEAPLIST = 0x00000001
 	TH32CS_SNAPPROCESS  = 0x00000002

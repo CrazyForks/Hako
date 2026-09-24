@@ -26,9 +26,6 @@ func TestControlledDirectTCPInterop(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if test.version == "ipv6" {
-				// The production config executor derives this process-wide policy
-				// from top-level `ipv6: true`. ParseProxy alone intentionally does
-				// not alter runtime DNS policy, so reproduce that prerequisite here.
 				originalDisableIPv6 := resolver.DisableIPv6
 				resolver.DisableIPv6 = false
 				defer func() { resolver.DisableIPv6 = originalDisableIPv6 }()

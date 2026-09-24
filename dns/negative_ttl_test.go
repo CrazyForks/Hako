@@ -7,23 +7,6 @@ import (
 	D "github.com/miekg/dns"
 )
 
-// Negative answers are cached exactly the way mihomo caches them: minimalTTL over
-// Answer+Ns+Extra, with no branch for negativity at all.
-//
-// This file used to assert RFC 2308 section 5 instead -- a negative answer's lifetime is
-// min(SOA MINIMUM, the SOA's header TTL) -- and that reading is the conformant one. Measured
-// against live responses, amazon.com's NXDOMAIN via 1.1.1.1 carries a 7200 second header TTL
-// where the RFC gives 60, so mihomo caches "this name does not exist" for two hours after a
-// zone says one minute. Removing the fix reintroduces that, knowingly.
-//
-// It was removed anyway. Being more correct than mihomo is still being different from
-// mihomo, and the promise this core makes is that a mihomo configuration behaves the way its
-// author expects -- which is however mihomo behaves, bugs included. The same helper exists in
-// sing-box (dns/client.go extractNegativeTTL), so "written from the RFC" also described a
-// shape only the other project has. The fix belongs upstream, where every mihomo user gets it.
-//
-// These tests now pin the parity. If one of them fails, this core has drifted away from
-// mihomo again -- check dns/util.go putMsgToCache against v1.19.29 before changing the test.
 
 func negativeReply(t *testing.T, rcode int, soaHeaderTTL, soaMinimum uint32) *D.Msg {
 	t.Helper()
@@ -51,14 +34,9 @@ func cachedLifetime(t *testing.T, reply *D.Msg) (time.Duration, bool) {
 	if !hit {
 		return 0, false
 	}
-	// Rounded UP: the expiry is computed from a clock read inside putMsgToCache, always a
-	// hair after `before`, so the raw difference is a few hundred nanoseconds short of the
-	// TTL and Round() lands it one second low.
 	return expireAt.Sub(before).Truncate(time.Second) + time.Second, true
 }
 
-// The case the deviation existed for: an SOA MINIMUM well below its header TTL. mihomo takes
-// the header TTL and never looks at MINIMUM, so this core does the same.
 func TestNXDomainTakesTheSOAHeaderTTLLikeMihomo(t *testing.T) {
 	lifetime, hit := cachedLifetime(t, negativeReply(t, D.RcodeNameError, 7200, 60))
 	if !hit {
@@ -71,8 +49,6 @@ func TestNXDomainTakesTheSOAHeaderTTLLikeMihomo(t *testing.T) {
 	}
 }
 
-// NODATA -- NOERROR with no record of the requested type -- takes the same path, because
-// mihomo has no negativity branch to take.
 func TestNoDataTakesTheSameUnbranchedPath(t *testing.T) {
 	lifetime, hit := cachedLifetime(t, negativeReply(t, D.RcodeSuccess, 1800, 30))
 	if !hit {
@@ -83,9 +59,6 @@ func TestNoDataTakesTheSameUnbranchedPath(t *testing.T) {
 	}
 }
 
-// A negative answer with no SOA is cached on whatever records it does carry. The removed
-// version refused to cache it at all (RFC 2308: no SOA, no bound to count down); mihomo has
-// no such rule, so the NSEC's own TTL decides.
 func TestNegativeAnswerWithoutSOAIsStillCached(t *testing.T) {
 	question := new(D.Msg)
 	question.SetQuestion("absent.example.com.", D.TypeA)
@@ -108,10 +81,6 @@ func TestNegativeAnswerWithoutSOAIsStillCached(t *testing.T) {
 	}
 }
 
-// A CNAME chain with no record of the requested type is negative in RFC 2308's sense, and
-// mihomo caches it on the CNAME's TTL regardless. Pinned because this was the subtlest case
-// the removed code handled: it is the one where "negative" is not visible from an empty
-// answer section.
 func TestCNAMEOnlyAnswerIsCachedOnTheCNAMETTL(t *testing.T) {
 	question := new(D.Msg)
 	question.SetQuestion("alias.example.com.", D.TypeA)
@@ -140,14 +109,12 @@ func TestCNAMEOnlyAnswerIsCachedOnTheCNAMETTL(t *testing.T) {
 	}
 }
 
-// Unchanged, and upstream's own: a zero minimal TTL means do not cache.
 func TestZeroTTLIsStillNotCached(t *testing.T) {
 	if _, hit := cachedLifetime(t, negativeReply(t, D.RcodeNameError, 0, 0)); hit {
 		t.Fatal("an answer whose minimal TTL is zero was cached")
 	}
 }
 
-// Also unchanged and also upstream's: SERVFAIL keeps its own five-second bound.
 func TestServerFailureKeepsUpstreamsOwnBound(t *testing.T) {
 	lifetime, hit := cachedLifetime(t, negativeReply(t, D.RcodeServerFailure, 7200, 60))
 	if !hit {

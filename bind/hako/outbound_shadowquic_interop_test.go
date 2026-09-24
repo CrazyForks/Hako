@@ -17,14 +17,6 @@ import (
 	IN "github.com/TokenPLS/Hako/listener/inbound"
 )
 
-// TestControlledShadowQUICReferenceInterop is the controlled interop evidence for
-// the ShadowQUIC outbound that mihomo v1.19.29 introduced. The reference server is
-// this core's own ShadowQUIC listener, the same pattern the Hysteria2 realm and
-// TUIC interop tests use, driven through adapter.ParseProxy so the config surface
-// is exercised too. It covers QUIC, TCP, UDP, JLS authentication (a wrong password
-// must fail without reaching the target) and the brutal congestion-control
-// negotiation, which transport/shadowquic treats as an optional upgrade that must
-// leave the connection usable.
 func TestControlledShadowQUICReferenceInterop(t *testing.T) {
 	pinUnifiedDelayOff(t)
 	for _, test := range []struct {
@@ -61,8 +53,6 @@ func runControlledShadowQUICVariant(t *testing.T, quicVersion, congestionControl
 		MaxIdleTime:          30000,
 		MaxDatagramFrameSize: 1400,
 		Users:                []IN.ShadowQuicUser{{Username: username, Password: password}},
-		// An authenticated session must never reach the JLS upstream; point it at a
-		// closed port so any fallthrough would fail loudly instead of succeeding.
 		JLSUpstream: IN.ShadowQuicJLSUpstream{Addr: "127.0.0.1:1"},
 	})
 	if err != nil {

@@ -17,30 +17,17 @@ import (
 	"github.com/metacubex/blake3"
 )
 
-// RestlsServerConfig configures a Restls server connection.
 type RestlsServerConfig struct {
-	// ServerHostname is the camouflage target contacted and relayed during the
-	// Restls handshake. If no port is present, :443 is used.
 	ServerHostname string
 
-	// Password is the shared Restls password. It is expanded into the traffic
-	// authentication key with the same derivation used by NewRestlsConfig.
 	Password string
 
-	// RestlsScript controls the server-to-client record sizing and fake response
-	// behavior. If empty, the package default script is used.
 	RestlsScript string
 
-	// MinRecordLen is the minimum server-to-client Restls record target length
-	// used after the script is exhausted. If zero, RestlsServer uses 15.
 	MinRecordLen int
 
-	// RateLimit limits fallback relay traffic in bits per second in each
-	// direction. If zero, fallback traffic is not rate limited.
 	RateLimit uint64
 
-	// DialContext opens the outbound connection to ServerHostname. If nil,
-	// RestlsServer uses a zero-value net.Dialer.
 	DialContext func(ctx context.Context, network, address string) (net.Conn, error)
 }
 
@@ -56,8 +43,6 @@ const (
 	maxRateLimitBurstBytes        = 64 * 1024
 )
 
-// RestlsServer completes the Restls handshake and returns the authenticated
-// plaintext connection.
 func RestlsServer(ctx context.Context, inbound net.Conn, config *RestlsServerConfig) (net.Conn, error) {
 	success := false
 	defer func() {

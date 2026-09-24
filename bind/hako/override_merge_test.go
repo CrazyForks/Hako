@@ -30,7 +30,6 @@ func TestMergeOverridePatchesScalarAndPrependsRule(t *testing.T) {
 	if !strings.Contains(got, "ipv6: true") {
 		t.Fatalf("added key missing:\n%s", got)
 	}
-	// prepended rule must appear before MATCH
 	i := strings.Index(got, "DOMAIN-SUFFIX,x.com,PROXY")
 	j := strings.Index(got, "MATCH,DIRECT")
 	if i < 0 || j < 0 || i > j {

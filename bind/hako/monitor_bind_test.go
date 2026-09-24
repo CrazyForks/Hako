@@ -7,9 +7,6 @@ import (
 	"github.com/TokenPLS/Hako/component/dialer"
 )
 
-// DoD: the NWPathMonitor callback updates the dialer's default
-// interface and treats same-interface capability changes as meaningful while
-// suppressing truly identical callbacks.
 func TestInterfaceUpdaterUpdatesDialer(t *testing.T) {
 	orig := dialer.DefaultInterface.Load()
 	t.Cleanup(func() { dialer.DefaultInterface.Store(orig) })
@@ -30,7 +27,6 @@ func TestInterfaceUpdaterUpdatesDialer(t *testing.T) {
 	if got := dialer.DefaultInterface.Load(); got != "en0" {
 		t.Fatalf("DefaultInterface = %q, want en0", got)
 	}
-	// An identical callback is a no-op.
 	u.UpdateDefaultInterface("en0", 4, false, false, true, true)
 	if flushes.Load() != 1 || resets.Load() != 1 {
 		t.Fatalf("identical path thrashed caches: flush=%d reset=%d", flushes.Load(), resets.Load())
@@ -38,19 +34,6 @@ func TestInterfaceUpdaterUpdatesDialer(t *testing.T) {
 	if closes.Load() != 0 {
 		t.Fatalf("initial path closed connections: %d", closes.Load())
 	}
-	// Same interface, changed capability is still a meaningful path update for the
-	// resolver, and it stays that way.
-	//
-	// It was briefly treated as a no-op on the grounds that nothing in the tree reads
-	// isExpensive or isConstrained. That was the wrong conclusion from a true premise: a
-	// changed flag is not consumed as a capability, but it is the only evidence this
-	// process gets that the path was REPLACED. Moving from Wi-Fi to a Personal Hotspot
-	// keeps the interface name, index and address families and changes only "expensive",
-	// while the source address and gateway move -- so treating it as a no-op left DNS
-	// sockets pinned to a dead path, and the request failed rather than merely re-dialled.
-	//
-	// Connections are still not closed here: a TCP flow through the tunnel recovers on its
-	// own, where a DNS socket does not.
 	u.UpdateDefaultInterface("en0", 4, false, true, true, true)
 	if flushes.Load() != 2 || resets.Load() != 2 {
 		t.Fatalf("same-interface capability change was ignored: flush=%d reset=%d", flushes.Load(), resets.Load())
@@ -58,13 +41,10 @@ func TestInterfaceUpdaterUpdatesDialer(t *testing.T) {
 	if closes.Load() != 0 {
 		t.Fatalf("capability-only change closed connections: %d", closes.Load())
 	}
-	// A same-interface IP-family transition invalidates every physical socket
-	// and must activate NAT64 policy before the next dial.
 	u.UpdateDefaultInterface("en0", 4, false, true, false, true)
 	if closes.Load() != 1 || flushes.Load() != 3 || resets.Load() != 3 {
 		t.Fatalf("address-family transition close/flush/reset=%d/%d/%d", closes.Load(), flushes.Load(), resets.Load())
 	}
-	// Switch to cellular.
 	u.UpdateDefaultInterface("pdp_ip0", 10, true, false, true, true)
 	if got := dialer.DefaultInterface.Load(); got != "pdp_ip0" {
 		t.Fatalf("DefaultInterface = %q, want pdp_ip0", got)
@@ -76,8 +56,6 @@ func TestInterfaceUpdaterUpdatesDialer(t *testing.T) {
 		t.Fatalf("interface switch closed %d connection sets, want 2", closes.Load())
 	}
 
-	// Loss of all physical paths clears the dialer scope and closes flows that
-	// would otherwise continue on a stale interface.
 	u.UpdateDefaultInterface("", 0, false, false, false, false)
 	if got := dialer.DefaultInterface.Load(); got != "" {
 		t.Fatalf("unavailable path left DefaultInterface=%q", got)
@@ -125,7 +103,6 @@ func TestInterfaceUpdaterTreatsSameNameIndexChangeAsIdentityChange(t *testing.T)
 	}
 }
 
-// startInterfaceMonitor is a no-op when the platform opts out (app-process path).
 func TestStartInterfaceMonitorOptOut(t *testing.T) {
 	setupRuntimeProfile.Store(uint32(runtimeProfileIOSPacketTunnel))
 	listener, err := startInterfaceMonitor(&recordingPlatform{})
@@ -134,10 +111,6 @@ func TestStartInterfaceMonitorOptOut(t *testing.T) {
 	}
 }
 
-// macOS Packet Tunnel sockets already receive NECP's provider-originated
-// tunnel exclusion. The Core still needs path updates to invalidate resolver,
-// interface and connection state, but must not force those sockets onto one
-// physical interface merely to receive the callback.
 func TestMacOSPacketTunnelMonitorsPathWithoutSocketBinding(t *testing.T) {
 	originalProfile := currentRuntimeProfile()
 	setupRuntimeProfile.Store(uint32(runtimeProfileMacOSPacketTunnel))

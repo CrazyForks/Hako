@@ -2,10 +2,6 @@ package statistic
 
 import "testing"
 
-// bytes whose final egress is a reserved non-proxy outbound
-// (direct/reject/reject-drop/pass/compatible) must not inflate the proxy-only
-// counters used as release evidence. Previously only exact "DIRECT" was
-// excluded, so REJECTed and other pseudo-outbound bytes counted as proxy.
 func TestManagerExcludesReservedNonProxyOutbounds(t *testing.T) {
 	for _, name := range []string{"DIRECT", "COMPATIBLE", "REJECT", "REJECT-DROP", "PASS"} {
 		m := &Manager{}

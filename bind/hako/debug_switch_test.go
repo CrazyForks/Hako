@@ -6,15 +6,6 @@ import (
 	"github.com/TokenPLS/Hako/log"
 )
 
-// /debug/gc and /debug/pprof were absent from every build this product ever shipped, and the
-// reason was not a decision: route.Config.IsDebug was never assigned, so its zero value kept
-// the whole group unregistered. Upstream gates them the same way, so this was never "stricter
-// than upstream" -- it was a switch nobody wired, which is a different defect and would not have
-// been found by looking for invented constraints.
-//
-// It matters more than a debug endpoint usually would: the memory attribution this batch did by
-// hand -- reading breadcrumbs, correlating footprints across probes -- is what pprof answers
-// directly, and the extension was being killed at 49.5 MiB while we did it.
 func TestDebugRoutesFollowTheConfiguredLogLevel(t *testing.T) {
 	for name, document := range map[string]string{
 		"debug": `
@@ -44,8 +35,6 @@ rules:
 			if server.IsDebug != want {
 				t.Errorf("log-level %s produced IsDebug=%v, want %v", name, server.IsDebug, want)
 			}
-			// Fixture check: the two cases must actually differ, or this test passes by
-			// comparing a constant with itself.
 			if name == "debug" && !want {
 				t.Fatal("fixture is wrong: log-level debug did not parse as log.DEBUG")
 			}

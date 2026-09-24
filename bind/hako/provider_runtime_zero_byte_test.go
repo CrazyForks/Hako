@@ -7,15 +7,6 @@ import (
 	"testing"
 )
 
-// A rule set the App staged EMPTY because its download failed (a 404'd rule
-// set, a walled network) is the client's deliberate start-first design: the
-// profile starts and that one rule set matches nothing, exactly as upstream
-// treats a rule provider whose Initial() fails (hub/executor/executor.go:
-// 318-338, warn-and-continue). The staging size guard sat in front of that
-// tolerance and killed the whole start with "published provider size is
-// invalid" before mihomo ever saw the file — the second half of the 100K
-// incident, after the client-side store refused to read the same revision
-// back. Zero bytes must take the same non-fatal path as unreadable content.
 func TestZeroByteRuleProviderFileStartsWarnAndContinue(t *testing.T) {
 	options := testOptions(t)
 	if err := Setup(options); err != nil {

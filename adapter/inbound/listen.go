@@ -20,14 +20,6 @@ var (
 	globalMPTCP = atomic.NewBool(false)
 )
 
-// DefaultListenerHook and DefaultListenerWrapper are the inbound counterparts
-// of dialer.DefaultSocketHook: nil by default, changing nothing, installed by
-// the Apple bind layer where the Network Extension's socket interface scope
-// makes an untouched listener structurally deaf to loopback traffic. The hook
-// runs in every listener socket's Control chain (Listen and ListenPacket
-// both); the wrapper runs after a successful TCP Listen and may replace the
-// listener, with relisten building any companion through the same
-// configuration path — hook included — as the primary.
 var (
 	DefaultListenerHook    func(network, address string, conn syscall.RawConn) error
 	DefaultListenerWrapper func(network, address string, primary net.Listener, relisten func(context.Context, string, string) (net.Listener, error)) (net.Listener, error)

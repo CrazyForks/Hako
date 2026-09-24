@@ -8,26 +8,6 @@ import (
 	"testing"
 )
 
-// A JSON body key this build does not map is named, and the node arrives.
-//
-// The share-link importer learned this on 2026-08-28 for query keys; the
-// twenty-two JSON whitelists -- the vmess base64 body, every level of a
-// sing-box outbound, every level of a v2ray outbound, the Shadowrocket server
-// object -- kept refusing. There is no upstream to measure the container
-// dialects against (mihomo does not read sing-box or v2ray files), which is
-// why the parity gate could not see them and why they outlived the ruling by
-// a week. The reader closed that on 2026-09-02: one rule for every key this
-// importer reads. Parse what parses, name what was not honoured, and never
-// let a field nobody maps cost a node that would have connected.
-//
-// Most probes are keys real files carry: v2ray writes `"level": 0` on every
-// user and `"mux"` on every outbound; sing-box 1.12 writes
-// `domain_resolver`; Shadowrocket's own JSON export is where `class` and
-// `verify_cert` come from. Each was a refusal the day before this was
-// written. The `hako-no-such-key` probes are invented on purpose: they sit
-// at the nested levels (uTLS, transport, wsSettings) and prove the rule
-// holds for a key no mapping will ever claim, so a later mapping of a real
-// key cannot quietly turn this test into a test of nothing.
 func TestAJSONBodyKeyNobodyMapsIsNamedUnderTheNodeAndTheNodeArrives(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -101,10 +81,6 @@ func TestAJSONBodyKeyNobodyMapsIsNamedUnderTheNodeAndTheNodeArrives(t *testing.T
 	}
 }
 
-// Two nodes with the same tag, both carrying a key nobody maps: each notice
-// lands under the name its node ends up with, not the name the file gave both.
-// A container node does not have its final name until makeProxyImportNameUnique
-// has run, exactly like a share link, so the notices have to wait for it.
 func TestAContainerNoticeWaitsForTheNameTheNodeEndsUpWith(t *testing.T) {
 	payload := `{"outbounds":[` +
 		`{"type":"trojan","tag":"HK","server":"one.example.invalid","server_port":443,"password":"a","hako-first":1},` +
@@ -130,10 +106,6 @@ func TestAContainerNoticeWaitsForTheNameTheNodeEndsUpWith(t *testing.T) {
 	}
 }
 
-// A record that named a key nobody maps and then failed for its own reason
-// is one thing that happened to the person. The notice rides with the skip,
-// as it does for a share link, rather than pointing at a node that is not
-// in the report.
 func TestAContainerNoticeRidesWithTheSkipWhenTheRecordProducesNoNode(t *testing.T) {
 	payload := `{"outbounds":[{"type":"vless","tag":"NoUUID","server":"sing.example.invalid","server_port":443,"domain_resolver":"local"}]}`
 	box, err := InspectProxyPayloadForIOS([]byte(payload), "subscriptionBody")
@@ -154,10 +126,6 @@ func TestAContainerNoticeRidesWithTheSkipWhenTheRecordProducesNoNode(t *testing.
 	}
 }
 
-// A `false` is a value. `"verify_cert": false` asks for a node that does not
-// check the certificate; this build has nowhere to put that, and building a
-// checking node in silence is the one outcome the ruling forbids. The blank
-// values -- "", [], {} -- still name nothing (Codex review of 23c4290d9, P2).
 func TestAFalseInABodyIsAValueAndIsNamed(t *testing.T) {
 	payload := `{"servers":[{"type":"trojan","server":"e.example","port":443,"password":"pw",` +
 		`"remarks":"Rocket","verify_cert":false,"blank":"","nothing":[],"empty":{}}]}`
@@ -179,10 +147,6 @@ func TestAFalseInABodyIsAValueAndIsNamed(t *testing.T) {
 	}
 }
 
-// Upstream drops a vmess body with no `ps` (common/convert/converter.go, the
-// `values["ps"]` check), so this record yields no node here either. The body
-// still named `class`; the notice rides with the skip, the way it does for a
-// container record that produces no node (Codex review of 23c4290d9, P2).
 func TestAVMessBodyNoticeRidesWithTheSkipWhenUpstreamYieldsNoNode(t *testing.T) {
 	body, err := json.Marshal(map[string]any{
 		"v": "2", "add": "e.example", "port": "443",
@@ -207,10 +171,6 @@ func TestAVMessBodyNoticeRidesWithTheSkipWhenUpstreamYieldsNoNode(t *testing.T) 
 	}
 }
 
-// One record of a `servers` array, or of a canonical `proxies` array, that
-// cannot be read is one record. It used to be the document's verdict: the
-// outbound parser had learned to skip on 2026-08-28 and the server parsers
-// had not (Codex review of 23c4290d9, P1).
 func TestOneUnreadableServerRecordDoesNotCostTheRestOfTheArray(t *testing.T) {
 	ssd := `{"airport":"Example","port":8388,"encryption":"aes-128-gcm","password":"secret","servers":[` +
 		`{"server":"a.example","remarks":"A"},` +

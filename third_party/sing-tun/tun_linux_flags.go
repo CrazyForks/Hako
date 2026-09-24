@@ -13,7 +13,6 @@ import (
 )
 
 const (
-	// TODO: support TSO with ECN bits
 	tunTCPOffloads = unix.TUN_F_CSUM | unix.TUN_F_TSO4 | unix.TUN_F_TSO6
 	tunUDPOffloads = unix.TUN_F_USO4 | unix.TUN_F_USO6
 )

@@ -88,7 +88,6 @@ func (c *Conn) ReadIP(buffer *buf.Buffer) error {
 			oob := ipv4.NewControlMessage(ipv4.FlagTTL)
 			buffer.Advance(header.IPv4MinimumSize)
 			var ttl int
-			// tos int
 			n, oobn, addr, err := c.readMsg(buffer.FreeBytes(), oob)
 			if err != nil {
 				return err
@@ -109,7 +108,6 @@ func (c *Conn) ReadIP(buffer *buf.Buffer) error {
 			}
 			ipHdr := header.IPv4(buffer.ExtendHeader(header.IPv4MinimumSize))
 			ipHdr.Encode(&header.IPv4Fields{
-				// TOS:         uint8(tos),
 				SrcAddr:     addr,
 				DstAddr:     c.source.Load(),
 				Protocol:    uint8(header.ICMPv4ProtocolNumber),
@@ -165,9 +163,6 @@ func (c *Conn) ReadIP(buffer *buf.Buffer) error {
 		if !c.destination.Is6() {
 			ipHdr := header.IPv4(buffer.Bytes())
 			if runtime.GOOS == "darwin" || runtime.GOOS == "ios" {
-				// MacOS have different TotalLen and FragOff in ipv4 header from socket api:
-				// https://stackoverflow.com/questions/13829712/mac-changes-ip-total-length-field/15881825#15881825
-				// but in the tun api still same data format as other system
 				ipHdr.SetTotalLength(ipHdr.TotalLengthDarwinRaw())
 				ipHdr.SetFlagsFragmentOffset(ipHdr.FlagsDarwinRaw(), ipHdr.FragmentOffsetDarwinRaw())
 			}

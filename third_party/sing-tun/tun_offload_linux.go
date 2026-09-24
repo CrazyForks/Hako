@@ -20,8 +20,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// virtioNetHdr is defined in the kernel in include/uapi/linux/virtio_net.h. The
-// kernel symbol is virtio_net_hdr.
 type virtioNetHdr struct {
 	flags      uint8
 	gsoType    uint8
@@ -72,20 +70,16 @@ func (v *virtioNetHdr) encode(b []byte) error {
 }
 
 const (
-	// virtioNetHdrLen is the length in bytes of virtioNetHdr. This matches the
-	// shape of the C ABI for its kernel counterpart -- sizeof(virtio_net_hdr).
 	virtioNetHdrLen = int(unsafe.Sizeof(virtioNetHdr{}))
 )
 
-// tcpFlowKey represents the key for a TCP flow.
 type tcpFlowKey struct {
 	srcAddr, dstAddr [16]byte
 	srcPort, dstPort uint16
-	rxAck            uint32 // varying ack values should not be coalesced. Treat them as separate flows.
+	rxAck            uint32
 	isV6             bool
 }
 
-// tcpGROTable holds flow and coalescing information for the purposes of TCP GRO.
 type tcpGROTable struct {
 	itemsByFlow map[tcpFlowKey][]tcpGROItem
 	itemsPool   [][]tcpGROItem
@@ -114,21 +108,16 @@ func newTCPFlowKey(pkt []byte, srcAddrOffset, dstAddrOffset, tcphOffset int) tcp
 	return key
 }
 
-// lookupOrInsert looks up a flow for the provided packet and metadata,
-// returning the packets found for the flow, or inserting a new one if none
-// is found.
 func (t *tcpGROTable) lookupOrInsert(pkt []byte, srcAddrOffset, dstAddrOffset, tcphOffset, tcphLen, bufsIndex int) ([]tcpGROItem, bool) {
 	key := newTCPFlowKey(pkt, srcAddrOffset, dstAddrOffset, tcphOffset)
 	items, ok := t.itemsByFlow[key]
 	if ok {
 		return items, ok
 	}
-	// TODO: insert() performs another map lookup. This could be rearranged to avoid.
 	t.insert(pkt, srcAddrOffset, dstAddrOffset, tcphOffset, tcphLen, bufsIndex)
 	return nil, false
 }
 
-// insert an item in the table for the provided packet and packet metadata.
 func (t *tcpGROTable) insert(pkt []byte, srcAddrOffset, dstAddrOffset, tcphOffset, tcphLen, bufsIndex int) {
 	key := newTCPFlowKey(pkt, srcAddrOffset, dstAddrOffset, tcphOffset)
 	item := tcpGROItem{
@@ -159,17 +148,15 @@ func (t *tcpGROTable) deleteAt(key tcpFlowKey, i int) {
 	t.itemsByFlow[key] = items
 }
 
-// tcpGROItem represents bookkeeping data for a TCP packet during the lifetime
-// of a GRO evaluation across a vector of packets.
 type tcpGROItem struct {
 	key       tcpFlowKey
-	sentSeq   uint32 // the sequence number
-	bufsIndex uint16 // the index into the original bufs slice
-	numMerged uint16 // the number of packets merged into this item
-	gsoSize   uint16 // payload size
-	iphLen    uint8  // ip header len
-	tcphLen   uint8  // tcp header len
-	pshSet    bool   // psh flag is set
+	sentSeq   uint32
+	bufsIndex uint16
+	numMerged uint16
+	gsoSize   uint16
+	iphLen    uint8
+	tcphLen   uint8
+	pshSet    bool
 }
 
 func (t *tcpGROTable) newItems() []tcpGROItem {
@@ -186,14 +173,12 @@ func (t *tcpGROTable) reset() {
 	}
 }
 
-// udpFlowKey represents the key for a UDP flow.
 type udpFlowKey struct {
 	srcAddr, dstAddr [16]byte
 	srcPort, dstPort uint16
 	isV6             bool
 }
 
-// udpGROTable holds flow and coalescing information for the purposes of UDP GRO.
 type udpGROTable struct {
 	itemsByFlow map[udpFlowKey][]udpGROItem
 	itemsPool   [][]udpGROItem
@@ -221,21 +206,16 @@ func newUDPFlowKey(pkt []byte, srcAddrOffset, dstAddrOffset, udphOffset int) udp
 	return key
 }
 
-// lookupOrInsert looks up a flow for the provided packet and metadata,
-// returning the packets found for the flow, or inserting a new one if none
-// is found.
 func (u *udpGROTable) lookupOrInsert(pkt []byte, srcAddrOffset, dstAddrOffset, udphOffset, bufsIndex int) ([]udpGROItem, bool) {
 	key := newUDPFlowKey(pkt, srcAddrOffset, dstAddrOffset, udphOffset)
 	items, ok := u.itemsByFlow[key]
 	if ok {
 		return items, ok
 	}
-	// TODO: insert() performs another map lookup. This could be rearranged to avoid.
 	u.insert(pkt, srcAddrOffset, dstAddrOffset, udphOffset, bufsIndex, false)
 	return nil, false
 }
 
-// insert an item in the table for the provided packet and packet metadata.
 func (u *udpGROTable) insert(pkt []byte, srcAddrOffset, dstAddrOffset, udphOffset, bufsIndex int, cSumKnownInvalid bool) {
 	key := newUDPFlowKey(pkt, srcAddrOffset, dstAddrOffset, udphOffset)
 	item := udpGROItem{
@@ -258,15 +238,13 @@ func (u *udpGROTable) updateAt(item udpGROItem, i int) {
 	items[i] = item
 }
 
-// udpGROItem represents bookkeeping data for a UDP packet during the lifetime
-// of a GRO evaluation across a vector of packets.
 type udpGROItem struct {
 	key              udpFlowKey
-	bufsIndex        uint16 // the index into the original bufs slice
-	numMerged        uint16 // the number of packets merged into this item
-	gsoSize          uint16 // payload size
-	iphLen           uint8  // ip header len
-	cSumKnownInvalid bool   // UDP header checksum validity; a false value DOES NOT imply valid, just unknown.
+	bufsIndex        uint16
+	numMerged        uint16
+	gsoSize          uint16
+	iphLen           uint8
+	cSumKnownInvalid bool
 }
 
 func (u *udpGROTable) newItems() []udpGROItem {
@@ -283,8 +261,6 @@ func (u *udpGROTable) reset() {
 	}
 }
 
-// canCoalesce represents the outcome of checking if two TCP packets are
-// candidates for coalescing.
 type canCoalesce int
 
 const (
@@ -293,111 +269,79 @@ const (
 	coalesceAppend      canCoalesce = 1
 )
 
-// ipHeadersCanCoalesce returns true if the IP headers found in pktA and pktB
-// meet all requirements to be merged as part of a GRO operation, otherwise it
-// returns false.
 func ipHeadersCanCoalesce(pktA, pktB []byte) bool {
 	if len(pktA) < 9 || len(pktB) < 9 {
 		return false
 	}
 	if pktA[0]>>4 == 6 {
 		if pktA[0] != pktB[0] || pktA[1]>>4 != pktB[1]>>4 {
-			// cannot coalesce with unequal Traffic class values
 			return false
 		}
 		if pktA[7] != pktB[7] {
-			// cannot coalesce with unequal Hop limit values
 			return false
 		}
 	} else {
 		if pktA[1] != pktB[1] {
-			// cannot coalesce with unequal ToS values
 			return false
 		}
 		if pktA[6]>>5 != pktB[6]>>5 {
-			// cannot coalesce with unequal DF or reserved bits. MF is checked
-			// further up the stack.
 			return false
 		}
 		if pktA[8] != pktB[8] {
-			// cannot coalesce with unequal TTL values
 			return false
 		}
 	}
 	return true
 }
 
-// udpPacketsCanCoalesce evaluates if pkt can be coalesced with the packet
-// described by item. iphLen and gsoSize describe pkt. bufs is the vector of
-// packets involved in the current GRO evaluation. bufsOffset is the offset at
-// which packet data begins within bufs.
 func udpPacketsCanCoalesce(pkt []byte, iphLen uint8, gsoSize uint16, item udpGROItem, bufs [][]byte, bufsOffset int) canCoalesce {
 	pktTarget := bufs[item.bufsIndex][bufsOffset:]
 	if !ipHeadersCanCoalesce(pkt, pktTarget) {
 		return coalesceUnavailable
 	}
 	if len(pktTarget[iphLen+udphLen:])%int(item.gsoSize) != 0 {
-		// A smaller than gsoSize packet has been appended previously.
-		// Nothing can come after a smaller packet on the end.
 		return coalesceUnavailable
 	}
 	if gsoSize > item.gsoSize {
-		// We cannot have a larger packet following a smaller one.
 		return coalesceUnavailable
 	}
 	return coalesceAppend
 }
 
-// tcpPacketsCanCoalesce evaluates if pkt can be coalesced with the packet
-// described by item. This function makes considerations that match the kernel's
-// GRO self tests, which can be found in tools/testing/selftests/net/gro.c.
 func tcpPacketsCanCoalesce(pkt []byte, iphLen, tcphLen uint8, seq uint32, pshSet bool, gsoSize uint16, item tcpGROItem, bufs [][]byte, bufsOffset int) canCoalesce {
 	pktTarget := bufs[item.bufsIndex][bufsOffset:]
 	if tcphLen != item.tcphLen {
-		// cannot coalesce with unequal tcp options len
 		return coalesceUnavailable
 	}
 	if tcphLen > 20 {
 		if !bytes.Equal(pkt[iphLen+20:iphLen+tcphLen], pktTarget[item.iphLen+20:iphLen+tcphLen]) {
-			// cannot coalesce with unequal tcp options
 			return coalesceUnavailable
 		}
 	}
 	if !ipHeadersCanCoalesce(pkt, pktTarget) {
 		return coalesceUnavailable
 	}
-	// seq adjacency
 	lhsLen := item.gsoSize
 	lhsLen += item.numMerged * item.gsoSize
-	if seq == item.sentSeq+uint32(lhsLen) { // pkt aligns following item from a seq num perspective
+	if seq == item.sentSeq+uint32(lhsLen) {
 		if item.pshSet {
-			// We cannot append to a segment that has the PSH flag set, PSH
-			// can only be set on the final segment in a reassembled group.
 			return coalesceUnavailable
 		}
 		if len(pktTarget[iphLen+tcphLen:])%int(item.gsoSize) != 0 {
-			// A smaller than gsoSize packet has been appended previously.
-			// Nothing can come after a smaller packet on the end.
 			return coalesceUnavailable
 		}
 		if gsoSize > item.gsoSize {
-			// We cannot have a larger packet following a smaller one.
 			return coalesceUnavailable
 		}
 		return coalesceAppend
-	} else if seq+uint32(gsoSize) == item.sentSeq { // pkt aligns in front of item from a seq num perspective
+	} else if seq+uint32(gsoSize) == item.sentSeq {
 		if pshSet {
-			// We cannot prepend with a segment that has the PSH flag set, PSH
-			// can only be set on the final segment in a reassembled group.
 			return coalesceUnavailable
 		}
 		if gsoSize < item.gsoSize {
-			// We cannot have a larger packet following a smaller one.
 			return coalesceUnavailable
 		}
 		if gsoSize > item.gsoSize && item.numMerged > 0 {
-			// There's at least one previous merge, and we're larger than all
-			// previous. This would put multiple smaller packets on the end.
 			return coalesceUnavailable
 		}
 		return coalescePrepend
@@ -417,8 +361,6 @@ func checksumValid(pkt []byte, iphLen, proto uint8, isV6 bool) bool {
 	return ^checksum.Checksum(pkt[iphLen:], cSum) == 0
 }
 
-// coalesceResult represents the result of attempting to coalesce two TCP
-// packets.
 type coalesceResult int
 
 const (
@@ -429,16 +371,12 @@ const (
 	coalesceSuccess
 )
 
-// coalesceUDPPackets attempts to coalesce pkt with the packet described by
-// item, and returns the outcome.
 func coalesceUDPPackets(pkt []byte, item *udpGROItem, bufs [][]byte, bufsOffset int, isV6 bool) coalesceResult {
-	pktHead := bufs[item.bufsIndex][bufsOffset:] // the packet that will end up at the front
+	pktHead := bufs[item.bufsIndex][bufsOffset:]
 	headersLen := item.iphLen + udphLen
 	coalescedLen := len(bufs[item.bufsIndex][bufsOffset:]) + len(pkt) - int(headersLen)
 
 	if cap(pktHead)-bufsOffset < coalescedLen {
-		// We don't want to allocate a new underlying array if capacity is
-		// too small.
 		return coalesceInsufficientCap
 	}
 	if item.numMerged == 0 {
@@ -457,21 +395,14 @@ func coalesceUDPPackets(pkt []byte, item *udpGROItem, bufs [][]byte, bufsOffset 
 	return coalesceSuccess
 }
 
-// coalesceTCPPackets attempts to coalesce pkt with the packet described by
-// item, and returns the outcome. This function may swap bufs elements in the
-// event of a prepend as item's bufs index is already being tracked for writing
-// to a Device.
 func coalesceTCPPackets(mode canCoalesce, pkt []byte, pktBuffsIndex int, gsoSize uint16, seq uint32, pshSet bool, item *tcpGROItem, bufs [][]byte, bufsOffset int, isV6 bool) coalesceResult {
-	var pktHead []byte // the packet that will end up at the front
+	var pktHead []byte
 	headersLen := item.iphLen + item.tcphLen
 	coalescedLen := len(bufs[item.bufsIndex][bufsOffset:]) + len(pkt) - int(headersLen)
 
-	// Copy data
 	if mode == coalescePrepend {
 		pktHead = pkt
 		if cap(pkt)-bufsOffset < coalescedLen {
-			// We don't want to allocate a new underlying array if capacity is
-			// too small.
 			return coalesceInsufficientCap
 		}
 		if pshSet {
@@ -489,14 +420,10 @@ func coalesceTCPPackets(mode canCoalesce, pkt []byte, pktBuffsIndex int, gsoSize
 		extendBy := coalescedLen - len(pktHead)
 		bufs[pktBuffsIndex] = append(bufs[pktBuffsIndex], make([]byte, extendBy)...)
 		copy(bufs[pktBuffsIndex][bufsOffset+len(pkt):], bufs[item.bufsIndex][bufsOffset+int(headersLen):])
-		// Flip the slice headers in bufs as part of prepend. The index of item
-		// is already being tracked for writing.
 		bufs[item.bufsIndex], bufs[pktBuffsIndex] = bufs[pktBuffsIndex], bufs[item.bufsIndex]
 	} else {
 		pktHead = bufs[item.bufsIndex][bufsOffset:]
 		if cap(pktHead)-bufsOffset < coalescedLen {
-			// We don't want to allocate a new underlying array if capacity is
-			// too small.
 			return coalesceInsufficientCap
 		}
 		if item.numMerged == 0 {
@@ -508,7 +435,6 @@ func coalesceTCPPackets(mode canCoalesce, pkt []byte, pktBuffsIndex int, gsoSize
 			return coalescePktInvalidCSum
 		}
 		if pshSet {
-			// We are appending a segment with PSH set.
 			item.pshSet = pshSet
 			pktHead[item.iphLen+tcpFlagsOffset] |= tcpFlagPSH
 		}
@@ -541,15 +467,9 @@ const (
 	groResultCoalesced
 )
 
-// tcpGRO evaluates the TCP packet at pktI in bufs for coalescing with
-// existing packets tracked in table. It returns a groResultNoop when no
-// action was taken, groResultTableInsert when the evaluated packet was
-// inserted into table, and groResultCoalesced when the evaluated packet was
-// coalesced with another packet in table.
 func tcpGRO(bufs [][]byte, offset int, pktI int, table *tcpGROTable, isV6 bool) groResult {
 	pkt := bufs[pktI][offset:]
 	if len(pkt) > maxUint16 {
-		// A valid IPv4 or IPv6 packet will never exceed this.
 		return groResultNoop
 	}
 	iphLen := int((pkt[0] & 0x0F) * 4)
@@ -577,13 +497,11 @@ func tcpGRO(bufs [][]byte, offset int, pktI int, table *tcpGROTable, isV6 bool) 
 	}
 	if !isV6 {
 		if pkt[6]&ipv4FlagMoreFragments != 0 || pkt[6]<<3 != 0 || pkt[7] != 0 {
-			// no GRO support for fragmented segments for now
 			return groResultNoop
 		}
 	}
 	tcpFlags := pkt[iphLen+tcpFlagsOffset]
 	var pshSet bool
-	// not a candidate if any non-ACK flags (except PSH+ACK) are set
 	if tcpFlags != tcpFlagACK {
 		if pkt[iphLen+tcpFlagsOffset] != tcpFlagACK|tcpFlagPSH {
 			return groResultNoop
@@ -591,7 +509,6 @@ func tcpGRO(bufs [][]byte, offset int, pktI int, table *tcpGROTable, isV6 bool) 
 		pshSet = true
 	}
 	gsoSize := uint16(len(pkt) - tcphLen - iphLen)
-	// not a candidate if payload len is 0
 	if gsoSize < 1 {
 		return groResultNoop
 	}
@@ -607,14 +524,6 @@ func tcpGRO(bufs [][]byte, offset int, pktI int, table *tcpGROTable, isV6 bool) 
 		return groResultTableInsert
 	}
 	for i := len(items) - 1; i >= 0; i-- {
-		// In the best case of packets arriving in order iterating in reverse is
-		// more efficient if there are multiple items for a given flow. This
-		// also enables a natural table.deleteAt() in the
-		// coalesceItemInvalidCSum case without the need for index tracking.
-		// This algorithm makes a best effort to coalesce in the event of
-		// unordered packets, where pkt may land anywhere in items from a
-		// sequence number perspective, however once an item is inserted into
-		// the table it is never compared across other items later.
 		item := items[i]
 		can := tcpPacketsCanCoalesce(pkt, uint8(iphLen), uint8(tcphLen), seq, pshSet, gsoSize, item, bufs, offset)
 		if can != coalesceUnavailable {
@@ -624,28 +533,23 @@ func tcpGRO(bufs [][]byte, offset int, pktI int, table *tcpGROTable, isV6 bool) 
 				table.updateAt(item, i)
 				return groResultCoalesced
 			case coalesceItemInvalidCSum:
-				// delete the item with an invalid csum
 				table.deleteAt(item.key, i)
 			case coalescePktInvalidCSum:
-				// no point in inserting an item that we can't coalesce
 				return groResultNoop
 			default:
 			}
 		}
 	}
-	// failed to coalesce with any other packets; store the item in the flow
 	table.insert(pkt, srcAddrOffset, srcAddrOffset+addrLen, iphLen, tcphLen, pktI)
 	return groResultTableInsert
 }
 
-// applyTCPCoalesceAccounting updates bufs to account for coalescing based on the
-// metadata found in table.
 func applyTCPCoalesceAccounting(bufs [][]byte, offset int, table *tcpGROTable) error {
 	for _, items := range table.itemsByFlow {
 		for _, item := range items {
 			if item.numMerged > 0 {
 				hdr := virtioNetHdr{
-					flags:      unix.VIRTIO_NET_HDR_F_NEEDS_CSUM, // this turns into CHECKSUM_PARTIAL in the skb
+					flags:      unix.VIRTIO_NET_HDR_F_NEEDS_CSUM,
 					hdrLen:     uint16(item.iphLen + item.tcphLen),
 					gsoSize:    item.gsoSize,
 					csumStart:  uint16(item.iphLen),
@@ -653,26 +557,21 @@ func applyTCPCoalesceAccounting(bufs [][]byte, offset int, table *tcpGROTable) e
 				}
 				pkt := bufs[item.bufsIndex][offset:]
 
-				// Recalculate the total len (IPv4) or payload len (IPv6).
-				// Recalculate the (IPv4) header checksum.
 				if item.key.isV6 {
 					hdr.gsoType = unix.VIRTIO_NET_HDR_GSO_TCPV6
-					binary.BigEndian.PutUint16(pkt[4:], uint16(len(pkt))-uint16(item.iphLen)) // set new IPv6 header payload len
+					binary.BigEndian.PutUint16(pkt[4:], uint16(len(pkt))-uint16(item.iphLen))
 				} else {
 					hdr.gsoType = unix.VIRTIO_NET_HDR_GSO_TCPV4
 					pkt[10], pkt[11] = 0, 0
-					binary.BigEndian.PutUint16(pkt[2:], uint16(len(pkt))) // set new total length
-					iphCSum := ^checksum.Checksum(pkt[:item.iphLen], 0)   // compute IPv4 header checksum
-					binary.BigEndian.PutUint16(pkt[10:], iphCSum)         // set IPv4 header checksum field
+					binary.BigEndian.PutUint16(pkt[2:], uint16(len(pkt)))
+					iphCSum := ^checksum.Checksum(pkt[:item.iphLen], 0)
+					binary.BigEndian.PutUint16(pkt[10:], iphCSum)
 				}
 				err := hdr.encode(bufs[item.bufsIndex][offset-virtioNetHdrLen:])
 				if err != nil {
 					return err
 				}
 
-				// Calculate the pseudo header checksum and place it at the TCP
-				// checksum offset. Downstream checksum offloading will combine
-				// this with computation of the tcp header and payload checksum.
 				addrLen := 4
 				addrOffset := ipv4SrcAddrOffset
 				if item.key.isV6 {
@@ -696,14 +595,12 @@ func applyTCPCoalesceAccounting(bufs [][]byte, offset int, table *tcpGROTable) e
 	return nil
 }
 
-// applyUDPCoalesceAccounting updates bufs to account for coalescing based on the
-// metadata found in table.
 func applyUDPCoalesceAccounting(bufs [][]byte, offset int, table *udpGROTable) error {
 	for _, items := range table.itemsByFlow {
 		for _, item := range items {
 			if item.numMerged > 0 {
 				hdr := virtioNetHdr{
-					flags:      unix.VIRTIO_NET_HDR_F_NEEDS_CSUM, // this turns into CHECKSUM_PARTIAL in the skb
+					flags:      unix.VIRTIO_NET_HDR_F_NEEDS_CSUM,
 					hdrLen:     uint16(item.iphLen + udphLen),
 					gsoSize:    item.gsoSize,
 					csumStart:  uint16(item.iphLen),
@@ -711,28 +608,22 @@ func applyUDPCoalesceAccounting(bufs [][]byte, offset int, table *udpGROTable) e
 				}
 				pkt := bufs[item.bufsIndex][offset:]
 
-				// Recalculate the total len (IPv4) or payload len (IPv6).
-				// Recalculate the (IPv4) header checksum.
 				hdr.gsoType = unix.VIRTIO_NET_HDR_GSO_UDP_L4
 				if item.key.isV6 {
-					binary.BigEndian.PutUint16(pkt[4:], uint16(len(pkt))-uint16(item.iphLen)) // set new IPv6 header payload len
+					binary.BigEndian.PutUint16(pkt[4:], uint16(len(pkt))-uint16(item.iphLen))
 				} else {
 					pkt[10], pkt[11] = 0, 0
-					binary.BigEndian.PutUint16(pkt[2:], uint16(len(pkt))) // set new total length
-					iphCSum := ^checksum.Checksum(pkt[:item.iphLen], 0)   // compute IPv4 header checksum
-					binary.BigEndian.PutUint16(pkt[10:], iphCSum)         // set IPv4 header checksum field
+					binary.BigEndian.PutUint16(pkt[2:], uint16(len(pkt)))
+					iphCSum := ^checksum.Checksum(pkt[:item.iphLen], 0)
+					binary.BigEndian.PutUint16(pkt[10:], iphCSum)
 				}
 				err := hdr.encode(bufs[item.bufsIndex][offset-virtioNetHdrLen:])
 				if err != nil {
 					return err
 				}
 
-				// Recalculate the UDP len field value
 				binary.BigEndian.PutUint16(pkt[item.iphLen+4:], uint16(len(pkt[item.iphLen:])))
 
-				// Calculate the pseudo header checksum and place it at the UDP
-				// checksum offset. Downstream checksum offloading will combine
-				// this with computation of the udp header and payload checksum.
 				addrLen := 4
 				addrOffset := ipv4SrcAddrOffset
 				if item.key.isV6 {
@@ -795,7 +686,6 @@ func packetIsGROCandidate(b []byte, gro groDisablementFlags) groCandidateType {
 	}
 	if b[0]>>4 == 4 {
 		if b[0]&0x0F != 5 {
-			// IPv4 packets w/IP options do not coalesce
 			return notGROCandidate
 		}
 		if b[9] == unix.IPPROTO_TCP && len(b) >= 40 && gro.canTCPGRO() {
@@ -819,15 +709,9 @@ const (
 	udphLen = 8
 )
 
-// udpGRO evaluates the UDP packet at pktI in bufs for coalescing with
-// existing packets tracked in table. It returns a groResultNoop when no
-// action was taken, groResultTableInsert when the evaluated packet was
-// inserted into table, and groResultCoalesced when the evaluated packet was
-// coalesced with another packet in table.
 func udpGRO(bufs [][]byte, offset int, pktI int, table *udpGROTable, isV6 bool) groResult {
 	pkt := bufs[pktI][offset:]
 	if len(pkt) > maxUint16 {
-		// A valid IPv4 or IPv6 packet will never exceed this.
 		return groResultNoop
 	}
 	iphLen := int((pkt[0] & 0x0F) * 4)
@@ -851,12 +735,10 @@ func udpGRO(bufs [][]byte, offset int, pktI int, table *udpGROTable, isV6 bool) 
 	}
 	if !isV6 {
 		if pkt[6]&ipv4FlagMoreFragments != 0 || pkt[6]<<3 != 0 || pkt[7] != 0 {
-			// no GRO support for fragmented segments for now
 			return groResultNoop
 		}
 	}
 	gsoSize := uint16(len(pkt) - udphLen - iphLen)
-	// not a candidate if payload len is 0
 	if gsoSize < 1 {
 		return groResultNoop
 	}
@@ -870,9 +752,6 @@ func udpGRO(bufs [][]byte, offset int, pktI int, table *udpGROTable, isV6 bool) 
 	if !existing {
 		return groResultTableInsert
 	}
-	// With UDP we only check the last item, otherwise we could reorder packets
-	// for a given flow. We must also always insert a new item, or successfully
-	// coalesce with an existing item, for the same reason.
 	item := items[len(items)-1]
 	can := udpPacketsCanCoalesce(pkt, uint8(iphLen), gsoSize, item, bufs, offset)
 	var pktCSumKnownInvalid bool
@@ -883,26 +762,15 @@ func udpGRO(bufs [][]byte, offset int, pktI int, table *udpGROTable, isV6 bool) 
 			table.updateAt(item, len(items)-1)
 			return groResultCoalesced
 		case coalesceItemInvalidCSum:
-			// If the existing item has an invalid csum we take no action. A new
-			// item will be stored after it, and the existing item will never be
-			// revisited as part of future coalescing candidacy checks.
 		case coalescePktInvalidCSum:
-			// We must insert a new item, but we also mark it as invalid csum
-			// to prevent a repeat checksum validation.
 			pktCSumKnownInvalid = true
 		default:
 		}
 	}
-	// failed to coalesce with any other packets; store the item in the flow
 	table.insert(pkt, srcAddrOffset, srcAddrOffset+addrLen, iphLen, pktI, pktCSumKnownInvalid)
 	return groResultTableInsert
 }
 
-// handleGRO evaluates bufs for GRO, and writes the indices of the resulting
-// packets into toWrite. toWrite, tcpTable, and udpTable should initially be
-// empty (but non-nil), and are passed in to save allocs as the caller may reset
-// and recycle them across vectors of packets. gro indicates if TCP and UDP GRO
-// are supported/enabled.
 func handleGRO(bufs [][]byte, offset int, tcpTable *tcpGROTable, udpTable *udpGROTable, gro groDisablementFlags, toWrite *[]int) error {
 	for i := range bufs {
 		if offset < virtioNetHdrLen || offset > len(bufs[i])-1 {

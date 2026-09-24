@@ -68,8 +68,6 @@ func TestPlanKeepsTheStripNoticesWhenNothingUsableIsSupplied(t *testing.T) {
 	}
 }
 
-// The plan predicts the runtime: the fields the plan says are substituted are exactly
-// the fields the pipeline rewrites, over the same inputs, including the tunnel-range drop.
 func TestPlanAndRuntimeAgreeOnWhichFieldsAreSubstituted(t *testing.T) {
 	for _, supplied := range [][]string{
 		{"1.1.1.1", "9.9.9.9"},

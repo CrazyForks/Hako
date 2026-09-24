@@ -35,7 +35,6 @@ func (r *autoRedirect) setupIPTablesForFamily(iptablesPath string) error {
 	tableNameOutput := r.tableName + "-output"
 	tableNamePreRouteing := r.tableName + "-prerouting"
 	redirectPort := r.redirectPort()
-	// OUTPUT
 	err := r.runShell(iptablesPath, "-t nat -N", tableNameOutput)
 	if err != nil {
 		return err
@@ -53,7 +52,6 @@ func (r *autoRedirect) setupIPTablesForFamily(iptablesPath string) error {
 	if runtime.GOOS == "android" {
 		return nil
 	}
-	// INPUT
 	err = r.runShell(iptablesPath, "-N", tableNameInput)
 	if err != nil {
 		return err
@@ -72,7 +70,6 @@ func (r *autoRedirect) setupIPTablesForFamily(iptablesPath string) error {
 	if err != nil {
 		return err
 	}
-	// FORWARD
 	err = r.runShell(iptablesPath, "-N", tableNameForward)
 	if err != nil {
 		return err
@@ -91,7 +88,6 @@ func (r *autoRedirect) setupIPTablesForFamily(iptablesPath string) error {
 	if err != nil {
 		return err
 	}
-	// PREROUTING
 	err = r.runShell(iptablesPath, "-t nat -N", tableNamePreRouteing)
 	if err != nil {
 		return err

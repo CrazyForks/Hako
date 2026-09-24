@@ -9,17 +9,6 @@ import (
 	"testing"
 )
 
-// The uid was returned as a hardcoded 0 here for as long as this file existed, which silently
-// broke every UID rule on darwin: a rule for uid 0 matched every connection and a rule for any
-// real uid matched none. Nothing failed loudly, which is why it survived.
-//
-// sing-box reads it at xsocket_n.so_uid -- the field immediately before the pid this code already
-// read, at the same base (searcher_darwin_shared.go: darwinXsocketUID 64, darwinXsocketLastPID
-// 68). Two independent implementations agreeing on the neighbouring offset is the cross-check that
-// makes a raw struct read defensible.
-//
-// The test makes its own connection rather than looking for one on the machine, so it asserts a
-// value it knows: the socket belongs to this test process, so the uid must be this process's uid.
 
 func TestDarwinLookupReturnsTheSocketOwnerUid(t *testing.T) {
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")

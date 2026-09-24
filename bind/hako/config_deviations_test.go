@@ -8,21 +8,6 @@ import (
 	"github.com/metacubex/http/httptest"
 )
 
-// The core has exactly one way to tell a user what it did to their configuration: a log line.
-// Seven deviations rely on it and four say nothing at all, which is how `ipv6: false` could
-// quietly claim the v6 default route for a year. A log is also the wrong shape -- it is a
-// stream, it is not addressable, and a client cannot ask it "what happened to my port".
-//
-// This is the addressable form. It answers per field, and it answers the four questions a
-// reader actually has: what did I write, what happens instead, why, and can I do anything
-// about it. The reason categories are the three shapes a deviation can take:
-//
-//	stripped    -- the field parsed, and this core removed it
-//	forced      -- the field parsed, and this core overwrote it
-//	unavailable -- the platform has no such facility; nothing could honour it
-//
-// A field the user never wrote is not a deviation. Clearing raw.Port from zero to zero is
-// not something to report, and a report full of those is a report nobody reads.
 func TestDeviationReportCoversAllThreeCategoriesFromWhatTheUserWrote(t *testing.T) {
 	const document = `
 tproxy-port: 7895
@@ -71,9 +56,6 @@ rules:
 		}
 	}
 
-	// Three written fields plus the two this core overwrites from silence. Naming the
-	// expected set rather than a count is what keeps this a noise guard: a new rule that
-	// fires on a document which does not carry its field shows up here as a name.
 	want := map[string]bool{
 		"redir-port": true, "tproxy-port": true, "ntp.write-to-system": true,
 		"dns.enable": true, "find-process-mode": true, "profile.store-fake-ip": true,
@@ -89,10 +71,6 @@ rules:
 	}
 }
 
-// Silence is the failure mode being fixed, but noise is how a report becomes silence again.
-// A silent configuration is entitled to a short answer: exactly the fields this core
-// overwrites regardless of what was written, and nothing else. Anything more and the reader
-// learns to skip the list, which puts us back where we started by a longer road.
 func TestASilentConfigurationReportsOnlyWhatItStillChanges(t *testing.T) {
 	const silent = `
 proxies: []
@@ -120,9 +98,6 @@ rules:
 	}
 }
 
-// Recoverable says whether editing the configuration can get the behaviour back. It is the
-// difference between "delete this line, it does nothing" and "this cannot work here at all",
-// and a client that cannot tell them apart will phrase both the same way.
 func TestRecoverabilityDistinguishesAPlatformWallFromOurChoice(t *testing.T) {
 	const document = `
 tproxy-port: 7895
@@ -133,10 +108,6 @@ rules:
   - MATCH,DIRECT
 `
 	for _, deviation := range configDeviationsForDocument(t, document) {
-		// Recoverable is the narrow claim that writing the field yourself gets your value.
-		// It is true for exactly the deviations that only change a default, and false for
-		// everything this core removes or overrides -- telling a user to go edit a file that
-		// cannot help them is the failure this separation exists to prevent.
 		if deviation.Recoverable && deviation.Category != deviationForced {
 			t.Errorf("%s is %s yet claims editing the configuration alone restores it",
 				deviation.Field, deviation.Category)
@@ -155,15 +126,13 @@ rules:
 			if deviation.Alternative != "" {
 				t.Errorf("redir-port offers an alternative (%q); nothing on Apple replaces it", deviation.Alternative)
 			}
-			if !strings.Contains(deviation.Reason+deviation.Source+deviation.Mechanism, "/dev/pf") { // the citation lives in mechanism now; reason is the reader-facing sentenceer's register
+			if !strings.Contains(deviation.Reason+deviation.Source+deviation.Mechanism, "/dev/pf") {
 				t.Error("redir-port does not cite the platform fact that justifies it")
 			}
 		}
 	}
 }
 
-// Start-time reachability is the whole point: the plan is computed before activation, so a
-// client that only ever saw the plan cannot answer "what is my running core doing".
 func TestDeviationRouteServesWhatTheRunningCoreDecided(t *testing.T) {
 	previous := publishedDeviations.Load()
 	t.Cleanup(func() { publishedDeviations.Store(previous) })
@@ -195,8 +164,6 @@ func TestDeviationRouteServesWhatTheRunningCoreDecided(t *testing.T) {
 	}
 }
 
-// An unstarted core has published nothing, and must say so as an empty list rather than a
-// null a client would render as "no problems".
 func TestDeviationRouteAnswersBeforeAnythingIsPublished(t *testing.T) {
 	previous := publishedDeviations.Load()
 	t.Cleanup(func() { publishedDeviations.Store(previous) })
@@ -236,14 +203,6 @@ func fieldsOf(deviations []configDeviation) []string {
 	return fields
 }
 
-// Some fields are overwritten whether or not the user wrote them, and those are the ones a
-// report keyed on "did they write it" cannot see. A silent configuration on this core still
-// answers DNS and still never looks up a process -- both differ from what the same file does
-// on mihomo, and a reader who wrote nothing is exactly the reader least likely to guess it.
-//
-// dns.enable: upstream DefaultRawConfig has false; this core forces true because an Apple
-// packet tunnel captures port 53 regardless, so false would mean every captured query
-// answers SERVFAIL. find-process-mode: upstream defaults to strict; this core forces off.
 func TestDeviationsFromSilenceAreReportedToo(t *testing.T) {
 	const silent = `
 proxies: []
@@ -273,9 +232,6 @@ rules:
 	}
 }
 
-// The mirror of the case above: a field this core forces to the value upstream already uses
-// changes nothing for a silent reader, and reporting it would be noise. ntp.write-to-system
-// is forced false and upstream's default is false.
 func TestForcingAValueUpstreamAlreadyDefaultsToIsNotADeviation(t *testing.T) {
 	const silent = `
 proxies: []
@@ -291,10 +247,6 @@ rules:
 	}
 }
 
-// The report has to come from the configuration that is running, and it has to keep coming.
-// A reload that changes what is deviating and leaves the old answer standing turns the
-// endpoint into a fresh way to be misinformed -- worse than the log it replaced, because a
-// log at least has timestamps.
 func TestRuntimeParseRepublishesOnEveryStartAndReload(t *testing.T) {
 	previous := publishedDeviations.Load()
 	t.Cleanup(func() { publishedDeviations.Store(previous) })
@@ -328,8 +280,6 @@ rules:
 	}
 }
 
-// CheckConfig validates a candidate the user has not activated. Publishing from it would
-// overwrite what the running core reported with what some other file would have done.
 func TestValidatingACandidateDoesNotOverwriteTheRunningReport(t *testing.T) {
 	previous := publishedDeviations.Load()
 	t.Cleanup(func() { publishedDeviations.Store(previous) })
@@ -361,13 +311,6 @@ func reportsField(deviations []configDeviation, field string) bool {
 	return false
 }
 
-// The report renders what the user wrote back to them, and some of what they write is a
-// credential. It goes to two outlets at once -- an HTTP response and a log line that lands on
-// disk at any level in any build -- so a plaintext secret here is the credential red line
-// broken twice by one struct field.
-//
-// This is an outlet constraint, not an internal invariant: the parsed configuration keeps the
-// real value, exactly as the user supplied it. Only what leaves the process is withheld.
 func TestCredentialBearingFieldsNeverRenderTheirValue(t *testing.T) {
 	const document = `
 secret: hunter2
@@ -410,8 +353,6 @@ rules:
 	}
 }
 
-// Withholding has to stay narrow. A port number is not a secret, and a report that says
-// "value withheld" for everything is a report that tells the reader nothing about their file.
 func TestNonCredentialFieldsStillShowWhatTheUserWrote(t *testing.T) {
 	const document = `
 tproxy-port: 7895

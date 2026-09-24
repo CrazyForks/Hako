@@ -16,13 +16,10 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-// This function is called by (*clientHandshakeStateTLS13).readServerCertificate()
-// to retrieve the certificate out of a message read by (*Conn).readHandshake()
 func (hs *clientHandshakeStateTLS13) utlsReadServerCertificate(msg any) (processedMsg any, err error) {
 	for _, ext := range hs.uconn.Extensions {
 		switch ext.(type) {
 		case *UtlsCompressCertExtension:
-			// Included Compressed Certificate extension
 			if len(hs.uconn.certCompressionAlgs) > 0 {
 				compressedCertMsg, ok := msg.(*utlsCompressedCertificateMsg)
 				if ok {
@@ -44,7 +41,6 @@ func (hs *clientHandshakeStateTLS13) utlsReadServerCertificate(msg any) (process
 	return nil, nil
 }
 
-// called by (*clientHandshakeStateTLS13).utlsReadServerCertificate() when UtlsCompressCertExtension is used
 func (hs *clientHandshakeStateTLS13) decompressCert(m utlsCompressedCertificateMsg) (*certificateMsgTLS13, error) {
 	var (
 		decompressed io.Reader
@@ -52,7 +48,6 @@ func (hs *clientHandshakeStateTLS13) decompressCert(m utlsCompressedCertificateM
 		c            = hs.c
 	)
 
-	// Check to see if the peer responded with an algorithm we advertised.
 	supportedAlg := false
 	for _, alg := range hs.uconn.certCompressionAlgs {
 		if m.algorithm == uint16(alg) {
@@ -91,7 +86,7 @@ func (hs *clientHandshakeStateTLS13) decompressCert(m utlsCompressedCertificateM
 		return nil, fmt.Errorf("unsupported algorithm (%d)", m.algorithm)
 	}
 
-	rawMsg := make([]byte, m.uncompressedLength+4) // +4 for message type and uint24 length field
+	rawMsg := make([]byte, m.uncompressedLength+4)
 	rawMsg[0] = typeCertificate
 	rawMsg[1] = uint8(m.uncompressedLength >> 16)
 	rawMsg[2] = uint8(m.uncompressedLength >> 8)
@@ -103,9 +98,6 @@ func (hs *clientHandshakeStateTLS13) decompressCert(m utlsCompressedCertificateM
 		return nil, err
 	}
 	if n < len(rawMsg)-4 {
-		// If, after decompression, the specified length does not match the actual length, the party
-		// receiving the invalid message MUST abort the connection with the "bad_certificate" alert.
-		// https://datatracker.ietf.org/doc/html/rfc8879#section-4
 		c.sendAlert(alertBadCertificate)
 		return nil, fmt.Errorf("decompressed len (%d) does not match specified len (%d)", n, m.uncompressedLength)
 	}
@@ -116,8 +108,6 @@ func (hs *clientHandshakeStateTLS13) decompressCert(m utlsCompressedCertificateM
 	return certMsg, nil
 }
 
-// to be called in (*clientHandshakeStateTLS13).handshake(),
-// after hs.readServerFinished() and before hs.sendClientCertificate()
 func (hs *clientHandshakeStateTLS13) serverFinishedReceived() error {
 	if err := hs.sendClientEncryptedExtensions(); err != nil {
 		return err
@@ -151,13 +141,10 @@ func (hs *clientHandshakeStateTLS13) utlsReadServerParameters(encryptedExtension
 			return errors.New("tls: server sent application settings without ALPN")
 		}
 
-		// Check if the ALPN selected by the server exists in the client's list.
 		if alps, ok := hs.uconn.config.ApplicationSettings[hs.serverHello.alpnProtocol]; ok {
 			hs.c.utls.localApplicationSettings = alps
 		} else {
-			// return errors.New("tls: server selected ALPN doesn't match a client ALPS")
-			return nil // ignore if client doesn't have ALPS in use.
-			// TODO: is this a issue or not?
+			return nil
 		}
 	}
 
@@ -167,11 +154,9 @@ func (hs *clientHandshakeStateTLS13) utlsReadServerParameters(encryptedExtension
 func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, *ecdh.PrivateKey, error) {
 	config := c.config
 
-	// [UTLS SECTION START]
 	if len(config.ServerName) == 0 && !config.InsecureSkipVerify && len(config.InsecureServerNameToVerify) == 0 {
 		return nil, nil, errors.New("tls: at least one of ServerName, InsecureSkipVerify or InsecureServerNameToVerify must be specified in the tls.Config")
 	}
-	// [UTLS SECTION END]
 
 	nextProtosLength := 0
 	for _, proto := range config.NextProtos {
@@ -191,9 +176,6 @@ func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, *ecdh.PrivateKe
 	}
 
 	clientHelloVersion := config.maxSupportedVersion(roleClient)
-	// The version at the beginning of the ClientHello was capped at TLS 1.2
-	// for compatibility reasons. The supported_versions extension is used
-	// to negotiate versions now. See RFC 8446, Section 4.2.1.
 	if clientHelloVersion > VersionTLS12 {
 		clientHelloVersion = VersionTLS12
 	}
@@ -229,8 +211,6 @@ func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, *ecdh.PrivateKe
 		if suite == nil {
 			continue
 		}
-		// Don't advertise TLS 1.2-only cipher suites unless
-		// we're attempting TLS 1.2.
 		if hello.vers < VersionTLS12 && suite.flags&suiteTLS12 != 0 {
 			continue
 		}
@@ -242,11 +222,6 @@ func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, *ecdh.PrivateKe
 		return nil, nil, errors.New("tls: short read from Rand: " + err.Error())
 	}
 
-	// A random session ID is used to detect when the server accepted a ticket
-	// and is resuming a session (see RFC 5077). In TLS 1.3, it's always set as
-	// a compatibility measure (see RFC 8446, Section 4.1.2).
-	//
-	// The session ID is not set for QUIC connections (see RFC 9001, Section 8.4).
 	if c.quic == nil {
 		hello.sessionId = make([]byte, 32)
 		if _, err := io.ReadFull(config.rand(), hello.sessionId); err != nil {
@@ -263,7 +238,6 @@ func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, *ecdh.PrivateKe
 
 	var key *ecdh.PrivateKey
 	if hello.supportedVersions[0] == VersionTLS13 {
-		// Reset the list of ciphers when the client only supports TLS 1.3.
 		if len(hello.supportedVersions) == 1 {
 			hello.cipherSuites = nil
 		}
@@ -284,17 +258,6 @@ func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, *ecdh.PrivateKe
 		hello.keyShares = []keyShare{{group: curveID, data: key.PublicKey().Bytes()}}
 	}
 
-	// [UTLS] We don't need this, since it is not ready yet
-	// if c.quic != nil {
-	// 	p, err := c.quicGetTransportParameters()
-	// 	if err != nil {
-	// 		return nil, nil, err
-	// 	}
-	// 	if p == nil {
-	// 		p = []byte{}
-	// 	}
-	// 	hello.quicTransportParameters = p
-	// }
 
 	return hello, key, nil
 }

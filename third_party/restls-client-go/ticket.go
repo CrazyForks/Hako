@@ -17,100 +17,36 @@ import (
 	"golang.org/x/crypto/cryptobyte"
 )
 
-// A SessionState is a resumable session.
 type SessionState struct {
-	// Encoded as a SessionState (in the language of RFC 8446, Section 3).
-	//
-	//   enum { server(1), client(2) } SessionStateType;
-	//
-	//   opaque Certificate<1..2^24-1>;
-	//
-	//   Certificate CertificateChain<0..2^24-1>;
-	//
-	//   opaque Extra<0..2^24-1>;
-	//
-	//   struct {
-	//       uint16 version;
-	//       SessionStateType type;
-	//       uint16 cipher_suite;
-	//       uint64 created_at;
-	//       opaque secret<1..2^8-1>;
-	//       Extra extra<0..2^24-1>;
-	//       uint8 ext_master_secret = { 0, 1 };
-	//       uint8 early_data = { 0, 1 };
-	//       CertificateEntry certificate_list<0..2^24-1>;
-	//       CertificateChain verified_chains<0..2^24-1>; /* excluding leaf */
-	//       select (SessionState.early_data) {
-	//           case 0: Empty;
-	//           case 1: opaque alpn<1..2^8-1>;
-	//       };
-	//       select (SessionState.type) {
-	//           case server: Empty;
-	//           case client: struct {
-	//               select (SessionState.version) {
-	//                   case VersionTLS10..VersionTLS12: Empty;
-	//                   case VersionTLS13: struct {
-	//                       uint64 use_by;
-	//                       uint32 age_add;
-	//                   };
-	//               };
-	//           };
-	//       };
-	//   } SessionState;
-	//
 
-	// Extra is ignored by crypto/tls, but is encoded by [SessionState.Bytes]
-	// and parsed by [ParseSessionState].
-	//
-	// This allows [Config.UnwrapSession]/[Config.WrapSession] and
-	// [ClientSessionCache] implementations to store and retrieve additional
-	// data alongside this session.
-	//
-	// To allow different layers in a protocol stack to share this field,
-	// applications must only append to it, not replace it, and must use entries
-	// that can be recognized even if out of order (for example, by starting
-	// with a id and version prefix).
 	Extra [][]byte
 
-	// EarlyData indicates whether the ticket can be used for 0-RTT in a QUIC
-	// connection. The application may set this to false if it is true to
-	// decline to offer 0-RTT even if supported.
 	EarlyData bool
 
 	version     uint16
 	isClient    bool
 	cipherSuite uint16
-	// createdAt is the generation time of the secret on the sever (which for
-	// TLS 1.0–1.2 might be earlier than the current session) and the time at
-	// which the ticket was received on the client.
-	createdAt         uint64 // seconds since UNIX epoch
-	secret            []byte // master secret for TLS 1.2, or the PSK for TLS 1.3
+	createdAt         uint64
+	secret            []byte
 	extMasterSecret   bool
 	peerCertificates  []*x509.Certificate
 	activeCertHandles []*activeCert
 	ocspResponse      []byte
 	scts              [][]byte
 	verifiedChains    [][]*x509.Certificate
-	alpnProtocol      string // only set if EarlyData is true
+	alpnProtocol      string
 
-	// Client-side TLS 1.3-only fields.
-	useBy  uint64 // seconds since UNIX epoch
+	useBy  uint64
 	ageAdd uint32
 }
 
-// Bytes encodes the session, including any private fields, so that it can be
-// parsed by [ParseSessionState]. The encoding contains secret values critical
-// to the security of future and possibly past sessions.
-//
-// The specific encoding should be considered opaque and may change incompatibly
-// between Go versions.
 func (s *SessionState) Bytes() ([]byte, error) {
 	var b cryptobyte.Builder
 	b.AddUint16(s.version)
 	if s.isClient {
-		b.AddUint8(2) // client
+		b.AddUint8(2)
 	} else {
-		b.AddUint8(1) // server
+		b.AddUint8(1)
 	}
 	b.AddUint16(s.cipherSuite)
 	addUint64(&b, s.createdAt)
@@ -142,7 +78,6 @@ func (s *SessionState) Bytes() ([]byte, error) {
 	b.AddUint24LengthPrefixed(func(b *cryptobyte.Builder) {
 		for _, chain := range s.verifiedChains {
 			b.AddUint24LengthPrefixed(func(b *cryptobyte.Builder) {
-				// We elide the first certificate because it's always the leaf.
 				if len(chain) == 0 {
 					b.SetError(errors.New("tls: internal error: empty verified chain"))
 					return
@@ -177,7 +112,6 @@ func certificatesToBytesSlice(certs []*x509.Certificate) [][]byte {
 	return s
 }
 
-// ParseSessionState parses a [SessionState] encoded by [SessionState.Bytes].
 func ParseSessionState(data []byte) (*SessionState, error) {
 	ss := &SessionState{}
 	s := cryptobyte.String(data)
@@ -287,8 +221,6 @@ func ParseSessionState(data []byte) (*SessionState, error) {
 	return ss, nil
 }
 
-// sessionState returns a partially filled-out [SessionState] with information
-// from the current connection.
 func (c *Conn) sessionState() (*SessionState, error) {
 	return &SessionState{
 		version:           c.vers,
@@ -305,8 +237,6 @@ func (c *Conn) sessionState() (*SessionState, error) {
 	}, nil
 }
 
-// EncryptTicket encrypts a ticket with the Config's configured (or default)
-// session ticket keys. It can be used as a [Config.WrapSession] implementation.
 func (c *Config) EncryptTicket(cs ConnectionState, ss *SessionState) ([]byte, error) {
 	ticketKeys := c.ticketKeys(nil)
 	stateBytes, err := ss.Bytes()
@@ -344,10 +274,6 @@ func (c *Config) encryptTicket(state []byte, ticketKeys []ticketKey) ([]byte, er
 	return encrypted, nil
 }
 
-// DecryptTicket decrypts a ticket encrypted by [Config.EncryptTicket]. It can
-// be used as a [Config.UnwrapSession] implementation.
-//
-// If the ticket can't be decrypted or parsed, DecryptTicket returns (nil, nil).
 func (c *Config) DecryptTicket(identity []byte, cs ConnectionState) (*SessionState, error) {
 	ticketKeys := c.ticketKeys(nil)
 	stateBytes := c.decryptTicket(identity, ticketKeys)
@@ -356,7 +282,7 @@ func (c *Config) DecryptTicket(identity []byte, cs ConnectionState) (*SessionSta
 	}
 	s, err := ParseSessionState(stateBytes)
 	if err != nil {
-		return nil, nil // drop unparsable tickets on the floor
+		return nil, nil
 	}
 	return s, nil
 }
@@ -393,45 +319,19 @@ func (c *Config) decryptTicket(encrypted []byte, ticketKeys []ticketKey) []byte 
 	return nil
 }
 
-// ClientSessionState contains the state needed by a client to
-// resume a previous TLS session.
 type ClientSessionState struct {
 	ticket  []byte
 	session *SessionState
 }
 
-// ResumptionState returns the session ticket sent by the server (also known as
-// the session's identity) and the state necessary to resume this session.
-//
-// It can be called by [ClientSessionCache.Put] to serialize (with
-// [SessionState.Bytes]) and store the session.
 func (cs *ClientSessionState) ResumptionState() (ticket []byte, state *SessionState, err error) {
 	return cs.ticket, cs.session, nil
 }
 
-// NewResumptionState returns a state value that can be returned by
-// [ClientSessionCache.Get] to resume a previous session.
-//
-// state needs to be returned by [ParseSessionState], and the ticket and session
-// state must have been returned by [ClientSessionState.ResumptionState].
 func NewResumptionState(ticket []byte, state *SessionState) (*ClientSessionState, error) {
 	return &ClientSessionState{
 		ticket: ticket, session: state,
 	}, nil
 }
 
-// // DecryptTicketWith decrypts an encrypted session ticket
-// // using a TicketKeys (ie []TicketKey) struct
-// //
-// // usedOldKey will be true if the key used for decryption is
-// // not the first in the []TicketKey slice
-// //
-// // [uTLS] changed to be made public and take a TicketKeys and use a fake conn receiver
-// func DecryptTicketWith(encrypted []byte, tks TicketKeys) (plaintext []byte, usedOldKey bool) {
-// 	// create fake conn
-// 	c := &Conn{
-// 		ticketKeys: tks.ToPrivate(),
-// 	}
 
-// 	return c.decryptTicket(encrypted)
-// }

@@ -6,17 +6,6 @@ import (
 	"github.com/TokenPLS/Hako/config"
 )
 
-// Shadowrocket ships a local proxy service out of a packet tunnel provider, sandboxed, on the
-// Mac App Store: its MacPacketTunnel.appex declares NSLocalNetworkUsageDescription "Use local
-// networking to provice local proxy service", imports listen/bind/accept, and carries
-// com.apple.security.network.server. sing-box and hakosfm carry the same entitlement. So the
-// question TN3120 raises is a design question, not a permission question, and this product
-// answered it the same way they did.
-//
-// What that means here: the local inbound proxy surface is honoured as written. mihomo opens
-// the listener the user asked for, and so does this core -- the executor's updateListeners was
-// never modified, so the only thing that ever stopped it was this fork zeroing the fields
-// before the parser saw them.
 func TestLocalProxyInboundSurfaceMatchesUpstream(t *testing.T) {
 	const document = `
 port: 7890
@@ -39,9 +28,6 @@ proxy-groups: []
 rules:
   - MATCH,DIRECT
 `
-	// allow-lan is gated on an app-level permission (see allow_lan_gate.go); parity for it is
-	// conditional by design, so this test states the condition instead of pretending it is not
-	// there. The other ten are unconditional.
 	SetAllowLanPermitted(true)
 	t.Cleanup(func() { SetAllowLanPermitted(false) })
 
@@ -87,9 +73,6 @@ rules:
 	}
 }
 
-// Opening a listener the user asked for is parity. Doing it silently on the LAN with no
-// credentials is not something to be quiet about: mihomo's behaviour is the same, but on a
-// phone the blast radius is a device that follows its owner onto other people's networks.
 func TestAnUnauthenticatedLANListenerIsAnnounced(t *testing.T) {
 	const exposed = `
 mixed-port: 7890

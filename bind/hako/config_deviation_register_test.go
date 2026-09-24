@@ -5,27 +5,17 @@ import (
 	"testing"
 )
 
-// The sentences a reader sees on the deviations page are in the reader's register: what
-// happened to them and what they can do. Nothing in them names a file, a function, an API
-// type, a kernel constant, a Linux tool, a system call, a device path or a decision number.
-// That material is the developer's and lives in source and mechanism, which the clients keep
-// for the diagnostics export and never put on screen.
-//
-// The user's words, on seeing an iOS screen that read "bind/hako/config_pipeline.go:119-124
-// (the StoreFakeIPSet guard)": that is Go's decision-making shown to someone who came to change
-// a setting. The outward rule is older than this file -- state facts, not mechanism -- and the
-// report walked straight into it. This gate is the ruler, so the call is not left to an eye.
 var developerRegister = regexp.MustCompile(
-	`\.(go|swift)\b` + // source files
-		`|\b(?:NE|CF|NS)[A-Z][A-Za-z0-9]+\b|\b(?:TunOptions|FinalizeForIOS|StoreFakeIPSet|DefaultRawConfig)\b` + // Apple API prefixes and this binding\'s own type/function names -- not "CamelCase is red", which would flag Fake-IP, GeoIP, SERVFAIL
-		`|\b(?:SOCK_DGRAM|IP_BOUND_IF|SO_MARK|IP_TRANSPARENT|DIOCNATLOOK)\b` + // kernel constants
-		`|\b(?:nftables|iptables|iproute2|netfilter|sing-tun|gVisor|bbolt)\b` + // implementation names
-		`|\b(?:bind|listener|hub|component|config|adapter)/[a-z_/]+\.go\b` + // repository path shape
-		`|\b(?:ioctl|sysctl|settimeofday|readv|writev|recvmsg|sendmsg)\b` + // system calls
-		`|\b(?:utun|fd|pcblist)\b` + // kernel-side nouns
-		`|/dev/` + // device paths
-		`|\bD-\d{3}\b|\bT-[A-Z0-9-]+\b` + // decision / task numbers
-		`|\b(?:mihomo|sing-box|Meta|darwin)\b`, // upstream project names: the product is Clash, and the core is "the core" on screen (macOS lane caught twelve of these; their own gate scans only the localisation table and could not see a core-supplied string)
+	`\.(go|swift)\b` +
+		`|\b(?:NE|CF|NS)[A-Z][A-Za-z0-9]+\b|\b(?:TunOptions|FinalizeForIOS|StoreFakeIPSet|DefaultRawConfig)\b` +
+		`|\b(?:SOCK_DGRAM|IP_BOUND_IF|SO_MARK|IP_TRANSPARENT|DIOCNATLOOK)\b` +
+		`|\b(?:nftables|iptables|iproute2|netfilter|sing-tun|gVisor|bbolt)\b` +
+		`|\b(?:bind|listener|hub|component|config|adapter)/[a-z_/]+\.go\b` +
+		`|\b(?:ioctl|sysctl|settimeofday|readv|writev|recvmsg|sendmsg)\b` +
+		`|\b(?:utun|fd|pcblist)\b` +
+		`|/dev/` +
+		`|\bD-\d{3}\b|\bT-[A-Z0-9-]+\b` +
+		`|\b(?:mihomo|sing-box|Meta|darwin)\b`,
 )
 
 func TestUserFacingSentencesCarryNoMechanism(t *testing.T) {
@@ -39,7 +29,6 @@ func TestUserFacingSentencesCarryNoMechanism(t *testing.T) {
 		check(rule.field+".reason", rule.reason)
 		check(rule.field+".alternative", rule.alternative)
 	}
-	// The shared family sentences, once each.
 	for name, text := range map[string]string{
 		"tunPacketTunnelShape": tunPacketTunnelShape,
 		"tunRoutingIsApples":   tunRoutingIsApples,
@@ -49,8 +38,6 @@ func TestUserFacingSentencesCarryNoMechanism(t *testing.T) {
 	} {
 		check("family "+name, text)
 	}
-	// The two synthetic rule-effect entries are literal text in ownerMetadataRuleDeviations;
-	// run it on a configuration that produces both and check what comes out.
 	box, err := ConfigDeviationsJSON("rules:\n  - PROCESS-NAME,curl,DIRECT\n  - PROCESS-NAME-REGEX,.*,DIRECT\n  - MATCH,DIRECT\nproxies: []\n", RuntimeProfileIOSPacketTunnel)
 	if err != nil {
 		t.Fatal(err)
@@ -58,8 +45,6 @@ func TestUserFacingSentencesCarryNoMechanism(t *testing.T) {
 	check("synthetic rows (whole report)", stripDeveloperOnlyFields(box.Value))
 }
 
-// stripDeveloperOnlyFields blanks the source and mechanism values in a report so the register
-// check reads only what a client puts on screen.
 func stripDeveloperOnlyFields(report string) string {
 	for _, key := range []string{`"source":"`, `"mechanism":"`} {
 		for {

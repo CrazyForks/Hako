@@ -107,9 +107,6 @@ func (t *NativeTun) Read(p []byte) (n int, err error) {
 	}
 }
 
-// handleVirtioRead splits in into bufs, leaving offset bytes at the front of
-// each buffer. It mutates sizes to reflect the size of each element of bufs,
-// and returns the number of packets read.
 func handleVirtioRead(in []byte, bufs [][]byte, sizes []int, offset int) (int, error) {
 	var hdr virtioNetHdr
 	err := hdr.decode(in)
@@ -123,10 +120,6 @@ func handleVirtioRead(in []byte, bufs [][]byte, sizes []int, offset int) (int, e
 		return 0, err
 	}
 
-	// Don't trust HdrLen from the kernel as it can be equal to the length
-	// of the entire first packet when the kernel is handling it as part of a
-	// FORWARD path. Instead, parse the transport header length and add it onto
-	// CsumStart, which is synonymous for IP header length.
 	if options.GSOType == GSOUDPL4 {
 		options.HdrLen = options.CsumStart + 8
 	} else if options.GSOType != GSONone {
@@ -136,7 +129,6 @@ func handleVirtioRead(in []byte, bufs [][]byte, sizes []int, offset int) (int, e
 
 		tcpHLen := uint16(in[options.CsumStart+12] >> 4 * 4)
 		if tcpHLen < 20 || tcpHLen > 60 {
-			// A TCP header must be between 20 and 60 bytes in length.
 			return 0, fmt.Errorf("tcp header len is invalid: %d", tcpHLen)
 		}
 		options.HdrLen = options.CsumStart + tcpHLen
@@ -161,12 +153,6 @@ func (t *NativeTun) BatchSize() int {
 	if !t.vnetHdr {
 		return 1
 	}
-	/* // Not works on some devices: https://github.com/SagerNet/sing-box/issues/1605
-	batchSize := int(gsoMaxSize/t.options.MTU) * 2
-	if batchSize > idealBatchSize {
-		batchSize = idealBatchSize
-	}
-	return batchSize*/
 	return idealBatchSize
 }
 
@@ -185,8 +171,6 @@ func (t *NativeTun) probeTCPGRO() error {
 			SrcAddr:  ipPort.Addr(),
 			DstAddr:  ipPort.Addr(),
 			Protocol: unix.IPPROTO_TCP,
-			// Use a zero value TTL as best effort means to reduce chance of
-			// probe packet leaking further than it needs to.
 			TTL:         0,
 			TotalLength: uint16(totalLen),
 		})
@@ -303,7 +287,6 @@ func open(name string, vnetHdr bool) (int, error) {
 func (t *NativeTun) configure(tunLink netlink.Link) error {
 	err := netlink.LinkSetMTU(tunLink, int(t.options.MTU))
 	if errors.Is(err, unix.EPERM) {
-		// unprivileged
 		return nil
 	} else if err != nil {
 		return err
@@ -360,7 +343,6 @@ func (t *NativeTun) configure(tunLink netlink.Link) error {
 
 	err = netlink.LinkSetUp(tunLink)
 	if errors.Is(err, unix.EPERM) {
-		// unprivileged
 		return nil
 	} else if err != nil {
 		return err
@@ -459,7 +441,6 @@ func (t *NativeTun) routes(tunLink netlink.Link) ([]netlink.Route, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Do not create gateway on linux by default
 	gateway4, gateway6 := t.options.Inet4GatewayAddr(), t.options.Inet6GatewayAddr()
 	return common.Map(routeRanges, func(it netip.Prefix) netlink.Route {
 		var gateway net.IP
@@ -578,8 +559,6 @@ func (t *NativeTun) rules() []*netlink.Rule {
 			it.Family = unix.AF_INET6
 			rules = append(rules, it)
 		}
-		// Fallback rules after system default rules (32766: main, 32767: default)
-		// Only reached when main and default tables have no route
 		if p4 {
 			it = netlink.NewRule()
 			it.Priority = t.options.IPRoute2AutoRedirectFallbackRuleIndex
@@ -858,7 +837,6 @@ func (t *NativeTun) rules() []*netlink.Rule {
 			it.Family = unix.AF_INET
 			rules = append(rules, it)
 		}
-		// priority++
 	}
 	if p6 {
 		it = netlink.NewRule()
@@ -901,7 +879,6 @@ func (t *NativeTun) rules() []*netlink.Rule {
 		it.Table = t.options.IPRoute2TableIndex
 		it.Family = unix.AF_INET6
 		rules = append(rules, it)
-		// priority6++
 	}
 	if p4 {
 		it = netlink.NewRule()

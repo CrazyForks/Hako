@@ -11,23 +11,6 @@ import (
 	"time"
 )
 
-// Both legs of the dual-stack race used the caller's context, so a leg that lost -- or
-// one that never finished at all -- held its dial open until the caller's own deadline,
-// five seconds by default. On a phone that is a socket and a radio wake kept alive for
-// nothing.
-//
-// The fallback ticker is a separate matter and is NOT dead code in general, contrary to
-// how the finding was phrased. With prefer unset both legs get isPrimary=true, so
-// fallback is never assigned and the ticker can never fire -- allocated and stopped for
-// nothing on every dual-stack dial. With prefer explicitly 4 or 6 one leg is
-// non-primary, fallback is assigned, and the ticker is live. So it is created only when
-// it can fire, rather than deleted.
-//
-// Every leg's context is cancelled before returning, the winner's included. The first
-// version spared the winner out of caution about a custom opt.netDialer still using its
-// context; adversarial review showed that leaks a child context per successful dial, and
-// cancelling it is safe by the contract net.Dialer documents. See
-// TestDualStackDoesNotAccumulateChildContexts at the bottom of this file.
 
 func TestDualStackCancelsTheLosingLegAtTheWin(t *testing.T) {
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -54,8 +37,6 @@ func TestDualStackCancelsTheLosingLegAtTheWin(t *testing.T) {
 
 	dialFn := func(ctx context.Context, network string, ips []netip.Addr, port string, opt option) (net.Conn, error) {
 		if ips[0].Is6() {
-			// The stalled leg: never completes on its own, so the only thing that can
-			// release it is a cancel from the race.
 			<-ctx.Done()
 			loserCancelled.Store(true)
 			close(loserDone)
@@ -64,8 +45,6 @@ func TestDualStackCancelsTheLosingLegAtTheWin(t *testing.T) {
 		return net.Dial("tcp4", net.JoinHostPort("127.0.0.1", port))
 	}
 
-	// A caller deadline far longer than the test: if the leg were only released by the
-	// caller's context, this test would time out rather than pass.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
@@ -78,7 +57,6 @@ func TestDualStackCancelsTheLosingLegAtTheWin(t *testing.T) {
 		t.Fatal("no connection returned")
 	}
 
-	// The winner must still be usable: cancelling the race must not have taken it out.
 	if err := conn.SetDeadline(time.Now().Add(time.Second)); err != nil {
 		t.Fatalf("the winning connection is not usable after the race returned: %v", err)
 	}
@@ -95,9 +73,6 @@ func TestDualStackCancelsTheLosingLegAtTheWin(t *testing.T) {
 	}
 }
 
-// TestDualStackStillReturnsTheFallbackWhenPreferIsSet guards the half that is not free:
-// with prefer set, a non-primary success is held as fallback and returned if the primary
-// fails. Cancelling losers must not break that.
 func TestDualStackStillReturnsTheFallbackWhenPreferIsSet(t *testing.T) {
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
@@ -121,7 +96,7 @@ func TestDualStackStillReturnsTheFallbackWhenPreferIsSet(t *testing.T) {
 	failure := errors.New("primary refused")
 	dialFn := func(ctx context.Context, network string, ips []netip.Addr, port string, opt option) (net.Conn, error) {
 		if ips[0].Is6() {
-			return nil, failure // prefer 6 makes this the primary
+			return nil, failure
 		}
 		return net.Dial("tcp4", net.JoinHostPort("127.0.0.1", port))
 	}
@@ -138,8 +113,6 @@ func TestDualStackStillReturnsTheFallbackWhenPreferIsSet(t *testing.T) {
 	_ = conn.Close()
 }
 
-// TestDualStackReturnsBothFailures: cancelling losers must not swallow the error report
-// when neither leg succeeds.
 func TestDualStackReturnsBothFailures(t *testing.T) {
 	primary := errors.New("v6 refused")
 	secondary := errors.New("v4 refused")
@@ -160,22 +133,6 @@ func TestDualStackReturnsBothFailures(t *testing.T) {
 	}
 }
 
-// TestDualStackDoesNotAccumulateChildContexts: the winner's cancel must be called too.
-//
-// Found by adversarial review of the first version, which skipped the winner's cancel to
-// avoid any chance of breaking its connection. Go retains a cancellable child in its
-// parent's children set until the child's cancel or the parent's runs, so one uncancelled
-// child per successful dial accumulates for as long as the parent lives. Reproduced
-// independently: five dials left five children on the parent.
-//
-// Bounded in the tunnel path, where the parent is a per-dial WithTimeout that the caller
-// cancels -- but unbounded for any caller passing a long-lived context, and the fix costs
-// nothing.
-//
-// Cancelling the winner is safe, and the codebase already proves it: tunnel.go creates the
-// dial context with WithTimeout plus defer cancel and then uses the returned connection
-// long afterwards. A connection surviving cancellation of the context it was dialled on is
-// already load-bearing here, which is also exactly what net.Dialer documents.
 func TestDualStackDoesNotAccumulateChildContexts(t *testing.T) {
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
@@ -203,7 +160,6 @@ func TestDualStackDoesNotAccumulateChildContexts(t *testing.T) {
 		return net.Dial("tcp4", net.JoinHostPort("127.0.0.1", port))
 	}
 
-	// A long-lived parent, which is the shape where the accumulation is unbounded.
 	parent, cancelParent := context.WithCancel(context.Background())
 	defer cancelParent()
 
@@ -213,7 +169,6 @@ func TestDualStackDoesNotAccumulateChildContexts(t *testing.T) {
 		if err != nil {
 			t.Fatalf("dial %d: %v", i, err)
 		}
-		// The connection must still be usable after the race released its context.
 		if err := conn.SetDeadline(time.Now().Add(time.Second)); err != nil {
 			t.Fatalf("dial %d returned an unusable connection: %v", i, err)
 		}
@@ -226,9 +181,6 @@ func TestDualStackDoesNotAccumulateChildContexts(t *testing.T) {
 	}
 }
 
-// parentChildCount reads the unexported children set of a cancelCtx. Reflection is the only
-// way to observe this from outside context, and observing it is the point: the leak is
-// invisible to go vet's lostcancel, which cannot follow a CancelFunc stored in a slice.
 func parentChildCount(parent context.Context) int {
 	value := reflect.ValueOf(parent)
 	if value.Kind() == reflect.Ptr {

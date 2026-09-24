@@ -43,7 +43,6 @@ func TestPing(t *testing.T) {
 			})
 		})
 	})
-	// const addr6 = "2606:4700:4700::1001"
 	const addr6 = "::1"
 	t.Run("ipv6", func(t *testing.T) {
 		t.Run("unprivileged", func(t *testing.T) {

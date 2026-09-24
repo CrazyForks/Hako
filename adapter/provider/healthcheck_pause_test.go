@@ -12,22 +12,10 @@ import (
 	C "github.com/TokenPLS/Hako/constant"
 )
 
-// HealthCheck.process registers its ticker with the process-wide pause manager so the URL
-// tests stop while the device sleeps. The registration is two lines; the risk in it is the
-// other two:
-//
-//   - it must actually happen, or an idle device keeps paying a TCP connect plus a full TLS
-//     handshake per proxy per interval, which on Apple is one trustd XPC round trip per
-//     verification (an idle iPhone logged 17,568 over 6.7 hours);
-//   - it must be released when the health check stops, or every configuration reload leaves a
-//     callback behind holding a dead ticker, for the life of the process.
-//
-// The pause package's own tests cover the ticker behaviour. These cover the wiring.
 
 func TestHealthCheckRegistersAndReleasesItsPauseCallback(t *testing.T) {
 	baseline := pause.Outstanding()
 
-	// One second is the minimum: NewHealthCheck takes the interval in seconds.
 	healthCheck := NewHealthCheck(nil, "http://127.0.0.1:1/never", 1, 1, true, nil)
 
 	stopped := make(chan struct{})
@@ -57,9 +45,6 @@ func TestHealthCheckRegistersAndReleasesItsPauseCallback(t *testing.T) {
 	}
 }
 
-// TestRepeatedHealthChecksDoNotAccumulateCallbacks is the reload case stated directly: a
-// counter that only ever grows is what the leak looks like in production, where reloads happen
-// far more often than restarts.
 func TestRepeatedHealthChecksDoNotAccumulateCallbacks(t *testing.T) {
 	baseline := pause.Outstanding()
 
@@ -98,10 +83,6 @@ func waitFor(condition func() bool) bool {
 	return condition()
 }
 
-// countingProxy is the smallest thing HealthCheck.execute will drive: it calls exactly
-// Name, URLTest, AliveForTestUrl and LastDelayForTestUrl. Embedding the interface leaves
-// everything else nil, so any method this test did not anticipate panics loudly instead of
-// quietly returning a zero value.
 type countingProxy struct {
 	C.Proxy
 	urlTests atomic.Int64
@@ -115,16 +96,9 @@ func (p *countingProxy) URLTest(ctx context.Context, url string, expectedStatus 
 func (p *countingProxy) AliveForTestUrl(url string) bool       { return false }
 func (p *countingProxy) LastDelayForTestUrl(url string) uint16 { return 0 }
 
-// A wake has to produce a check, not just restart the clock. sing's RegisterTicker does
-// `resume(); ticker.Reset(duration)` -- so with a nil resume, a device that slept through a
-// scheduled check runs the next one a full interval after waking, and whatever the user sees
-// on unlock is as stale as the sleep made it. That is the pause turning into a silent
-// degradation of the very data it was added to keep cheap.
 func TestWakeRunsAHealthCheckInsteadOfOnlyRestartingTheClock(t *testing.T) {
 	t.Cleanup(pause.DeviceWake)
 
-	// An interval far longer than the test: if a check happens, only the resume can have
-	// caused it, never a tick.
 	healthCheck := NewHealthCheck(nil, "http://127.0.0.1:1/never", 1, 3600, false, nil)
 	probe := &countingProxy{}
 	healthCheck.setProxies([]C.Proxy{probe})
@@ -139,14 +113,9 @@ func TestWakeRunsAHealthCheckInsteadOfOnlyRestartingTheClock(t *testing.T) {
 		<-stopped
 	})
 
-	// process() kicks one check on entry; wait it out so the wake's check is unambiguous.
 	if !waitFor(func() bool { return probe.urlTests.Load() >= 1 }) {
 		t.Fatal("process() did not run its initial check; the rest of this test cannot distinguish causes")
 	}
-	// check() is behind a singledo.Single with a one-second result cache, so a wake inside
-	// that window is answered from the cache and never reaches the proxy. Waiting past it is
-	// what makes a green here mean the resume ran, rather than that the timing happened to
-	// dodge the deduplication.
 	time.Sleep(1200 * time.Millisecond)
 	initial := probe.urlTests.Load()
 

@@ -8,39 +8,15 @@ import (
 	"github.com/TokenPLS/Hako/config"
 )
 
-// . The plan layer used to run every string in every dns field it did not
-// recognise through isNEIncompatibleNameserver, and a hit refused the whole
-// configuration with "system/dhcp resolver '…' has no iOS equivalent here and
-// cannot be stripped". The registry carried the premise as unverified with the
-// question "why can this tree strip them from six fields and must refuse on a
-// seventh?"
-//
-// The answer is that there is no seventh. Upstream's RawDNS declares exactly
-// seven resolver-bearing fields; six are in dnsResolverFields and are stripped
-// with a notice, the seventh is default-nameserver and is filtered as the
-// bootstrap. So the catch-all could never reach a resolver, and every input it
-// COULD reach was something else wearing a resolver's clothes.
-//
-// These two tests hold the finding in place from both sides: the classification
-// stays complete as upstream moves, and the fields that are not resolvers stay
-// unjudged.
 
-// dnsFieldClassification records what every yaml key in upstream's RawDNS is.
-// A field added upstream is unclassified until someone says which it is, and
-// this test is where they are asked.
 var dnsFieldClassification = map[string]string{
-	// Resolver-bearing. Stripped with a notice at activation.
 	"nameserver":                     "resolver",
 	"fallback":                       "resolver",
 	"proxy-server-nameserver":        "resolver",
 	"direct-nameserver":              "resolver",
 	"nameserver-policy":              "resolver",
 	"proxy-server-nameserver-policy": "resolver",
-	// The bootstrap. Filtered by filterBootstrap, judged by
-	// defaultNameserverStrip against mihomo's own pure-IP check.
 	"default-nameserver": "bootstrap",
-	// Everything else holds no resolver. Listed so the sweep is a sweep: a
-	// name that vanishes upstream goes red too, rather than rotting here.
 	"enable":                          "not-a-resolver",
 	"prefer-h3":                       "not-a-resolver",
 	"ipv6":                            "not-a-resolver",
@@ -101,8 +77,6 @@ func TestEveryDNSResolverFieldIsClassified(t *testing.T) {
 			t.Errorf("dns.%s is classified here but upstream's RawDNS no longer declares it; drop the entry", key)
 		}
 	}
-	// The claim the deleted catch-all rested on, stated as an assertion: the
-	// resolver-bearing fields are exactly dnsResolverFields + the bootstrap.
 	for _, key := range dnsResolverFields {
 		if dnsFieldClassification[key] != "resolver" {
 			t.Errorf("dnsResolverFields lists dns.%s, which is classified %q", key, dnsFieldClassification[key])
@@ -122,8 +96,6 @@ func contains(haystack []string, needle string) bool {
 	return false
 }
 
-// The three shapes the catch-all actually reached, each a legal upstream
-// configuration refused with a sentence about a resolver the field never held.
 func TestNonResolverDNSFieldsAreNotJudgedAsResolvers(t *testing.T) {
 	for _, tc := range []struct{ name, what, yaml string }{
 		{
@@ -167,9 +139,6 @@ dns:
 	}
 }
 
-// The strip itself is unchanged: a system/dhcp entry in a real resolver field
-// is still tolerated, stripped and reported. Without this, deleting the
-// catch-all could be mistaken for deleting the handling.
 func TestSystemResolverInARealFieldIsStillANotice(t *testing.T) {
 	r := planOf(t, `
 dns:

@@ -117,9 +117,6 @@ func (t *GVisor) Close() error {
 	return nil
 }
 
-// newGVisorWindowSnapshot reads the window state LIVE from the stack: the
-// installed range option (proving the tunable wiring, not restating it) and
-// the effective receive/send buffer size of every registered TCP endpoint.
 func newGVisorWindowSnapshot(s *stack.Stack) func() GVisorTCPWindowReport {
 	return func() GVisorTCPWindowReport {
 		var report GVisorTCPWindowReport
@@ -139,15 +136,9 @@ func newGVisorWindowSnapshot(s *stack.Stack) func() GVisorTCPWindowReport {
 			if !ok || info.TransProto != tcp.ProtocolNumber {
 				continue
 			}
-			// Per-endpoint drop count first: it is meaningful even for an endpoint
-			// whose occupancy cannot be read, and it is the only direct evidence that
-			// the memory gate ever refused a segment.
 			if endpointStats, ok := endpoint.Stats().(*tcp.Stats); ok {
 				report.SegmentQueueDroppedTotal += endpointStats.ReceiveErrors.SegmentQueueDropped.Value()
 			}
-			// RcvBufUsed = queued PAYLOAD bytes, not memory; see the field comment on
-			// GVisorTCPWindowReport. SO_RCVBUF (GetReceiveBufferSize) reports a 1 MiB
-			// nominal default that is never clamped and would overstate by ~8x.
 			used, err := endpoint.GetSockOptInt(tcpip.ReceiveQueueSizeOption)
 			if err != nil {
 				continue
@@ -221,20 +212,6 @@ func NewGVisorStackWithOptions(ep stack.LinkEndpoint, opts stack.NICOptions) (*s
 	})
 	ipStack.SetSpoofing(DefaultNIC, true)
 	ipStack.SetPromiscuousMode(DefaultNIC, true)
-	// Receive/send window range {4 KiB, 32 KiB, 128 KiB} with moderation on is
-	// deliberately IDENTICAL to sing-box/sing-tun's shipping iOS production
-	// value (SagerNet/sing-tun stack_gvisor.go, commit 1664d083f "Reduce iOS
-	// TCP buffers"): connections start at 32 KiB and gVisor's moderation grows
-	// busy ones only toward 128 KiB, so per-connection memory follows load and
-	// is bounded at ~Max (window ≈ Max/2). Do NOT chase a smaller fixed window
-	// (mihomo's 20 KiB throttles single-stream throughput to ~1.6 Mbit/s at
-	// 50 ms RTT) and do NOT disable moderation (documented to cause stalls,
-	// sing-box#3976). On-device A/B confirmed the win over the old 20 KiB:
-	// 20K≈305 Mbps, 64K≈526, 128K≈600+ with a core-memory delta under load of
-	// ~0.3 MiB. iOS NE hard cap is 50 MiB (jetsam); the real many-connection
-	// backstops are the Go soft memory limit + TCP connection admission cap,
-	// not this window (gVisor has no global receive-memory limit). A positive
-	// GVisorTCPBufferBytes pins Default==Max (fixed window) for benchmarks.
 	bufMin, bufDefault, bufMax := 4096, 32*1024, 128*1024
 	if GVisorTCPBufferBytes > 0 {
 		bufMin, bufDefault, bufMax = 1, GVisorTCPBufferBytes, GVisorTCPBufferBytes

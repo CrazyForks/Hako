@@ -6,12 +6,6 @@ import (
 	"time"
 )
 
-// The value of this package is that a periodic task stops while the device sleeps. So the
-// tests observe the ticker actually not firing, not merely that a state flag flipped: an
-// assertion on IsDevicePaused would have passed even if RegisterTicker did nothing.
-//
-// The manager is process-wide, so every test here must leave it awake and its callback list
-// empty, or it corrupts the next one.
 
 func TestRegisteredTickerStopsWhilePausedAndResumesOnWake(t *testing.T) {
 	const interval = 10 * time.Millisecond
@@ -35,7 +29,6 @@ func TestRegisteredTickerStopsWhilePausedAndResumesOnWake(t *testing.T) {
 	unregister := RegisterTicker(ticker, interval, nil)
 	defer unregister()
 
-	// Running: ticks accumulate.
 	time.Sleep(6 * interval)
 	running := ticks.Load()
 	if running == 0 {
@@ -45,7 +38,6 @@ func TestRegisteredTickerStopsWhilePausedAndResumesOnWake(t *testing.T) {
 	DevicePause()
 	defer DeviceWake()
 
-	// Let any tick already delivered to the channel drain, then take the baseline.
 	time.Sleep(2 * interval)
 	atPause := ticks.Load()
 
@@ -71,9 +63,6 @@ func TestRegisteredTickerStopsWhilePausedAndResumesOnWake(t *testing.T) {
 	}
 }
 
-// TestUnregisterStopsTrackingTheTicker is the leak guard. The callback list is process-wide, so
-// a health check that registers per configuration reload and never unregisters accumulates
-// callbacks for the life of the process -- each one holding a reference to a dead ticker.
 func TestUnregisterStopsTrackingTheTicker(t *testing.T) {
 	const interval = 10 * time.Millisecond
 	ticker := time.NewTicker(interval)
@@ -109,9 +98,6 @@ func TestUnregisterStopsTrackingTheTicker(t *testing.T) {
 	}
 }
 
-// TestResumeCallbackRunsBeforeTheTickerRestarts: callers pass a resume function to do work the
-// pause deferred. Upstream invokes it before Reset, and something relying on that ordering --
-// refreshing state the next tick will read -- must not be reordered silently.
 func TestResumeCallbackRunsBeforeTheTickerRestarts(t *testing.T) {
 	const interval = 10 * time.Millisecond
 	ticker := time.NewTicker(interval)
@@ -132,8 +118,6 @@ func TestResumeCallbackRunsBeforeTheTickerRestarts(t *testing.T) {
 	}
 }
 
-// TestRegisteringWhileAlreadyPausedStopsImmediately: a provider created while the device is
-// asleep -- a configuration reload during sleep -- must not start ticking until wake.
 func TestRegisteringWhileAlreadyPausedStopsImmediately(t *testing.T) {
 	const interval = 10 * time.Millisecond
 

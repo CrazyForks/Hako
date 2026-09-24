@@ -8,10 +8,6 @@ import (
 	"testing"
 )
 
-// The same shape a real dial failure has -- an OpError wrapping a SyscallError -- so
-// errors.Is reaches the errno the way it does in production. permissionDenied above is the
-// EPERM case; this one is parameterised because the advice is chosen by errno and a test
-// that cannot vary it cannot show that.
 func dialErrno(errno syscall.Errno) error {
 	return &net.OpError{
 		Op:   "dial",
@@ -31,10 +27,6 @@ func decodeDialHealth(t *testing.T) map[string]any {
 	return decoded
 }
 
-// The reason this exists at all. The notice is a log line, and a log line has no "cleared":
-// observeDialOutcomeForNotice resets the run on the first success and says nothing, so a
-// home-screen row lit from that line stays lit after the tunnel recovers. A caller needs a
-// state it can read again, not an event it had to catch.
 func TestDialHealthGoesBackToQuietAfterOneSuccess(t *testing.T) {
 	resetDialFailureWatch(t)
 	for attempt := 0; attempt < consecutiveDialFailuresBeforeNotice; attempt++ {
@@ -75,9 +67,6 @@ func TestDialHealthGoesBackToQuietAfterOneSuccess(t *testing.T) {
 	}
 }
 
-// The advice is the half of the sentence that names a likely cause, and it is derived from
-// the errno rather than from the message text. Keeping the error itself is what makes that
-// possible after the fact -- the run's first error is what the whole run is attributed to.
 func TestDialHealthAdviceFollowsTheErrnoNotTheText(t *testing.T) {
 	resetDialFailureWatch(t)
 	observeDialOutcomeForNotice(dialErrno(syscall.ECONNREFUSED))
@@ -95,9 +84,6 @@ func TestDialHealthAdviceFollowsTheErrnoNotTheText(t *testing.T) {
 	}
 }
 
-// A run below the threshold is real and worth reading -- the caller decides what to draw --
-// but it is not the announced one. Reporting `announced` separately is what lets a caller
-// tell "three failures just now" from "twenty in a row and the core said so".
 func TestDialHealthReportsARunBeforeItIsAnnounced(t *testing.T) {
 	resetDialFailureWatch(t)
 	for attempt := 0; attempt < 3; attempt++ {

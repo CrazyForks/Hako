@@ -185,8 +185,4 @@ func TestControlledAnyTLSSingBoxReferenceInterop(t *testing.T) {
 		t.Fatalf("AnyTLS sing-box failed attempt leaked to target; request count = %d", count)
 	}
 
-	// TestControlledAnyTLSInterop retains the invalid-password fail-closed
-	// behavior gate. Repeating that case against sing-box exposes an upstream
-	// mihomo close/write race in transport/anytls/session.Stream; do not claim
-	// that independent negative path race-clean until upstream fixes it.
 }

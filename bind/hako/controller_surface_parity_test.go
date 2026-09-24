@@ -7,14 +7,6 @@ import (
 	"github.com/TokenPLS/Hako/config"
 )
 
-// The RESTful API surface follows the same rule the user set for the listener surface: if a
-// shipping App Store app does it, the platform is not the obstacle. sing-box.app is on the Mac
-// App Store and its core carries clash_api / external_controller / external_ui / secret --
-// reproducible with `strings -a
-// /Applications/sing-box.app/Contents/Frameworks/Library.framework/Versions/A/Library`.
-//
-// So these are honoured as written. It stays opt-in exactly as upstream has it: a config that
-// does not name external-controller gets no API, which is mihomo's own default.
 func TestControllerSurfaceMatchesUpstream(t *testing.T) {
 	const document = `
 external-controller: 127.0.0.1:9090
@@ -49,15 +41,6 @@ rules:
 	}
 }
 
-// external-ui was the one member of this family that stayed stripped, and this test pinned that.
-// It no longer does, and the reason it stopped is worth keeping: the hold was
-// ("downloads happen app-side"), which is an architecture decision of ours, not a platform
-// limit -- Apple does not stop an extension from making an outbound request. Under the standard
-// the product stated (upstream allows it, the platform allows it, therefore we allow it), that
-//
-// The parity assertion lives in external_controller_test.go now. What is left here is the guard
-// against the reason coming back: if someone re-strips these three, they need a platform fact,
-// not.
 func TestExternalUIIsNoLongerHeldBackByAnArchitectureDecision(t *testing.T) {
 	const document = `
 external-controller: 127.0.0.1:9090
@@ -76,8 +59,6 @@ rules:
 	}
 }
 
-// An API that can reconfigure the running tunnel, reachable from the network, with no secret,
-// is worth a line. mihomo behaves the same and so do we -- saying so is not refusing.
 func TestANetworkReachableControllerWithoutASecretIsAnnounced(t *testing.T) {
 	for name, testCase := range map[string]struct {
 		document string

@@ -12,8 +12,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// zeroTierFakeGatewayIp from
-// https://github.com/zerotier/ZeroTierOne/blob/1.8.6/osdep/WindowsEthernetTap.cpp#L994
 var zeroTierFakeGatewayIp = netip.MustParseAddr("25.255.255.254")
 
 type networkUpdateMonitor struct {

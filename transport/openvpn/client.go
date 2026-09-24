@@ -523,9 +523,6 @@ func (c *Client) effectiveControlDeadline(fallback time.Time) time.Time {
 	pending := c.pendingDeferredUntil
 	pendingMatches := c.pendingDeferredSet && c.pendingDeferredKeyID == keyID
 	c.dataLock.RUnlock()
-	// AUTH_PENDING replaces the operation timeout for its exact key epoch;
-	// it may extend or shorten the original context deadline. Pending state
-	// wins before installDataChannel, active state afterwards.
 	if pendingMatches {
 		return pending
 	}
@@ -929,8 +926,6 @@ func (c *Client) failControl(err error) {
 	_ = c.mux.Close()
 }
 
-// errRenegotiateNoTLS is returned when renegotiate() is called before a TLS
-// connection has been established.
 var errRenegotiateNoTLS = errors.New("cannot renegotiate: tls connection not established")
 
 // renegotiate performs a single TLS epoch restart:
@@ -1082,8 +1077,6 @@ func operationContextError(ctx context.Context, fallback error) error {
 	return fallback
 }
 
-// interruptTLSOnDone makes cancellation observable to tls.Conn reads backed
-// by ControlConn, whose packet read otherwise has no context parameter.
 func (c *Client) interruptTLSOnDone(ctx context.Context) func() {
 	stop := contextutils.AfterFunc(ctx, func() {
 		if conn := c.tlsConn.Load(); conn != nil {

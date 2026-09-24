@@ -46,28 +46,6 @@ type HealthCheck struct {
 func (hc *HealthCheck) process() {
 	ticker := time.NewTicker(hc.interval)
 
-	// While the device sleeps this ticker used to keep firing, and each tick URL-tests every
-	// proxy in the provider: a TCP connect plus a full TLS handshake per proxy. On Apple
-	// platforms every certificate verification in that handshake is an XPC round trip to
-	// trustd, which is how an idle iPhone logged 17,568 verifications over 6.7 hours -- about
-	// 0.8 per second, all night, for a device nobody was using.
-	//
-	// sing-box stops the equivalent ticker instead (protocol/group/urltest.go registers it
-	// with pause.RegisterTicker), and the pause package it uses is already in this module's
-	// dependencies; it was simply never wired up. Registering here is that wiring.
-	//
-	// Nothing outside Apple calls DevicePause, so on every other platform this is inert.
-	//
-	// The unregister is deferred on the same path that stops the ticker: the callback list is
-	// process-wide, so a health check that registered without unregistering would leak one
-	// callback per configuration reload for the life of the process.
-	//
-	// The resume callback is what keeps the pause honest. On wake the ticker is Reset, which
-	// starts a fresh full interval -- so without this, a device that slept through a scheduled
-	// check would not run one until a whole interval after waking, and the results the user
-	// sees on unlock would be however stale the sleep made them. Running a check first costs
-	// exactly what one scheduled tick costs, at the one moment the device is demonstrably
-	// awake and about to be used.
 	stopPauseTracking := pause.RegisterTicker(ticker, hc.interval, func() { go hc.check() })
 	defer stopPauseTracking()
 
@@ -206,9 +184,6 @@ func (hc *HealthCheck) execute(b *errgroup.Group, url, uid string, option *extra
 
 		p := proxy
 		b.Go(func() error {
-			// Scheduled health checks are background probes: an armed memory
-			// admission gate may skip them this round rather than queue them
-			// into fake timeouts; the node keeps its last state.
 			ctx, cancel := context.WithTimeout(adapter.WithBackgroundProbe(hc.ctx), hc.timeout)
 			defer cancel()
 			log.Debugln("Health Checking, proxy: %s, url: %s, id: {%s}", p.Name(), url, uid)

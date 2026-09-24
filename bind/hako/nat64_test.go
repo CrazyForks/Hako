@@ -26,17 +26,6 @@ func setupNAT64PolicyTest(t *testing.T) {
 	installPhysicalAddressTransform(true)
 }
 
-// The synthesized address comes from the SYSTEM resolver, which on an
-// IPv6-only path derives it from a NAT64 prefix the NETWORK advertises (RFC
-// 7050 / DNS64). On a hostile network that prefix is attacker-chosen, so the
-// answer is attacker-influenced input and has to be checked like any other:
-// what comes back must look like the address it claims to be a translation of.
-// Without that, a crafted answer redirects an outbound dial anywhere the
-// attacker likes -- loopback (reaching this device's own services),
-// link-local, or multicast -- while the core believes it is talking to the
-// destination the configuration named.
-//
-// Threat model: whoever controls the network this device joined.
 func TestNAT64SynthesisRejectsAddressesThatCannotBeATranslation(t *testing.T) {
 	setupNAT64PolicyTest(t)
 	physicalPathSupportsIPv4.Store(false)
@@ -62,8 +51,6 @@ func TestNAT64SynthesisRejectsAddressesThatCannotBeATranslation(t *testing.T) {
 		}
 	}
 
-	// A well-formed translation still works: the well-known prefix with the
-	// destination's four bytes embedded where RFC 6052 puts them.
 	synthesizeIPv4Literal = func(string, netip.Addr) (netip.Addr, error) {
 		return netip.MustParseAddr("64:ff9b::5db8:d822"), nil
 	}
@@ -76,39 +63,21 @@ func TestNAT64SynthesisRejectsAddressesThatCannotBeATranslation(t *testing.T) {
 	}
 }
 
-// RFC 6052 defines SIX prefix lengths and only /96 puts the address in the
-// last four bytes; /32../64 place it around the u-byte at offset 8. A check
-// that only understands /96 rejects every legitimate translation on a network
-// using any of the other five -- and the rejection is a hard abort
-// (component/dialer/dialer.go dialContext returns the error), so on such a
-// network every IPv4 destination becomes unreachable. That is a security fix
-// turning into an outage, which is worse than the exposure it closes.
-//
-// Caught by the iOS lane before this shipped. The premise it removed ("no
-// Apple platform emits the others") existed only in the comment that asserted
-// it: the prefix comes from the network via RFC 7050 discovery, and this
-// fork's own C-side note says providers may advertise a different one.
 func TestNAT64SynthesisAcceptsEveryRFC6052PrefixLength(t *testing.T) {
 	setupNAT64PolicyTest(t)
 	physicalPathSupportsIPv4.Store(false)
 	physicalPathSupportsIPv6.Store(true)
-	destination := netip.MustParseAddr("192.0.2.33") // c0 00 02 21
+	destination := netip.MustParseAddr("192.0.2.33")
 
 	for _, form := range []struct {
 		name      string
 		synthetic string
 	}{
-		// v4 bytes at 4..7
 		{"/32", "2001:db8:c000:221::"},
-		// v4 bytes at 5,6,7,9 -- byte 8 is the reserved u-byte and must be zero
 		{"/40", "2001:db8:1c0:2:21::"},
-		// v4 bytes at 6,7,9,10
 		{"/48", "2001:db8:122:c000:2:2100::"},
-		// v4 bytes at 7,9,10,11
 		{"/56", "2001:db8:122:3c0:0:221::"},
-		// v4 bytes at 9..12
 		{"/64", "2001:db8:122:344:c0:2:2100:0"},
-		// v4 bytes at 12..15
 		{"/96", "64:ff9b::c000:221"},
 	} {
 		synthesizeIPv4Literal = func(string, netip.Addr) (netip.Addr, error) {
@@ -124,8 +93,6 @@ func TestNAT64SynthesisAcceptsEveryRFC6052PrefixLength(t *testing.T) {
 		}
 	}
 
-	// An address that embeds the destination NOWHERE is still refused: that is
-	// the property this validation exists for.
 	synthesizeIPv4Literal = func(string, netip.Addr) (netip.Addr, error) {
 		return netip.MustParseAddr("2001:db8::dead:beef"), nil
 	}
@@ -134,21 +101,6 @@ func TestNAT64SynthesisAcceptsEveryRFC6052PrefixLength(t *testing.T) {
 	}
 }
 
-// The /96 case above uses 64:ff9b::, the well-known prefix. Real networks do not
-// have to use it, and the one Apple itself builds does not.
-//
-// These vectors were MEASURED, not invented: an Apple "Create NAT64 Network"
-// internet-sharing network on macOS 26.6.1 (2026-08-15) advertises the
-// network-specific prefix 2001:2:0:1baa::/96, and its DNS64 answered with the
-// addresses below. An iPad on that network reported ipv4=false / ipv6=true, so
-// this is the exact input transformPhysicalAddressForApple sees there.
-//
-// What this guards is OUR half. The prefix is discovered by the system --
-// nat64_darwin.go calls getaddrinfo(PF_UNSPEC, AI_DEFAULT) and deliberately
-// does not form a prefix itself -- so the only way we can break an IPv6-only
-// network is by REFUSING a legitimate answer here, which aborts the dial
-// outright. Anyone tempted to "tighten" this to the well-known prefix would
-// make every IPv4 destination unreachable on Apple's own test network.
 func TestNAT64SynthesisAcceptsAppleNetworkSpecificPrefix(t *testing.T) {
 	setupNAT64PolicyTest(t)
 	physicalPathSupportsIPv4.Store(false)
@@ -159,9 +111,7 @@ func TestNAT64SynthesisAcceptsAppleNetworkSpecificPrefix(t *testing.T) {
 		destination string
 		synthesized string
 	}{
-		// ipv4only.arpa, the RFC 7050 discovery name: 192.0.0.170 = c0 00 00 aa
 		{"ipv4only.arpa", "192.0.0.170", "2001:2:0:1baa::c000:aa"},
-		// ipv4.google.com, an ordinary IPv4-only host: 74.125.130.100 = 4a 7d 82 64
 		{"ipv4-only host", "74.125.130.100", "2001:2:0:1baa::4a7d:8264"},
 	} {
 		destination := netip.MustParseAddr(measured.destination)
@@ -178,8 +128,6 @@ func TestNAT64SynthesisAcceptsAppleNetworkSpecificPrefix(t *testing.T) {
 		}
 	}
 
-	// Negative control, so the two acceptances above are not vacuous: the same
-	// real prefix carrying someone else's four bytes must still be refused.
 	synthesizeIPv4Literal = func(string, netip.Addr) (netip.Addr, error) {
 		return netip.MustParseAddr("2001:2:0:1baa::dead:beef"), nil
 	}
@@ -188,9 +136,6 @@ func TestNAT64SynthesisAcceptsAppleNetworkSpecificPrefix(t *testing.T) {
 	}
 }
 
-// A destination that is private or link-local has no business being handed to
-// a network-provided translator at all: the answer would send traffic meant
-// for this LAN through whatever prefix the network advertises.
 func TestNAT64SynthesisSkipsPrivateAndLinkLocalDestinations(t *testing.T) {
 	setupNAT64PolicyTest(t)
 	physicalPathSupportsIPv4.Store(false)

@@ -7,29 +7,11 @@ import (
 	"github.com/TokenPLS/Hako/config"
 )
 
-// The converse of TestEveryFieldTheCoreChangesIsRegistered.
-//
-// That test proves every field the core changes is registered. It says nothing about the
-// other direction -- that every registration is a change -- and the other direction is where
-// geodata-loader slipped through: registered for all four profiles, forced only where
-// memoryConservativeGeodata is set, so on a macOS profile the registry claimed a change that
-// finalize never made. A client reading the registry on a Mac showed "forced: memconservative"
-// over a loader that was exactly what the reader wrote. The iOS lane asked how a self-proving
-// registry let that past; the answer is that it proved one direction.
-//
-// So: seed every field, run the real finalize once per profile, and for every forced rule with
-// a forcedValue require that the field MOVED on each profile the rule claims and DID NOT move
-// on each profile it does not claim. appliesTo is then derived from the code's behaviour in
-// both directions, not from a hand-written applies alone.
 
 func TestEveryRegisteredForcedRuleActuallyFiresOnEachProfileItClaims(t *testing.T) {
 	restore := allowLanPermitted.Load()
 	t.Cleanup(func() { allowLanPermitted.Store(restore) })
 
-	// changed[profile] = set of registry field names finalize moved, seeding high so a force to
-	// false/""/0/off is visible. (Seeding only high misses a force TO the high value; the
-	// registry's forced values that are "true" -- dns.enable, tun.enable, store-fake-ip,
-	// disable-icmp-forwarding -- are covered by the low seed below.)
 	changedOn := func(high bool) map[string]map[string]bool {
 		out := map[string]map[string]bool{}
 		for _, seat := range registryProfiles {
@@ -60,7 +42,7 @@ func TestEveryRegisteredForcedRuleActuallyFiresOnEachProfileItClaims(t *testing.
 	movedHigh, movedLow := changedOn(true), changedOn(false)
 	moved := func(profile, field string) bool { return movedHigh[profile][field] || movedLow[profile][field] }
 
-	claims := map[string]map[string]bool{} // field -> profiles the registry claims
+	claims := map[string]map[string]bool{}
 	for _, rule := range deviationRules {
 		if rule.category != deviationForced || rule.forcedValue == "" {
 			continue
@@ -77,8 +59,6 @@ func TestEveryRegisteredForcedRuleActuallyFiresOnEachProfileItClaims(t *testing.
 		t.Fatal("no forced rule carries a forcedValue; the converse has nothing to check")
 	}
 
-	// Fields the seeder cannot reach (no json tag and no alias) are skipped with a log line, so
-	// a silent skip cannot masquerade as a pass.
 	for field, profiles := range claims {
 		reachable := false
 		for _, seat := range registryProfiles {
@@ -104,14 +84,6 @@ func TestEveryRegisteredForcedRuleActuallyFiresOnEachProfileItClaims(t *testing.
 	}
 }
 
-// Two forces fire on the RAW configuration, before parsing: dns.enable inside
-// normalizeRawConfigForApple (the packet-tunnel DNS repair) and profile.store-fake-ip in
-// applyStoreFakeIPDefault, which parseConfigForIOSInternal runs right after it for every
-// profile -- neither is in finalizeConfigForApple.
-// The parsed-config probe above cannot see them ("never moved ... listed, not passed"), which
-// is a blind spot of its own, so they get the same converse check on the path they actually
-// run on: seed the raw field with the non-forced value, run the raw normaliser per profile,
-// and require the field to move exactly on the profiles the registry claims.
 func TestRawPathForcesFireExactlyWhereTheRegistryClaims(t *testing.T) {
 	cases := []struct {
 		field string
@@ -140,7 +112,6 @@ func TestRawPathForcesFireExactlyWhereTheRegistryClaims(t *testing.T) {
 			claimed := rule.applies == nil || rule.applies(policy)
 			raw := config.DefaultRawConfig()
 			c.seed(raw)
-			// The same two calls, in the same order, that parseConfigForIOSInternal makes.
 			normalizeRawConfigForApple(raw, policy)
 			applyStoreFakeIPDefault(raw)
 			did := c.moved(raw)

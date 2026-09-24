@@ -7,8 +7,6 @@ import (
 	"github.com/TokenPLS/Hako/config"
 )
 
-// parseBoth runs mihomo's own parser and this fork's on the same document. Reading a diff tells
-// us what changed; running both tells us what it does. was found the second way.
 func parseBoth(t *testing.T, document string) (*config.Config, *config.Config) {
 	t.Helper()
 	mihomo, err := config.Parse([]byte(document))
@@ -22,9 +20,6 @@ func parseBoth(t *testing.T, document string) (*config.Config, *config.Config) {
 	return mihomo, ours
 }
 
-// A reader who never writes these keys must see no deviation: this fork forces them to the value
-// DefaultRawConfig already uses (config/config.go:513,517 and NTP at :563). If this test ever
-// fails, the force stopped agreeing with upstream's default and became observable to everyone.
 func TestSilentReaderSeesNoDeviationOnGeoAndNTPDefaults(t *testing.T) {
 	const silent = `
 mixed-port: 7890
@@ -46,9 +41,6 @@ rules:
 	}
 }
 
-// The same three keys, written by a reader who explicitly asked for the other value. Whatever this
-// prints is the finding: it is the exact deviation an opted-in reader gets, and B1's verdict for
-// these three fields rests on it.
 func TestOptedInReaderGetsTheOverride(t *testing.T) {
 	const optedIn = `
 mixed-port: 7890
@@ -78,14 +70,6 @@ rules:
 	}
 }
 
-// find-process-mode is not forced everywhere. override.go:40 applies it only where the runtime
-// profile cannot name the owner of a connection, so an iOS packet tunnel gets FindProcessOff and
-// a macOS one keeps what the reader configured. Both branches are pinned: a conditional force
-// with only one branch under test can be made unconditional later and nothing notices.
-//
-// Upstream's default is FindProcessStrict at e26714a18:config/config.go:498. That line number
-// resolves against the pinned upstream only — this fork added 57 lines to config/config.go, so
-// line 498 in the working tree is `func Parse`.
 func TestFindProcessModeIsForcedOffOnlyWhereNoProcessPathExists(t *testing.T) {
 	const silent = `
 mixed-port: 7890
@@ -124,11 +108,6 @@ rules:
 	})
 }
 
-// ruled dns.enable is a product-level requirement of the Apple packet tunnel: with it false
-// DefaultService is nil, ServeMsg returns ErrIPNotFound, every hijacked query answers SERVFAIL,
-// and ShouldHijackDns matches port 53 unconditionally so no configuration avoids the hijack. This
-// test does not re-litigate the ruling. It checks the code still implements it, and that upstream
-// still honours the value this fork overrides — a force is only a force while the two disagree.
 func TestDNSEnableIsForcedOnAsD184Ruled(t *testing.T) {
 	restoreRuntimeProfileForTest(t)
 
@@ -153,9 +132,6 @@ rules:
 	}
 }
 
-// default-nameserver is the one CORE-TASK-DNS-CONFIG-PARITY files as class C, "forced today,
-// disposition unresolved". Nothing is asserted about which side is right: this records what a
-// reader who wrote `system` actually gets, which is the input to that verdict and not the verdict.
 func TestDefaultNameserverSubstitutionIsObservable(t *testing.T) {
 	restoreRuntimeProfileForTest(t)
 
@@ -175,11 +151,6 @@ rules:
 	t.Logf("default-nameserver  ours=%v", addressesOf(ours.DNS.DefaultNameserver))
 }
 
-// The substitution above replaces a stripped bootstrap with a list — and the list matters as much
-// as the stripping. These four are mihomo's own DefaultNameserver at
-// e26714a18:config/config.go:516-521, so the repair hands the reader upstream's default rather
-// than a set this fork chose. Pinned here because that is the difference between a
-// platform-required repair and an invented one, and nothing else in the tree asserts it.
 func TestStrippedBootstrapIsReplacedWithUpstreamsOwnDefault(t *testing.T) {
 	restoreRuntimeProfileForTest(t)
 
@@ -214,16 +185,6 @@ rules:
 	}
 }
 
-// This test used to record the strongest form of "not as written": mihomo accepted these keys
-// and this fork refused the whole configuration. The refusal is gone, and this is now the
-// regression guard for it -- because the reason it was there sounded convincing. It said the
-// keys "decide WHICH traffic enters the tunnel, so silently dropping them would misroute".
-//
-// They do not. sing-tun reads the value only in redirect_linux.go and the two nftables files,
-// always through autoRedirect, which is Linux-only; upstream's documentation says "Linux only,
-// requires nftables". mihomo on darwin parses the field and ignores it. Refusing it was
-// stricter than upstream and not required by the platform --'s definition of a defect --
-// and the user-visible cost was that a configuration mihomo runs would not start here at all.
 func TestRouteAddressSetLoadsExactlyAsUpstreamDoes(t *testing.T) {
 	restoreRuntimeProfileForTest(t)
 
@@ -247,9 +208,6 @@ rules:
 	}
 }
 
-// The second refused key, on its own. validate.go:54 tests both in one condition today, so one
-// case would cover both — which is exactly why this exists: split that condition, get one branch
-// wrong, and a single-key test still passes.
 func TestRouteExcludeAddressSetLoadsOnItsOwn(t *testing.T) {
 	restoreRuntimeProfileForTest(t)
 
@@ -275,15 +233,6 @@ rules:
 
 }
 
-// B2's thesis is that all 48 stripped fields are inbound/server surfaces, and an Apple packet
-// tunnel has exactly one inbound — its own TUN. The thesis is cheap to state and worth attacking,
-// because a field swept in by prefix rather than by meaning would take an outbound capability with
-// it. config_pipeline.go:392 shows the surgical version already exists for one cluster:
-// raw.TLS.CustomTrustCert is deliberately left alone while its five inbound siblings are cleared.
-//
-// These are the two clusters where an outbound sibling shares the vocabulary of a stripped
-// inbound one: tuic-server.* against an outbound tuic proxy, and inbound-tfo/inbound-mptcp
-// against the per-proxy tfo/mptcp options.
 func TestStrippingInboundSurfacesLeavesOutboundAlone(t *testing.T) {
 	restoreRuntimeProfileForTest(t)
 
@@ -336,9 +285,6 @@ rules:
 			t.Errorf("outbound %q: upstream addr %q, ours %q", name, theirs.Addr(), mine.Addr())
 		}
 
-		// Type and address surviving proves the proxy was built; it does not prove its dial
-		// options survived, and per-proxy tfo/mptcp are the exact options that share their
-		// vocabulary with the stripped inbound-tfo/inbound-mptcp. Compare them directly.
 		theirInfo, myInfo := theirs.ProxyInfo(), mine.ProxyInfo()
 
 		if theirInfo.TFO {
@@ -354,21 +300,11 @@ rules:
 		}
 	}
 
-	// Positive control for the dial-option comparisons. Not every outbound type accepts tfo --
-	// TuicOption carries no such field upstream, so tuic reads false on both sides and comparing
-	// it proves nothing. The invariant is still "whatever upstream does, we do", so the equality
-	// checks stay for every proxy; this asserts the fixture made at least one of them mean
-	// something. Without it the whole group could pass on false == false.
 	if !carriedTFO {
 		t.Fatal("no proxy in the fixture carried tfo upstream, so every tfo comparison above was " +
 			"false == false — fix the fixture, not the assertions")
 	}
 
-	// The inbound half now matches upstream too. It used to be asserted gone, on the ground
-	// that a Network Extension could not listen -- a claim this core's own proxy_share.go
-	// disproved in the same process, and one the market settles: Shadowrocket ships a local
-	// proxy service from a sandboxed packet tunnel on the Mac App Store. These two fields
-	// configure the listener the user asked for, so they follow it.
 	if ours.General.InboundTfo != mihomo.General.InboundTfo {
 		t.Errorf("inbound-tfo: mihomo %v, ours %v", mihomo.General.InboundTfo, ours.General.InboundTfo)
 	}
@@ -377,12 +313,6 @@ rules:
 	}
 }
 
-// B3 covers the fields the ledger files as `apple` (the Apple layer takes over) and `split` (the
-// client writes it, the kernel consumes it). Two of them read like they were filed under the wrong
-// disposition, and a misfiled deviation is invisible to every review that trusts the filing.
-//
-// store-fake-ip is filed `split`, but its note says the value is defaulted on when the reader omits
-// it — that changes what a silent reader gets, which is the shape of a `force`, not of a layering.
 func TestStoreFakeIPDefaultForASilentReader(t *testing.T) {
 	restoreRuntimeProfileForTest(t)
 
@@ -403,9 +333,6 @@ rules:
 	}
 }
 
-// The same field written explicitly. The note claims an explicit true/false is preserved verbatim,
-// which is the difference between defaulting and overriding — and the difference decides whether
-// the reader's file ran as written.
 func TestStoreFakeIPIsPreservedWhenTheReaderIsExplicit(t *testing.T) {
 	restoreRuntimeProfileForTest(t)
 
@@ -430,9 +357,6 @@ rules:
 	}
 }
 
-// tun.* is filed `apple` — the Apple layer owns the device — but the same note says stack, mtu,
-// dns-hijack, icmp, gso and auto-route are pinned to iOS-safe values. Pinning a reader's value is
-// an override whoever owns the device, so this records what a reader who set them actually gets.
 func TestTunKnobsAReaderSetsAreReplaced(t *testing.T) {
 	restoreRuntimeProfileForTest(t)
 
@@ -458,10 +382,6 @@ rules:
 	t.Logf("tun.dns-hijack  mihomo=%v ours=%v", mihomo.General.Tun.DNSHijack, ours.General.Tun.DNSHijack)
 }
 
-// B4's 16 `na` fields are the ones nobody looks at, which is reason enough to look. Fifteen are
-// Android or Linux surfaces; the interesting question is not whether iOS can honour them — it
-// cannot — but what a reader who writes one actually gets. `na` says "not applicable"; it does not
-// say "stripped", and a field that is neither honoured nor removed is a third thing.
 func TestLinuxOnlyKnobsSurviveIntoTheConfigUnchanged(t *testing.T) {
 	restoreRuntimeProfileForTest(t)
 
@@ -480,18 +400,11 @@ rules:
 	t.Logf("iptables.enable            mihomo=%v ours=%v", mihomo.IPTables.Enable, ours.IPTables.Enable)
 	t.Logf("iptables.inbound-interface mihomo=%q ours=%q", mihomo.IPTables.InboundInterface, ours.IPTables.InboundInterface)
 
-	// Whichever way this goes it is a result. Equal means the knob is carried into a core that
-	// will never act on it; unequal means something strips it and the ledger says `na` where it
-	// should say `strip`.
 	if mihomo.IPTables.Enable != ours.IPTables.Enable {
 		t.Logf("FINDING: iptables.enable is not carried through — `na` describes the wrong mechanism")
 	}
 }
 
-// geo-update-interval is the one `na` field that is not platform-specific. Its note says it is
-// inert once auto-update is off — but auto-update is off because this fork forces it off (B1,
-// config_pipeline.go:138). So its inertness is derived from a deviation this fork chose, not from
-// anything the platform imposes, and `na` records the wrong reason.
 func TestGeoUpdateIntervalIsInertOnlyBecauseWeForcedAutoUpdateOff(t *testing.T) {
 	restoreRuntimeProfileForTest(t)
 

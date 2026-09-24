@@ -8,9 +8,6 @@ import (
 	tun "github.com/metacubex/sing-tun"
 )
 
-// Diagnostics must carry the LIVE window report while a gVisor stack runs and
-// omit the keys entirely when none does — consumers distinguish "no stack"
-// from "window zero".
 func TestRuntimeDiagnosticsCarriesGVisorWindow(t *testing.T) {
 	service := &BoxService{}
 	if strings.Contains(service.RuntimeDiagnosticsJSON(), "gvisorTCPWindow") {

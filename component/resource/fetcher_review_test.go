@@ -16,22 +16,7 @@ import (
 	"github.com/TokenPLS/Hako/common/utils"
 )
 
-// Four findings from the 2026-09-05 read-only audit of the deferred first load
-// each verified against this file before it was fixed:
-//
-//   F01  a side update from the app loaded the provider, and the background first
-//        load went on retrying its own download anyway -- it only ever recognised
-//        its own success, on its own private backoff;
-//   F02  Update read f.hash with no lock while loadBuf wrote it under one, and the
-//        first-load loop plus a side update is a real concurrent pair (race detector,
-//        production tags, exit 1);
-//   F03  the executor's five-slot provider-load bound covers Initial only; a deferred
-//        Initial returns at once and the actual download and parse ran outside it,
-//        so N deferred providers meant N bodies and N parses in flight;
-//   F04  the 16 MiB default cap read exactly 16 MiB and called it a success -- a
-//        rule set one byte longer lost its tail and reported no error.
 
-// --- F01 ---------------------------------------------------------------------------
 
 func TestASideUpdateEndsTheDeferredFirstLoad(t *testing.T) {
 	withDeferredFetch(t, 20*time.Millisecond, 60*time.Millisecond)
@@ -45,9 +30,8 @@ func TestASideUpdateEndsTheDeferredFirstLoad(t *testing.T) {
 	if _, _, err := fetcher.SideUpdate([]byte("from the app")); err != nil {
 		t.Fatalf("SideUpdate: %v", err)
 	}
-	// One attempt may already be in flight; after it lands, the loop must be gone.
 	settled := vehicle.reads.Load() + 1
-	time.Sleep(400 * time.Millisecond) // > several backoff steps at 20..60ms
+	time.Sleep(400 * time.Millisecond)
 	if reads := vehicle.reads.Load(); reads > settled {
 		t.Fatalf("the background first load kept downloading after a side update loaded the provider: reads went to %d (allowed %d)", reads, settled)
 	}
@@ -58,8 +42,6 @@ func TestASideUpdateEndsTheDeferredFirstLoad(t *testing.T) {
 	}
 }
 
-// A side update lands while the background attempt is in flight, and that attempt then
-// succeeds too. Two paths completed the first load; exactly one pull loop may follow.
 func TestBothPathsCompletingTheFirstLoadStartExactlyOnePullLoop(t *testing.T) {
 	withDeferredFetch(t, 20*time.Millisecond, 60*time.Millisecond)
 	const interval = 150 * time.Millisecond
@@ -73,14 +55,13 @@ func TestBothPathsCompletingTheFirstLoadStartExactlyOnePullLoop(t *testing.T) {
 	if _, _, err := fetcher.SideUpdate([]byte("same")); err != nil {
 		t.Fatalf("SideUpdate: %v", err)
 	}
-	close(block) // the in-flight attempt now succeeds with the same payload
+	close(block)
 	waitFor(t, "the in-flight attempt to return", 5*time.Second, func() bool { return vehicle.reads.Load() >= 2 })
-	// From here every read is a pull-loop tick; two loops would tick twice as often.
 	before := vehicle.reads.Load()
 	const window = time.Second
 	time.Sleep(window)
 	ticks := vehicle.reads.Load() - before
-	maxForOneLoop := int32(window/interval) + 2 // + one in flight, + rounding
+	maxForOneLoop := int32(window/interval) + 2
 	if ticks == 0 {
 		t.Fatal("no pull loop is running after the first load completed")
 	}
@@ -89,9 +70,6 @@ func TestBothPathsCompletingTheFirstLoadStartExactlyOnePullLoop(t *testing.T) {
 	}
 }
 
-// The download never succeeds; the side update is the only thing that ever loads the
-// provider. The pull loop the interval asks for must still start -- the first-load loop
-// was the only thing that would have started it.
 func TestASideUpdateStillHandsOverToThePullLoopWhenTheDownloadNeverSucceeds(t *testing.T) {
 	withDeferredFetch(t, 20*time.Millisecond, 60*time.Millisecond)
 	vehicle := &scriptedVehicle{path: filepath.Join(t.TempDir(), "list"), failures: 1 << 20, payload: []byte("never")}
@@ -103,9 +81,7 @@ func TestASideUpdateStillHandsOverToThePullLoopWhenTheDownloadNeverSucceeds(t *t
 	if _, _, err := fetcher.SideUpdate([]byte("from the app")); err != nil {
 		t.Fatalf("SideUpdate: %v", err)
 	}
-	// The first-load loop is gone (TestASideUpdateEndsTheDeferredFirstLoad); reads that
-	// keep coming at this point are the pull loop's refreshes, which the interval asked for.
-	before := vehicle.reads.Load() + 1 // one attempt may have been in flight
+	before := vehicle.reads.Load() + 1
 	waitFor(t, "the pull loop's first refresh", 5*time.Second, func() bool { return vehicle.reads.Load() > before })
 }
 
@@ -120,17 +96,14 @@ func TestASideUpdateBeforeTheFirstAttemptSpendsNoDownload(t *testing.T) {
 	if _, _, err := fetcher.SideUpdate([]byte("from the app")); err != nil {
 		t.Fatalf("SideUpdate: %v", err)
 	}
-	close(vehicle.block) // the in-flight attempt fails now
+	close(vehicle.block)
 	time.Sleep(500 * time.Millisecond)
 	if reads := vehicle.reads.Load(); reads != 1 {
 		t.Fatalf("a second attempt was scheduled after the side update: reads = %d", reads)
 	}
 }
 
-// --- F02 ---------------------------------------------------------------------------
 
-// The race detector is the assertion here: run the package with -race. Without the
-// fix this test reports Update's read of f.hash against loadBuf's write.
 func TestUpdateAndSideUpdateDoNotRaceOnTheHash(t *testing.T) {
 	withDeferredFetch(t, time.Millisecond, 5*time.Millisecond)
 	vehicle := &scriptedVehicle{path: filepath.Join(t.TempDir(), "list"), payload: []byte("remote")}
@@ -152,7 +125,6 @@ func TestUpdateAndSideUpdateDoNotRaceOnTheHash(t *testing.T) {
 	wg.Wait()
 }
 
-// --- F03 ---------------------------------------------------------------------------
 
 func withFirstLoadConcurrency(t *testing.T, n int) {
 	t.Helper()
@@ -187,8 +159,6 @@ func TestDeferredFirstLoadsShareOneAdmission(t *testing.T) {
 		t.Fatalf("%d downloads in flight with an admission of 2; the bound does not cover the background first load", n)
 	}
 	close(block)
-	// Wait on the writes, not the reads: a read that has returned may still be
-	// writing while the temp dir is torn down.
 	waitFor(t, "every provider to load and write", 5*time.Second, func() bool {
 		for _, v := range vehicles {
 			if v.written.Load() != 1 {
@@ -203,8 +173,6 @@ func TestCloseReleasesADeferredFirstLoadWaitingForAdmission(t *testing.T) {
 	withDeferredFetch(t, 20*time.Millisecond, 60*time.Millisecond)
 	withFirstLoadConcurrency(t, 1)
 	block := make(chan struct{})
-	// Which of the two wins the single slot is the scheduler's choice, not the
-	// test's: the one that entered Read is the holder, the other is the waiter.
 	type pair struct {
 		vehicle *scriptedVehicle
 		fetcher *Fetcher[string]
@@ -242,9 +210,6 @@ func TestWithoutAnAdmissionDeferredFirstLoadsRunUnbounded(t *testing.T) {
 	withDeferredFetch(t, 20*time.Millisecond, 60*time.Millisecond)
 	withFirstLoadConcurrency(t, 0)
 	const providers = 4
-	// Never released: Cleanup's fetcher.Close cancels the context, every blocked
-	// Read returns ctx.Err, and no goroutine is left writing into the temp dir
-	// while it is being removed.
 	block := make(chan struct{})
 	vehicles := make([]*scriptedVehicle, providers)
 	for i := range vehicles {
@@ -263,7 +228,6 @@ func TestWithoutAnAdmissionDeferredFirstLoadsRunUnbounded(t *testing.T) {
 	})
 }
 
-// --- F04 ---------------------------------------------------------------------------
 
 func withDefaultRemoteSizeLimit(t *testing.T, limit int64) {
 	t.Helper()
@@ -308,13 +272,6 @@ func TestADefaultedSizeLimitRefusesAnOversizedBodyInsteadOfTruncatingIt(t *testi
 	}
 }
 
-// Upstream's own explicit size-limit truncates and reports success
-// (component/resource/vehicle.go: LimitReader then ReadAll, no overrun check). That is
-// what a profile that WRITES size-limit gets from mihomo, and this build keeps it:
-// changing it would be stricter than upstream for a field upstream defines, which is a
-// registry decision, not a fix. Only the cap this build ADDS -- the default applied when
-// the profile names none -- refuses, because there is no upstream behaviour to match
-// there and "success with the tail missing" is the one outcome nobody asked for.
 func TestAnExplicitSizeLimitKeepsUpstreamsTruncation(t *testing.T) {
 	withDefaultRemoteSizeLimit(t, 1024)
 	var body atomic.Pointer[[]byte]

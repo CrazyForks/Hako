@@ -34,8 +34,6 @@ func writeCompiledCategory(t *testing.T, directory, category string, domains ...
 	}
 }
 
-// The compiled artifact has to win, or the saving is theoretical: the loader
-// that would otherwise run is the one that peaks at 72.7 MiB.
 func TestCompiledCategoryIsPreferredOverSource(t *testing.T) {
 	directory := stageCompiledHome(t)
 	reads := stageCountingLoader(t, "compiled-preference-probe")
@@ -53,9 +51,6 @@ func TestCompiledCategoryIsPreferredOverSource(t *testing.T) {
 	}
 }
 
-// The rule a reader lives by: a category this process cannot afford to build is
-// a category that matches nothing, not a tunnel that refuses to start. Their
-// configuration was killed by the alternative.
 func TestCompiledOnlyRuntimeDegradesInsteadOfDecoding(t *testing.T) {
 	stageCompiledHome(t)
 	reads := stageCountingLoader(t, "compiled-only-probe")
@@ -81,8 +76,6 @@ func TestCompiledOnlyRuntimeDegradesInsteadOfDecoding(t *testing.T) {
 	}
 }
 
-// The same absence off the constrained runtime still decodes: this is a memory
-// policy for one process, not a change to what the core supports.
 func TestUnconstrainedRuntimeStillDecodesSource(t *testing.T) {
 	stageCompiledHome(t)
 	reads := stageCountingLoader(t, "unconstrained-probe")
@@ -96,9 +89,6 @@ func TestUnconstrainedRuntimeStillDecodesSource(t *testing.T) {
 	}
 }
 
-// Compiling is the expensive direction and has to leave an artifact the cheap
-// direction can read, or the App would pay the peak on every launch and the
-// tunnel would still have nothing.
 func TestCompileGeoSiteWritesAnArtifactTheLoaderThenUses(t *testing.T) {
 	directory := stageCompiledHome(t)
 	reads := stageCountingLoader(t, "compile-probe")
@@ -118,7 +108,6 @@ func TestCompileGeoSiteWritesAnArtifactTheLoaderThenUses(t *testing.T) {
 		t.Fatalf("compiling left no artifact: %v", err)
 	}
 
-	// A fresh process, constrained, with only the artifact to work from.
 	ClearGeoSiteCache()
 	SetCompiledGeoSiteOnly(true)
 	t.Cleanup(func() { SetCompiledGeoSiteOnly(false) })
@@ -135,20 +124,10 @@ func TestCompileGeoSiteWritesAnArtifactTheLoaderThenUses(t *testing.T) {
 	}
 }
 
-// The defect this exists to stop, reproduced exactly as it happened on a
-// device: the App's preflight parses as the tunnel would — CheckConfig passes
-// underNetworkExtension true — so compiled-only is ON in the App's own process
-// and every category it declines to decode leaves an empty matcher in the
-// loader's cache, which stores results for the life of the process. Compiling
-// afterwards must not take that empty matcher for the category.
-//
-// It did. Three categories "compiled", nothing was written, and the tunnel
-// started with geosite:cn matching nothing while reporting records: 0.
 func TestCompilingIgnoresAnEmptyMatcherLeftByAConstrainedPreflight(t *testing.T) {
 	directory := stageCompiledHome(t)
 	reads := stageCountingLoader(t, "poisoned-cache-probe")
 
-	// The preflight: constrained, so the category degrades and is memoised.
 	SetCompiledGeoSiteOnly(true)
 	preflight, err := LoadGeoSiteMatcher("poisoned-cn")
 	if err != nil {
@@ -158,7 +137,6 @@ func TestCompilingIgnoresAnEmptyMatcherLeftByAConstrainedPreflight(t *testing.T)
 		t.Fatalf("the preflight did not degrade: count=%d reads=%d", preflight.Count(), *reads)
 	}
 
-	// The compile step that follows it, in the same process.
 	SetCompiledGeoSiteOnly(false)
 	t.Cleanup(func() { SetCompiledGeoSiteOnly(false) })
 	if err := CompileGeoSite("poisoned-cn"); err != nil {
@@ -177,11 +155,6 @@ func TestCompilingIgnoresAnEmptyMatcherLeftByAConstrainedPreflight(t *testing.T)
 	}
 }
 
-// A negated rule reads the same artifact as the plain spelling: negation is
-// applied at match time, never baked into the file. Compiling under the raw
-// spelling wrote !cn.mrs while the loader reads cn.mrs; under compiled-only the
-// missing artifact degraded to an empty matcher, and the negation then turned
-// "not in cn" into "every domain there is".
 func TestNegatedCategoryReadsTheArtifactItCompiled(t *testing.T) {
 	stageCompiledHome(t)
 	reads := stageCountingLoader(t, "negation-probe")
@@ -191,7 +164,6 @@ func TestNegatedCategoryReadsTheArtifactItCompiled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A fresh process, constrained, with only the artifact to work from.
 	ClearGeoSiteCache()
 	SetCompiledGeoSiteOnly(true)
 	t.Cleanup(func() { SetCompiledGeoSiteOnly(false) })
@@ -211,10 +183,6 @@ func TestNegatedCategoryReadsTheArtifactItCompiled(t *testing.T) {
 	}
 }
 
-// A category with several attributes compiles under the exact name the loader
-// asks for. The raw spelling keeps '@' between attributes while the loader
-// prints them comma-joined; the compiled key must be the loader's, or the
-// artifact is written once and never read.
 func TestAttributedCategoryReadsTheArtifactItCompiled(t *testing.T) {
 	stageCompiledHome(t)
 	reads := 0
@@ -264,10 +232,6 @@ func TestAttributedCategoryReadsTheArtifactItCompiled(t *testing.T) {
 	}
 }
 
-// A category the set cannot fully hold still compiles, and still matches what
-// the source matched. geosite:private carries one regex among 131 entries; the
-// first version of this refused the whole category over it, so private compiled
-// to nothing and matched nothing.
 func TestResidualEntriesSurviveCompilation(t *testing.T) {
 	directory := stageCompiledHome(t)
 	reads := 0
@@ -302,8 +266,6 @@ func TestResidualEntriesSurviveCompilation(t *testing.T) {
 		t.Fatalf("residual = %+v, want the regex and the keyword", residual)
 	}
 
-	// And the tunnel's side: read it back constrained, and every kind of entry
-	// the source held still answers.
 	ClearGeoSiteCache()
 	SetCompiledGeoSiteOnly(true)
 	t.Cleanup(func() { SetCompiledGeoSiteOnly(false) })

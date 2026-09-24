@@ -8,18 +8,6 @@ import (
 	"testing"
 )
 
-// The staged manifest is a control file two processes share through the App
-// Group container: the App writes it at publish, the extension reads it at
-// every start and serves whatever it describes WITHOUT re-running sanitize,
-// strip or compile. Everything it claims was therefore trusted on the strength
-// of a size comparison.
-//
-// On iOS, writing that container means the device is already jailbroken or in
-// forensic hands, which accepts. macOS is the reason these matter: its
-// sandbox is far weaker, an App Group container there is reachable by other
-// processes of the same user, and this fork now ships a macOS packet tunnel.
-//
-// Threat model: a local process that can write the container.
 
 func stagedManifestPath(t *testing.T, home string) string {
 	t.Helper()
@@ -62,8 +50,6 @@ func stageOnce(t *testing.T, source string, compile bool) string {
 	return path
 }
 
-// Equal-length rewriting of a staged file is invisible to a size comparison,
-// so the core would load rules nobody published.
 func TestStagedFileRewriteIsRejected(t *testing.T) {
 	home := compileStagingHome(t)
 	source := filepath.Join(home, "rules.yaml")
@@ -73,11 +59,6 @@ func TestStagedFileRewriteIsRejected(t *testing.T) {
 	}
 	stagedPath := stageOnce(t, source, false)
 
-	// Same length, different rules: a size check cannot see this. The staged
-	// product is a hard link to the published source, so the file is REPLACED
-	// (new inode) rather than written through -- writing through would edit the
-	// reader's own published bytes, which is a different act with a different
-	// answer (restaging from a changed source is correct).
 	poisoned := "payload:\n  - DOMAIN,attacker.io\n"
 	poisoned = poisoned + strings.Repeat(" ", len(original)-len(poisoned))
 	if len(poisoned) != len(original) {
@@ -110,9 +91,6 @@ func TestStagedFileRewriteIsRejected(t *testing.T) {
 	}
 }
 
-// A manifest that claims a compiled artifact carries the behavior the core
-// must read it under. An unknown value there fails ParseRawConfig, which fails
-// the whole start -- persistently, because the manifest survives restarts.
 func TestManifestCompiledBehaviorIsWhitelisted(t *testing.T) {
 	home := compileStagingHome(t)
 	source := filepath.Join(home, "rules.txt")
@@ -149,9 +127,6 @@ func TestManifestCompiledBehaviorIsWhitelisted(t *testing.T) {
 	}
 }
 
-// A manifest is a JSON control file, not a payload: reading it unbounded lets
-// one oversized file (or a symlink to one) end every start inside a 50 MiB
-// process.
 func TestOversizedManifestIsRefusedNotLoaded(t *testing.T) {
 	home := compileStagingHome(t)
 	source := filepath.Join(home, "rules.yaml")
@@ -160,7 +135,6 @@ func TestOversizedManifestIsRefusedNotLoaded(t *testing.T) {
 	}
 	stageOnce(t, source, false)
 
-	// Well-formed JSON, absurdly large.
 	var builder strings.Builder
 	builder.WriteString(`{"schema":1,"logic":3,"core":"x","policy":"y","entries":{},"pad":"`)
 	builder.WriteString(strings.Repeat("A", 8<<20))

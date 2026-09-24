@@ -28,10 +28,8 @@ import (
 	"github.com/metacubex/gvisor/pkg/tcpip/stack/gro"
 )
 
-// +stateify savable
 type processor struct {
 	mu processorMutex `state:"nosave"`
-	// +checklocks:mu
 	pkts stack.PacketBufferList
 
 	e           *endpoint
@@ -85,10 +83,6 @@ func (p *processor) deliverPackets() {
 	p.gro.Flush()
 }
 
-// processorManager handles starting, closing, and queuing packets on processor
-// goroutines.
-//
-// +stateify savable
 type processorManager struct {
 	processors []processor
 	seed       uint32
@@ -97,7 +91,6 @@ type processorManager struct {
 	ready      []bool
 }
 
-// newProcessorManager creates a new processor manager.
 func newProcessorManager(opts *Options, e *endpoint) *processorManager {
 	m := &processorManager{}
 	m.seed = rand.Uint32()
@@ -117,19 +110,15 @@ func newProcessorManager(opts *Options, e *endpoint) *processorManager {
 	return m
 }
 
-// start starts the processor goroutines if the processor manager is configured
-// with more than one processor.
 func (m *processorManager) start() {
 	for i := range m.processors {
 		p := &m.processors[i]
-		// Only start processor in a separate goroutine if we have multiple of them.
 		if len(m.processors) > 1 {
 			go p.start(&m.wg)
 		}
 	}
 }
 
-// afterLoad is invoked by stateify.
 func (m *processorManager) afterLoad(context.Context) {
 	m.wg.Add(len(m.processors))
 	m.start()
@@ -147,21 +136,16 @@ func (m *processorManager) connectionHash(cid *connectionID) uint32 {
 	return h.Sum32()
 }
 
-// queuePacket queues a packet to be delivered to the appropriate processor.
 func (m *processorManager) queuePacket(pkt *stack.PacketBuffer, hasEthHeader bool) {
 	var pIdx uint32
 	cid, nonConnectionPkt := tcpipConnectionID(pkt)
 	if !hasEthHeader {
 		if nonConnectionPkt {
-			// If there's no eth header this should be a standard tcpip packet. If
-			// it isn't the packet is invalid so drop it.
 			return
 		}
 		pkt.NetworkProtocolNumber = cid.proto
 	}
 	if len(m.processors) == 1 || nonConnectionPkt {
-		// If the packet is not associated with an active connection, use the
-		// first processor.
 		pIdx = 0
 	} else {
 		pIdx = m.connectionHash(&cid) % uint32(len(m.processors))
@@ -180,15 +164,10 @@ type connectionID struct {
 	proto            tcpip.NetworkProtocolNumber
 }
 
-// tcpipConnectionID returns a tcpip connection id tuple based on the data found
-// in the packet. It returns true if the packet is not associated with an active
-// connection (e.g ARP, NDP, etc). The method assumes link headers have already
-// been processed if they were present.
 func tcpipConnectionID(pkt *stack.PacketBuffer) (connectionID, bool) {
 	var cid connectionID
 	h, ok := pkt.Data().PullUp(1)
 	if !ok {
-		// Skip this packet.
 		return cid, true
 	}
 
@@ -205,8 +184,6 @@ func tcpipConnectionID(pkt *stack.PacketBuffer) (connectionID, bool) {
 
 		cid.srcAddr = ipHdr.SourceAddressSlice()
 		cid.dstAddr = ipHdr.DestinationAddressSlice()
-		// All fragment packets need to be processed by the same goroutine, so
-		// only record the TCP ports if this is not a fragment packet.
 		if ipHdr.IsValid(pkt.Data().Size()) && !ipHdr.More() && ipHdr.FragmentOffset() == 0 {
 			cid.srcPort = tcpHdr.SourcePort()
 			cid.dstPort = tcpHdr.DestinationPort()
@@ -223,19 +200,14 @@ func tcpipConnectionID(pkt *stack.PacketBuffer) (connectionID, bool) {
 		cid.proto = header.IPv6ProtocolNumber
 
 		if !header.IsExtensionHeader(ipHdr.NextHeader()) {
-			// Known transport protocols(not just TCP) store the src and dst ports
-			// in the first 4 bytes after the IPv6 fixed header.
 			tcpHdr := header.TCP(h[header.IPv6FixedHeaderSize:][:tcpSrcDstPortLen])
 			cid.srcPort = tcpHdr.SourcePort()
 			cid.dstPort = tcpHdr.DestinationPort()
 		} else {
-			// Slow path for IPv6 extension headers :(.
 			dataBuf := pkt.Data().ToBuffer()
 			dataBuf.TrimFront(header.IPv6MinimumSize)
 			it := header.MakeIPv6PayloadIterator(header.IPv6ExtensionHeaderIdentifier(ipHdr.NextHeader()), dataBuf)
 			defer it.Release()
-			// All fragment packets need to be processed by the same goroutine, so
-			// only record the ports if this is not a fragment packet.
 			var isFragment bool
 			for {
 				hdr, done, err := it.Next()
@@ -252,8 +224,6 @@ func tcpipConnectionID(pkt *stack.PacketBuffer) (connectionID, bool) {
 				if !ok {
 					return cid, true
 				}
-				// Known transport protocols store the src and dst ports
-				//  in the first 4 bytes after the IPv6 fixed header.
 				tcpHdr := header.TCP(h[it.HeaderOffset():][:tcpSrcDstPortLen])
 				cid.srcPort = tcpHdr.SourcePort()
 				cid.dstPort = tcpHdr.DestinationPort()
@@ -275,9 +245,6 @@ func (m *processorManager) close() {
 	}
 }
 
-// wakeReady wakes up all processors that have a packet queued. If there is only
-// one processor, the method delivers the packet inline without waking a
-// goroutine.
 func (m *processorManager) wakeReady() {
 	for i, ready := range m.ready {
 		if !ready {

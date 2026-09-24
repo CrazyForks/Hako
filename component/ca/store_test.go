@@ -15,16 +15,6 @@ import (
 	"time"
 )
 
-// Certificate store selection, ported from sing-box. The tests are built around the one property
-// that makes the port worth doing rather than around the option plumbing: which pool shape
-// crypto/x509 ends up with, because on darwin that is what decides whether every verification
-// costs an XPC round trip to trustd.
-//
-// verify.go branches on the systemPool mark ALONE. A pool built by x509.NewCertPool() is verified
-// in-process; a pool from x509.SystemCertPool() is not, no matter how many roots are added to it.
-// So "did the store take effect" is answerable by looking at the mark, and that is what these
-// tests look at -- plus a real Verify, because a pool with the right shape and unusable contents
-// would pass a shape test and fail every handshake.
 
 func withStore(t *testing.T, store Store) {
 	t.Helper()
@@ -101,9 +91,6 @@ func TestStoreSelectionDecidesThePoolShape(t *testing.T) {
 	}
 }
 
-// TestBundledStoresCarryRecognisableRoots: a pool of the right size proves the PEM parsed, not
-// that it is a trust store. If the vendored file were ever replaced by something else of similar
-// size, every selection would still "work" while trusting the wrong world.
 func TestBundledStoresCarryRecognisableRoots(t *testing.T) {
 	for _, testCase := range []struct {
 		store  Store
@@ -136,10 +123,6 @@ func TestBundledStoresCarryRecognisableRoots(t *testing.T) {
 	}
 }
 
-// TestSelectedStoreIsTheOneActuallyConsulted is the end-to-end half. A shape assertion cannot
-// tell whether crypto/x509 uses that pool, so this builds a private CA, selects "none", adds only
-// that CA, and verifies a leaf it signed. Under any other store the same leaf must fail, which is
-// what proves the selection is load-bearing rather than decorative.
 func TestSelectedStoreIsTheOneActuallyConsulted(t *testing.T) {
 	authority, authorityPEM, leaf := issueChain(t)
 
@@ -173,15 +156,11 @@ func TestSelectedStoreIsTheOneActuallyConsulted(t *testing.T) {
 	})
 }
 
-// TestUnknownStoreFailsClosed: falling back to the platform store on a typo would leave an
-// operator believing verification had moved in-process while every handshake still reached trustd.
 func TestUnknownStoreFailsClosed(t *testing.T) {
 	for _, value := range []string{"mozzila", "Mozilla ", "apple", "default", "true"} {
 		t.Run(value, func(t *testing.T) {
 			store, err := ParseStore(value)
 			if value == "Mozilla " {
-				// Case and surrounding space are tolerated on purpose: this is an operator-facing
-				// string that arrives from plists and environment variables.
 				if err != nil || store != StoreMozilla {
 					t.Fatalf("ParseStore(%q) = %q, %v; case and padding must be tolerated", value, store, err)
 				}
@@ -200,8 +179,6 @@ func TestUnknownStoreFailsClosed(t *testing.T) {
 	}
 }
 
-// TestEmptyStoreParsesAsNoSelection: the option is absent far more often than it is set, and
-// absent must not be an error.
 func TestEmptyStoreParsesAsNoSelection(t *testing.T) {
 	for _, value := range []string{"", "  "} {
 		store, err := ParseStore(value)
@@ -211,8 +188,6 @@ func TestEmptyStoreParsesAsNoSelection(t *testing.T) {
 	}
 }
 
-// issueChain builds a throwaway CA and a leaf it signed. Nothing here touches the network, and
-// the CA is unrelated to any public root, which is what makes the rejection half meaningful.
 func issueChain(t *testing.T) (authority *x509.Certificate, authorityPEM string, leaf *x509.Certificate) {
 	t.Helper()
 

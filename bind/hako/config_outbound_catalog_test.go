@@ -14,10 +14,6 @@ import (
 	"github.com/TokenPLS/Hako/config"
 )
 
-// TestOfficialOutboundCatalogParses turns docs/config.yaml into an executable
-// schema fixture for every outbound shipped by the pinned mihomo parser. It is
-// intentionally production-tag-only: WireGuard, MASQUE and Tailscale require
-// with_gvisor, which Hako's iOS XCFramework always enables.
 func TestOfficialOutboundCatalogParses(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "docs", "config.yaml"))
 	if err != nil {
@@ -42,9 +38,6 @@ func TestOfficialOutboundCatalogParses(t *testing.T) {
 			continue
 		}
 		normalizeOfficialCatalogPlaceholders(typeName, mapping)
-		// The catalog's OpenVPN PEM is explanatory placeholder text. Preserve all
-		// documented schema fields but use a parseable PEM envelope and the
-		// documented auth-user-pass branch so this remains an offline schema test.
 		if typeName == "openvpn" {
 			mapping["ca"] = "-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----"
 			mapping["cert"] = ""
@@ -56,8 +49,6 @@ func TestOfficialOutboundCatalogParses(t *testing.T) {
 		seenByType[typeName]++
 		fixtures = append(fixtures, fixture{typeName: typeName, ordinal: ordinal, mapping: mapping})
 	}
-	// The official catalog documents reject through built-ins/rules rather
-	// than a named proxy. Keep it in the parser matrix explicitly.
 	fixtures = append(fixtures, fixture{typeName: "reject", mapping: map[string]any{"name": "reject-probe", "type": "reject"}})
 	seenByType["reject"]++
 
@@ -90,10 +81,6 @@ func TestOfficialOutboundCatalogParses(t *testing.T) {
 	}
 }
 
-// normalizeOfficialCatalogPlaceholders replaces values which docs/config.yaml
-// deliberately uses to explain a choice or the expected wire format. It keeps
-// every documented field in the fixture: this test exercises the complete
-// example shape, not a reduced hand-written proxy.
 func normalizeOfficialCatalogPlaceholders(typeName string, mapping map[string]any) {
 	if typeName == "ss" {
 		for _, key := range []string{"server", "password"} {

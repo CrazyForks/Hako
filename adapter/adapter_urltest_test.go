@@ -20,11 +20,6 @@ func statusRanges(t *testing.T, spec string) utils.IntRanges[uint16] {
 	return ranges
 }
 
-// An answer outside the expected range is not an error and does not mark the
-// proxy dead everywhere: upstream records it as "not alive for this URL" and
-// nothing more, and the fork's earlier error here turned one URL's
-// expectation into a global death. The caller that needs to know reads the
-// outcome.
 func TestAnUnexpectedStatusIsAnOutcomeNotAnError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -47,16 +42,12 @@ func TestAnUnexpectedStatusIsAnOutcomeNotAnError(t *testing.T) {
 	if proxy.AliveForTestUrl(server.URL) {
 		t.Fatal("the per-URL state must record the unexpected status as not alive")
 	}
-	// C.Proxy's URLTest keeps upstream's shape on the same measurement.
 	delay, err := proxy.URLTest(ctx, server.URL, statusRanges(t, "200-299"))
 	if err != nil || delay == 0 {
 		t.Fatalf("URLTest = (%d, %v), want a delay and no error", delay, err)
 	}
 }
 
-// A sub-millisecond answer is reported as 1, never as the zero that
-// hub/route/proxies.go reads as failure. Driven by a frozen clock, not by
-// hoping the loopback round trip stays under a millisecond.
 func TestASubMillisecondAnswerIsNeverReportedAsZero(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -77,7 +68,6 @@ func TestASubMillisecondAnswerIsNeverReportedAsZero(t *testing.T) {
 	}
 }
 
-// A transport failure is still an error, with its cause.
 func TestATransportFailureIsStillAnError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
 	target := server.URL

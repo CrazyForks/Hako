@@ -60,11 +60,6 @@ func TestControlledWireGuardInterop(t *testing.T) {
 	defer proxy.Close()
 
 	wireTargetURL := "http://" + net.JoinHostPort(peerAddress4.String(), strconv.Itoa(int(tcpPort4)))
-	// The first request also establishes the userspace WireGuard handshake.
-	// Race instrumentation on a deliberately two-core release gate can push
-	// that one-time setup beyond five seconds even though the peer is already
-	// bound. Keep the wait bounded without weakening any subsequent data-plane
-	// or invalid-key deadline.
 	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
 	delay, err := proxy.URLTest(ctx, wireTargetURL, nil)
 	cancel()

@@ -1,4 +1,3 @@
-// #Restls# Begin
 
 package tls
 
@@ -296,4 +295,3 @@ func AnyTrue[T any](vals []T, predicate func(T) bool) bool {
 	return false
 }
 
-// #Restls# End

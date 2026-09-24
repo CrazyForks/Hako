@@ -13,10 +13,6 @@ import (
 	"github.com/TokenPLS/Hako/tunnel"
 )
 
-// The gomobile entry point folds failure into -1. An answer outside 200-299
-// is a failure for it -- that is the app's expectation, stated here now that
-// the kernel no longer turns it into an error -- and a 2xx answer is its
-// delay.
 func TestURLTestEntryPointReadsTheOutcome(t *testing.T) {
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
@@ -36,9 +32,6 @@ func TestURLTestEntryPointReadsTheOutcome(t *testing.T) {
 	}
 }
 
-// A stub provider: the entry point only ever asks it for its name and its
-// members, so the rest of the interface is here to satisfy the compiler and
-// nothing else calls it.
 type stubProxyProvider struct {
 	name    string
 	proxies []C.Proxy
@@ -58,15 +51,6 @@ func (p *stubProxyProvider) RegisterHealthCheckTask(string, utils.IntRanges[uint
 }
 func (p *stubProxyProvider) HealthCheckURL() string { return "" }
 
-// A node that only exists inside a proxy provider can still be tested.
-//
-// `config.go:962` builds the global proxy table from the `proxies:` section
-// plus the groups; a provider's members go to `providersMap` (:996) and never
-// enter it. So the entry point's `tunnel.Proxies()[name]` misses every node a
-// subscription brought -- which is most people's nodes -- and answered -1 for
-// all of them. The HTTP control plane learned this already and falls back to
-// the provider's health-check route; the television cannot use that plane
-// so the fallback belongs here too.
 func TestURLTestFindsANodeThatOnlyAProviderHas(t *testing.T) {
 	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -90,11 +74,6 @@ func TestURLTestFindsANodeThatOnlyAProviderHas(t *testing.T) {
 	}
 }
 
-// The same name under two providers is a conflict, not a coin toss.
-//
-// The HTTP client paid for this lesson first: measuring an arbitrary one of
-// them reports a latency for a node the reader did not mean, and there is no
-// way for them to tell which. Refuse instead.
 func TestURLTestRefusesANameTwoProvidersBothClaim(t *testing.T) {
 	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -116,8 +95,6 @@ func TestURLTestRefusesANameTwoProvidersBothClaim(t *testing.T) {
 	}
 }
 
-// The global table still wins: a name in both places is the one the reader
-// wrote in `proxies:`, which is what every other surface resolves it to.
 func TestURLTestPrefersTheGlobalTableOverAProvider(t *testing.T) {
 	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -125,10 +102,6 @@ func TestURLTestPrefersTheGlobalTableOverAProvider(t *testing.T) {
 	defer good.Close()
 
 	direct := adapter.NewProxy(outbound.NewDirect())
-	// Same name, two different proxies: the provider's copy rejects, so a
-	// positive delay can only come from the global table's entry. With the
-	// same object in both places this test passed either way -- it did, until
-	// a poison run showed it could not tell the two orders apart.
 	shadow := adapter.NewProxy(outbound.NewRejectWithOption(
 		outbound.RejectOption{Name: direct.Name()},
 	))

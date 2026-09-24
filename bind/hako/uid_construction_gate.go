@@ -9,21 +9,6 @@ import (
 	"github.com/TokenPLS/Hako/config"
 )
 
-// UID is the one owner-metadata kind upstream refuses to CONSTRUCT rather than merely
-// evaluate to false. rules/common/uid.go:23 gates NewUid on
-// runtime.GOOS being linux, android or darwin; every other GOOS gets an error, and an error
-// from a rule constructor fails config.Parse for the entire configuration.
-//
-// That distinction -- construct versus evaluate -- is what an earlier pass in this batch
-// missed. It removed the stripping of all ten kinds after establishing that upstream keeps
-// them and evaluates them against empty metadata, which is true for nine. For UID on GOOS=ios
-// it meant a subscription written for Android stopped starting at all, where before the rule
-// was dropped and the rest ran.
-//
-// The tests could not have caught it: they run on the host, which is darwin, and darwin is on
-// upstream's allow-list. So this file pairs the strip with a test that reads upstream's source
-// for the platform list rather than restating it -- the correspondence is load-bearing, and
-// the only cheap way to keep it honest is to check it against the thing it must correspond to.
 func uidRuleConstructible(goos string) bool {
 	switch goos {
 	case "linux", "android", "darwin":
@@ -33,8 +18,6 @@ func uidRuleConstructible(goos string) bool {
 	}
 }
 
-// uidRuleToken matches a UID rule at the start of a rule string or immediately inside a
-// logic rule's parenthesis, the two places a rule kind can appear.
 var uidRuleToken = regexp.MustCompile(`(?i)(?:^|\()\s*UID\s*,`)
 
 func ruleCarriesUID(rule string) bool {
@@ -45,11 +28,6 @@ func ruleCarriesUID(rule string) bool {
 	return uidRuleToken.MatchString(rule)
 }
 
-// stripUnconstructibleUIDRules removes UID rules where upstream cannot build them. A logic
-// rule carrying a UID branch goes whole: rules/logic/logic.go parsePayload returns on the
-// first branch that fails, so keeping the rule fails the configuration. That loses the
-// executable branches alongside it -- the harm this batch fixed for the other nine kinds --
-// which is why every removal is reported rather than done quietly.
 func stripUnconstructibleUIDRules(raw *config.RawConfig) []metadataRuleOccurrence {
 	removed := make([]metadataRuleOccurrence, 0)
 	filter := func(rules []string, location func(int) string) []string {
@@ -95,8 +73,6 @@ func stripUnconstructibleUIDRules(raw *config.RawConfig) []metadataRuleOccurrenc
 	return removed
 }
 
-// uidRuleExplanation is what every surface says about a removed UID rule. It names the
-// platform fact rather than a policy, because that is what this is.
 const uidRuleExplanation = "UID names a socket owner this platform does not expose, and mihomo's own " +
 	"rule constructor refuses to build it here (rules/common/uid.go), so the rule is removed " +
 	"rather than allowed to fail the whole configuration"

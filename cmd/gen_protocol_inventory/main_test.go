@@ -61,10 +61,6 @@ func hasGoName(fields []inventoryField, goName string) bool {
 	return false
 }
 
-// The roots come from the parser switch, so a type upstream adds appears here the
-// commit it lands. The 26 types the hand map used to carry are the floor (a walk
-// that silently lost one would still "work"); zerotier is the 27th, the one the
-// hand map missed for a whole upstream sync.
 func TestProxyRootsAreReadFromTheParserSwitch(t *testing.T) {
 	gen, roots := testSurface(t, "proxies")
 	previouslyHandKept := []string{
@@ -93,8 +89,6 @@ func TestProxyRootsAreReadFromTheParserSwitch(t *testing.T) {
 	}
 }
 
-// The listener surface uses the same walk over ParseListener; hysteria2-realm is
-// the one case that obtains its option through a constructor rather than a literal.
 func TestListenerRootsAreReadFromTheParserSwitch(t *testing.T) {
 	gen, roots := testSurface(t, "listeners")
 	for _, typeName := range []string{"socks", "http", "mixed", "tun", "tuic", "hysteria2", "shadowquic", "anytls"} {
@@ -119,8 +113,6 @@ func TestListenerRootsAreReadFromTheParserSwitch(t *testing.T) {
 	}
 }
 
-// A case the walk cannot pair with an option struct must be an error, never a
-// silently dropped type -- that silence is the failure this generator replaces.
 func TestParserRootsFailClosedOnAnUnrecognisedCaseShape(t *testing.T) {
 	dir := t.TempDir()
 	src := `package p
@@ -148,7 +140,6 @@ func ParseThing(mapping map[string]any) (any, error) {
 	if err == nil || !strings.Contains(err.Error(), `case "mystery"`) {
 		t.Fatalf("a case with no option struct must fail by name, got %v", err)
 	}
-	// The same file with the constructor shape resolves once the constructor is known.
 	src = strings.Replace(src, "out = buildSomewhereElse(mapping)", "o := opt.DefaultMysteryOption()\n\t\tout = o", 1)
 	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
 		t.Fatal(err)
@@ -165,13 +156,11 @@ func ParseThing(mapping map[string]any) (any, error) {
 func TestInventoryFlattensBasicOptionAndRendersSourceTypes(t *testing.T) {
 	gen, roots := testSurface(t, "proxies")
 	http := collectType(t, gen, roots, "http")
-	// BasicOption is flattened into the top level, ahead of the type's own keys.
 	for _, want := range []string{"tfo", "mptcp", "interface-name", "routing-mark", "ip-version", "dialer-proxy", "server", "port"} {
 		if fieldByKey(http, want) == nil {
 			t.Errorf("http inventory missing flattened key %q", want)
 		}
 	}
-	// goType is the source literal, which reflection could not reproduce.
 	if f := fieldByKey(http, "ip-version"); f == nil || f.GoType != "C.DNSPrefer" {
 		t.Errorf("ip-version goType = %q, want C.DNSPrefer", goTypeOrEmpty(f))
 	}
@@ -181,7 +170,6 @@ func TestInventoryFlattensBasicOptionAndRendersSourceTypes(t *testing.T) {
 	if f := fieldByKey(http, "sni"); f == nil || f.Required {
 		t.Errorf("sni should be optional (omitempty): %+v", f)
 	}
-	// Internal proxy:"-" fields must never leak into the editor catalog.
 	for _, internal := range []string{"DialerForAPI", "TunnelForAPI", "ProviderName"} {
 		if hasGoName(http, internal) {
 			t.Errorf("http leaked internal proxy:\"-\" field %q", internal)
@@ -199,14 +187,11 @@ func TestInventoryNestsStructsAndKeepsMapLeaf(t *testing.T) {
 	if fieldByKey(peers.Nested, "public-key") == nil {
 		t.Errorf("wireguard peers nested fields missing public-key")
 	}
-	// plugin-opts is map[string]any: a leaf, never expanded.
 	ss := collectType(t, gen, roots, "ss")
 	pluginOpts := fieldByKey(ss, "plugin-opts")
 	if pluginOpts == nil || pluginOpts.GoType != "map[string]any" || len(pluginOpts.Nested) != 0 {
 		t.Errorf("ss plugin-opts should be a map[string]any leaf, got %+v", pluginOpts)
 	}
-	// v1.19.30's nested additions recurse: ip-stack is a struct on four outbounds and
-	// zerotier's orbit is a slice of structs.
 	for _, typeName := range []string{"wireguard", "masque", "openvpn", "zerotier"} {
 		if f := fieldByKey(collectType(t, gen, roots, typeName), "ip-stack"); f == nil || fieldByKey(f.Nested, "mode") == nil {
 			t.Errorf("%s ip-stack must nest IPStackOption (mode, congestion-controller), got %+v", typeName, f)
@@ -228,10 +213,6 @@ func TestInventoryExcludesSingMux(t *testing.T) {
 	}
 }
 
-// zerotier is declared twice under build tags (zerotier.go / zerotier_stub.go); the
-// walk takes the first by file name. That choice must not matter: upstream keeps
-// the stub field-for-field identical, and this pins it so a divergence is seen
-// here rather than as a mysterious inventory flip.
 func TestZeroTierStubMirrorsTheRealOptionFieldForField(t *testing.T) {
 	fset := token.NewFileSet()
 	fieldsOf := func(file string) []string {
@@ -270,7 +251,6 @@ func TestZeroTierStubMirrorsTheRealOptionFieldForField(t *testing.T) {
 	}
 }
 
-// Two runs of the whole document must be byte-identical: the gate diffs it.
 func TestAllSurfacesRenderDeterministically(t *testing.T) {
 	render := func() []byte {
 		all := map[string]map[string][]inventoryField{}

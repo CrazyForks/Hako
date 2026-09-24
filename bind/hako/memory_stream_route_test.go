@@ -84,7 +84,6 @@ func TestMemoryRouteAndClientNeedNoExtraSnapshots(t *testing.T) {
 	}
 }
 
-// Inspect the actual wire before the App client can enrich it.
 func TestMemoryRouteOptionalReaderAndUnknownSample(t *testing.T) {
 	address := "127.0.0.1:" + freeLoopbackPort(t)
 	path := shortClashSocketPath(t)

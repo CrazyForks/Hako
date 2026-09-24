@@ -10,17 +10,6 @@ import (
 	"github.com/TokenPLS/Hako/config"
 )
 
-// A1 removed the stripping of all ten owner-metadata kinds, on the finding that upstream keeps
-// them and evaluates them against empty metadata. That finding was about EVALUATION, and it is
-// right for nine of the ten. UID is different for a reason A1 never checked: upstream refuses
-// to CONSTRUCT it off linux/android/darwin (rules/common/uid.go), so on GOOS=ios the rule does
-// not evaluate to false -- config.Parse returns an error and the whole configuration fails to
-// start.
-//
-// The tests that were supposed to catch this could not: they run on the host, which is darwin,
-// and darwin is on upstream's allow-list. A green `UID,0,REJECT` on this machine says nothing
-// about the platform the code ships to. That blind spot is why this test reads upstream's
-// source for the list instead of restating it.
 func TestOurUIDPlatformListStillMatchesUpstream(t *testing.T) {
 	source, err := os.ReadFile(filepath.Join("..", "..", "rules", "common", "uid.go"))
 	if err != nil {
@@ -42,8 +31,6 @@ func TestOurUIDPlatformListStillMatchesUpstream(t *testing.T) {
 	}
 }
 
-// The regression, stated as the user sees it: a subscription written for Android carries a UID
-// rule; on iOS it used to run with that rule stripped, and after A1 it stopped starting at all.
 func TestAUIDRuleDoesNotStopAnIOSConfigurationFromStarting(t *testing.T) {
 	raw := mustUnmarshalRaw(t, `
 rules:
@@ -64,12 +51,7 @@ rules:
 	}
 }
 
-// A1's fix stays: the other nine kinds are still kept, because their constructors accept every
-// platform and upstream evaluates them against empty metadata.
 func TestTheOtherNineKindsAreStillKeptOnIOS(t *testing.T) {
-	// All nine, by name, in the order RULE-KIND-AVAILABILITY.json lists them -- the macOS lane
-	// asked for the full set because its client cannot measure this offline and keys its own
-	// copy on these names.
 	raw := mustUnmarshalRaw(t, `
 rules:
   - PROCESS-NAME,curl,REJECT
@@ -103,7 +85,6 @@ rules:
 	}
 }
 
-// macOS builds as GOOS=darwin, which upstream allows, so nothing is stripped there.
 func TestUIDSurvivesOnMacOSWhereUpstreamCanBuildIt(t *testing.T) {
 	raw := mustUnmarshalRaw(t, `
 rules:
@@ -116,10 +97,6 @@ rules:
 	}
 }
 
-// A logic rule carrying a UID branch cannot be kept either: rules/logic/logic.go parsePayload
-// returns on the first branch that fails to construct, so one UID branch fails the whole rule
-// and with it the configuration. Dropping the rule loses its executable branches -- the exact
-// harm A1 fixed -- so it is dropped and REPORTED rather than dropped quietly.
 func TestALogicRuleCarryingUIDIsDroppedAndReportedOnIOS(t *testing.T) {
 	const document = `
 rules:
@@ -139,7 +116,6 @@ rules:
 	}
 }
 
-// And the whole thing has to actually parse, which is the property that broke.
 func TestAnIOSConfigurationWithUIDRulesParses(t *testing.T) {
 	const document = `
 proxies: []
@@ -158,15 +134,6 @@ rules:
 	}
 }
 
-// UID was found by a consumer, on a device, after it shipped to main. The class it belongs to
-// is "a rule constructor that refuses a platform", and the reason nobody here caught it is
-// structural: these tests run on darwin, which upstream allows, so the failure is invisible on
-// the only machine that runs them.
-//
-// This is that class turned into a gate. It does not try to be clever about what a new gate
-// would mean -- it just refuses to let one arrive unnoticed. Today the set is exactly one
-// file; if an upstream bump adds another, somebody has to look at it and decide whether iOS
-// needs the same treatment, and this is the line that makes them look.
 func TestNoNewPlatformGatedRuleConstructorArrivesUnnoticed(t *testing.T) {
 	known := map[string]string{
 		"rules/common/uid.go": "handled: stripUnconstructibleUIDRules removes UID where upstream " +

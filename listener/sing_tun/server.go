@@ -39,10 +39,6 @@ import (
 var InterfaceName = "Meta"
 var EnforceBindInterface = false
 
-// IncludeAllNetworks tells sing-tun that the tunnel runs under Apple's Include All
-// Networks, where only the gVisor stack carries traffic; sing-tun then refuses `system`
-// and `mixed` at Start instead of letting them run silently. Set by the Apple binding
-// from the tunnel's installed configuration before Start; false everywhere else.
 var IncludeAllNetworks = false
 
 type Listener struct {
@@ -160,9 +156,6 @@ func New(options LC.Tun, tunnel C.Tunnel, additions ...inbound.Addition) (l *Lis
 		options.Device = tunName
 	}
 	forwarderBindInterface := false
-	// Hako's App Store data plane feeds gVisor through a public
-	// NEPacketTunnelFlow -> SOCK_DGRAM bridge. That descriptor is intentionally
-	// not an Apple utun fd, so do not execute the utun-only getsockopt probe.
 	if options.FileDescriptor > 0 && options.Device != "hako-packet-flow" {
 		if tunnelName, err := getTunnelName(int32(options.FileDescriptor)); err == nil {
 			tunName = tunnelName // sing-tun must have the truth tun interface name even it from a fd

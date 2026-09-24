@@ -31,10 +31,6 @@ func TestNEPacingSoftLimitDecision(t *testing.T) {
 	}
 }
 
-// disarmThresholdMonitor parks the global monitor on an idle machine after a
-// test armed a real one. Without this the armed machine keeps polling the
-// real test process -- whose footprint dwarfs the NE budget -- and sheds
-// every tracked connection later tests create.
 func disarmThresholdMonitor(t *testing.T, priorShed bool) {
 	setupMu.Lock()
 	priorSoft := currentRuntimeSetup.softMemoryLimit
@@ -90,18 +86,11 @@ func TestNewServiceArmsNEPacingAndRelogsTheMonitor(t *testing.T) {
 		t.Fatalf("GOMEMLIMIT = %d, want %d", got, nePacingSoftLimitBytes)
 	}
 
-	// The armed line must land where a reader can find it: the Setup-time line went to
-	// logrus before the platform redirect existed, which is why three rounds of device
-	// logs held triggers but never an armed line.
 	deadline := time.After(2 * time.Second)
 	for {
 		select {
 		case line := <-platform.lines:
 			if strings.Contains(line, "threshold monitor armed") {
-				// The machine gets the FULL jetsam budget, not the pacing
-				// value: a 39321600 here is the unit error that makes the
-				// trigger sit below the measured 42 MiB resident steady
-				// state and shed on every activation.
 				if !strings.Contains(line, "mode=limit") || !strings.Contains(line, "limit=52428800") || !strings.Contains(line, "shed=true") {
 					t.Fatalf("armed line = %q, want mode=limit limit=52428800 shed=true", line)
 				}
@@ -204,9 +193,6 @@ func TestExplicitReloadSoftLimitRearmsTheMachine(t *testing.T) {
 	pressureThresholdMu.Lock()
 	machine := pressureThresholdMachine
 	pressureThresholdMu.Unlock()
-	// The machine gets the budget the pacing value describes (×4/3), never
-	// the pacing value itself — the units differ, and feeding it the pacing
-	// value is the born-triggered defect this batch removed.
 	if machine == nil || machine.mode != thresholdModeLimit || machine.limit != uint64(machineBudgetForPacing(32*1024*1024)) {
 		t.Fatalf("machine not re-armed on the pacing value's budget: %+v", machine)
 	}
@@ -223,7 +209,7 @@ func TestPredictorHonoursTheEdgeDuringASustainedGrowingEpisode(t *testing.T) {
 	triggers := 0
 	for i := 0; i < 20; i++ {
 		now = now.Add(100 * time.Millisecond)
-		usage += 3 * 1024 * 1024 // fast, sustained growth toward the limit
+		usage += 3 * 1024 * 1024
 		if usage >= 49*1024*1024 {
 			usage = 49 * 1024 * 1024
 		}

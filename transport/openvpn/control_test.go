@@ -552,10 +552,6 @@ func TestClientClosesOnSoftReset(t *testing.T) {
 			if err := serverIO.WritePacket(ctx, softReset); err != nil {
 				t.Fatal(err)
 			}
-			// With the rekey fix, the client attempts TLS renegotiation on
-			// soft reset. Since no real TLS connection was established in
-			// this unit test (tlsConn is nil), renegotiate() should fail
-			// and the client should close.
 			select {
 			case <-client.mux.done:
 			case <-ctx.Done():

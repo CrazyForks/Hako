@@ -5,22 +5,6 @@ import (
 	"testing"
 )
 
-// All 36 tun fields that were labelled "apple", measured one at a time rather than read off the
-// family note that covered them.
-//
-// The note said "stack/mtu/dns-hijack/icmp/gso/auto-route fixed to iOS-safe values", and
-// "apple" is the one disposition exempt from BOTH the enforcement cross-check and the runtime
-// deviation report. So the label bought silence, and nothing checked whether it was earned.
-//
-// It was not. Not one of the three groups below matches what the note claimed:
-//
-//	12 honoured verbatim  -- the catalog understated what this core supports
-//	12 cleared            -- strips wearing the apple label, reported to nobody
-//	11 forced             -- same
-//	 1 untouched          -- file-descriptor, injected at runtime and never read from config
-//
-// The point of asserting the honoured group is not that it works today; it is that a future
-// change which starts touching them has to say so here first.
 func TestEveryTunFieldDoesWhatTheCatalogSays(t *testing.T) {
 	const honouredDocument = `
 ipv6: true
@@ -66,8 +50,6 @@ rules:
 	}
 }
 
-// The interventions, asserted as interventions. A change that quietly stops forcing one of these
-// is as much a surprise as one that starts.
 func TestEveryForcedTunFieldIsStillForced(t *testing.T) {
 	const document = `
 tun:
@@ -100,8 +82,6 @@ rules:
   - MATCH,DIRECT
 `
 	mihomo, ours := parseBoth(t, document)
-	// Fixture check first: every one of these has to have survived upstream, or the test proves
-	// nothing about what this core did to it.
 	if mihomo.General.Tun.Device != "my-utun" || len(mihomo.General.Tun.IncludeUID) == 0 {
 		t.Fatalf("fixture is wrong, not the code: upstream did not keep the values under test")
 	}
@@ -146,13 +126,7 @@ rules:
 	}
 }
 
-// Every one of those interventions has to reach the user, which is the half that was missing:
-// they were silent for as long as they were labelled apple.
 func TestEveryTunInterventionReachesTheDeviationReport(t *testing.T) {
-	// Every value here is the one the core does NOT force, so each intervention actually
-	// fires. tun.enable used to be written true -- the forced value -- and the row still
-	// appeared only because the report then emitted "changed X to X" non-events; once those
-	// stopped, this fixture had to write the value that is really changed.
 	const document = `
 tun:
   enable: false
@@ -210,8 +184,6 @@ rules:
 		}
 	}
 
-	// A configuration that asks for none of this must produce none of these rows, or the report
-	// stops being about the reader and starts being a list of everything this core could do.
 	quiet, err := collectConfigDeviations(`
 proxies: []
 proxy-groups: []

@@ -8,13 +8,6 @@ import (
 	"testing"
 )
 
-// proxyImportExporterFieldOracle says where each query key the exporter emits has
-// to land in the proxy this importer builds. It is the difference between "the
-// link was accepted" and "the link was understood": a websocket node imports
-// perfectly well as tcp, and nothing about the record count says otherwise.
-//
-// A dotted path walks nested option objects. Two keys have a value that depends
-// on the transport and carry both destinations.
 var proxyImportExporterFieldOracle = map[string][]string{
 	"path":          {"ws-opts.path", "grpc-opts.grpc-service-name"},
 	"obfsParam":     {"ws-opts.headers.Host"},
@@ -55,10 +48,6 @@ func lookupProxyPath(proxy map[string]any, path string) (any, bool) {
 	return current, true
 }
 
-// TestEveryShadowrocketExportImportsWithItsFieldsIntact is the acceptance oracle
-// for "compatible with Shadowrocket": every URI in the corpus is what the exporter
-// itself replied when handed the paired input, so the assertion is not that our
-// dialect table is complete but that nothing the exporter actually emits is lost.
 func TestEveryShadowrocketExportImportsWithItsFieldsIntact(t *testing.T) {
 	raw, err := os.ReadFile("testdata/shadowrocket-2.2.90-3378-dialect-matrix.json")
 	if err != nil {
@@ -113,7 +102,6 @@ func TestEveryShadowrocketExportImportsWithItsFieldsIntact(t *testing.T) {
 			}
 		}
 	}
-	// A run that grades nothing passes without comparing anything.
 	if graded < len(corpus.Pairs) {
 		t.Fatalf("graded only %d field(s) across %d export(s) -- the oracle no longer matches the corpus",
 			graded, len(corpus.Pairs))

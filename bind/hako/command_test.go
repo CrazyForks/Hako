@@ -8,8 +8,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// DoD: the getters return valid JSON reflecting the running core,
-// with no HTTP controller started.
 func TestCommandGettersReturnJSON(t *testing.T) {
 	t.Cleanup(func() { logrus.SetOutput(os.Stdout) })
 	if err := Setup(testOptions(t)); err != nil {
@@ -24,7 +22,6 @@ func TestCommandGettersReturnJSON(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	// Status reflects the running core.
 	var status map[string]string
 	if err := json.Unmarshal([]byte(StatusJSON()), &status); err != nil {
 		t.Fatalf("StatusJSON invalid: %v", err)
@@ -36,7 +33,6 @@ func TestCommandGettersReturnJSON(t *testing.T) {
 		t.Fatal("mode missing")
 	}
 
-	// Traffic parses and carries the expected keys.
 	var traffic map[string]int64
 	if err := json.Unmarshal([]byte(TrafficJSON()), &traffic); err != nil {
 		t.Fatalf("TrafficJSON invalid: %v", err)
@@ -47,7 +43,6 @@ func TestCommandGettersReturnJSON(t *testing.T) {
 		}
 	}
 
-	// Connections snapshot parses.
 	var conns map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(ConnectionsJSON()), &conns); err != nil {
 		t.Fatalf("ConnectionsJSON invalid: %v", err)
@@ -64,7 +59,6 @@ func TestCommandGettersReturnJSON(t *testing.T) {
 		t.Fatal("rule providers key missing")
 	}
 
-	// Proxies includes the config's "probe" proxy.
 	var proxies struct {
 		Proxies map[string]json.RawMessage `json:"proxies"`
 	}

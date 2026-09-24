@@ -254,19 +254,8 @@ func Mode() TunnelMode {
 	return mode
 }
 
-// modeObserver is told about every mode change, by whoever makes it.
-//
-// The seam exists because mode acquired a second writer: the embedded controller's
-// PATCH /configs reaches SetMode just as the containing app's own route does, and a consumer
-// holding a snapshot has no way to learn about the one it did not make. Installing a hook at
-// the two call sites instead would put the burden on each new path to remember, and the path
-// that would be forgotten is the controller's -- it is the one no default test drives.
-//
-// Nil is the default and what every non-embedded build gets, so upstream pays one nil check
-// per mode change.
 var modeObserver syncatomic.Pointer[func(TunnelMode)]
 
-// SetModeObserver installs the seam. Nil removes it.
 func SetModeObserver(observe func(TunnelMode)) {
 	if observe == nil {
 		modeObserver.Store(nil)
@@ -340,29 +329,10 @@ func preHandleMetadata(metadata *C.Metadata) error {
 	return nil
 }
 
-// ownerLookupUsesPackageName reports whether this build has to ask its host for a package name
-// instead of reading the socket table itself. Only an Android host can answer that: Android
-// stopped letting an app read /proc/net for other apps, so ClashMetaForAndroid supplies the
-// identity through process.DefaultPackageNameResolver instead.
-//
-// Upstream keys this off features.CMFA alone, which is right upstream, where the only thing built
-// with -tags cmfa is ClashMetaForAndroid. This fork reuses the tag on every Apple artifact too
-// for reasons that have nothing to do with process
-// attribution: a platform-supplied TUN descriptor, IsSafePath, the loopback detector. Keyed off
-// the tag alone, darwin took the package-name branch, where DefaultPackageNameResolver is nil and
-// every call returns ErrPlatformNotSupport -- component/process/process_darwin.go was compiled
-// into every shipped framework and never called, so PROCESS-* and UID rules on macOS matched
-// nothing at all while the app told the user they were available. See.
-//
-// Taking (cmfa, goos) as arguments instead of reading this build's own values is what lets the
-// untagged test run grade the cmfa case. A predicate that asks features.CMFA what it is can only
-// be graded by a run carrying that tag, and the defect above survived precisely because no gate
-// here does.
 func ownerLookupUsesPackageName(cmfa bool, goos string) bool {
 	return cmfa && goos == "android"
 }
 
-// resolvesOwnerByPackageName is that predicate applied to this build, once.
 var resolvesOwnerByPackageName = ownerLookupUsesPackageName(features.CMFA, runtime.GOOS)
 
 func resolveMetadata(metadata *C.Metadata) (proxy C.Proxy, rule C.Rule, err error) {
@@ -682,20 +652,8 @@ func handleTCPConn(connCtx C.ConnContext) {
 	handleSocket(conn, remoteConn)
 }
 
-// dialOutcomeObserver is told the result of every completed dial: the error when one failed,
-// nil when one succeeded. Both arrive through the two functions below, which is why the seam
-// lives here -- they are already the single place every TCP and UDP path reports through.
-//
-// It exists because of a specific failure this fork keeps meeting: the core does everything
-// right, says so, and the packets still do not leave. A macOS extension missing the
-// network-client entitlement logged 2,900 identical "operation not permitted" dial failures in
-// 65 seconds while the tunnel reported itself connected, the tun fd was live, the startup phases
-// were green and the controller was listening. The core knew every time. Nobody was told.
-//
-// Nil is the default, so a build that installs nothing pays one nil check per dial.
 var dialOutcomeObserver syncatomic.Pointer[func(error)]
 
-// SetDialOutcomeObserver installs the seam. Nil removes it.
 func SetDialOutcomeObserver(observe func(error)) {
 	if observe == nil {
 		dialOutcomeObserver.Store(nil)

@@ -33,7 +33,7 @@ func TestCloseIsIdempotentAndUseAfterCloseErrs(t *testing.T) {
 		t.Fatalf("open failed: %v", err)
 	}
 	doc.Close()
-	doc.Close() // second close must not panic
+	doc.Close()
 	if err := doc.closedErr(); err == nil {
 		t.Fatal("a closed document must refuse to serve")
 	}
@@ -45,9 +45,6 @@ func TestOpenRefusesWhatTheKernelRefuses(t *testing.T) {
 	}
 }
 
-// The concurrency contract: reads from any goroutine while another closes.
-// This test exists to give the race detector something real to chew on --
-// without it, "safe under -race" would be an untested claim.
 func TestConcurrentReadsAndCloseAreRaceFree(t *testing.T) {
 	doc, err := NewConfigDocument("proxies:\n  - {name: A, type: socks5, server: e.test, port: 1080}\n")
 	if err != nil {
@@ -58,9 +55,6 @@ func TestConcurrentReadsAndCloseAreRaceFree(t *testing.T) {
 		go func() {
 			defer func() { done <- struct{}{} }()
 			for j := 0; j < 200; j++ {
-				// Exactly the production pattern: one snapshot per query,
-				// used throughout. A snapshot taken before Close stays fully
-				// readable; after Close, snapshot() refuses.
 				if views, err := doc.snapshot(); err == nil {
 					_ = views.root
 					_ = len(views.raw.Proxy)

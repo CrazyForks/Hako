@@ -20,11 +20,6 @@ func mustOpen(t *testing.T, yamlText string) *ConfigDocument {
 	return doc
 }
 
-// The catalog reports what the file DECLARES. Effective membership lives in
-// mihomo's parseProxies / outboundgroup parser (config.go:931,
-// adapter/outboundgroup/parser.go:87-158); the plan never runs those, and the
-// projection must not impersonate them. So `use`, `include-all` and
-// `filter` are carried verbatim and never expanded.
 func TestCatalogCarriesDeclarationsWithoutExpanding(t *testing.T) {
 	doc := mustOpen(t, `
 proxies:
@@ -85,10 +80,6 @@ func TestAClosedDocumentRefusesToProject(t *testing.T) {
 	}
 }
 
-// §5-3 with a bell that rings: a LIVE local server counts requests. If any
-// code path ever fetches a declared provider while projecting, the counter
-// moves and this fails -- unlike an unroutable URL, which could mask a fetch
-// attempt as a timeout somewhere else.
 func TestProjectingNeverTouchesADeclaredProviderURL(t *testing.T) {
 	var hits atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -123,9 +114,8 @@ rule-providers:
 	}
 }
 
-// §5-6: a key the reader never wrote must come back absent, not defaulted.
 func TestScalarsReportAbsenceNotDefaults(t *testing.T) {
-	doc := mustOpen(t, "proxies: []\n") // no mode, no global-ua, no dns
+	doc := mustOpen(t, "proxies: []\n")
 	got, err := buildConfigProjection(doc, projectionKindSource, []string{projectionPackageScalars})
 	if err != nil {
 		t.Fatalf("build failed: %v", err)
@@ -163,9 +153,6 @@ proxy-providers:
 	}
 }
 
-// Drafts and synthetic documents have no revision to key a stored projection
-// by; they get the same answer through another door. "Same" is asserted --
-// and the door is the handle itself, so a second producer cannot exist.
 func TestOneShotMatchesTheHandleRoute(t *testing.T) {
 	yamlText := `
 proxies:
@@ -196,12 +183,6 @@ rules:
 	}
 }
 
-// Weak-type fidelity (found by adversarial review): the runtime reads these
-// declarations through WeaklyTypedInput, so the projection must agree.
-// `include-all: 1` IS true to the runtime; a numeric member in `use` IS a
-// string. The first implementation read exact Go types and projected the
-// opposite meaning -- an includeAll:false stored artifact for a group the
-// runtime expands to everything.
 func TestProjectionAgreesWithTheRuntimesWeakTyping(t *testing.T) {
 	doc := mustOpen(t, `
 mode: global
@@ -235,8 +216,6 @@ proxy-groups:
 	}
 }
 
-// §4-3 through BOTH public doors, not only the internal builder: the counter
-// is the invariant's bell, and a bell nobody wires to the doors cannot ring.
 func TestNeitherPublicDoorTouchesADeclaredProviderURL(t *testing.T) {
 	var hits atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -261,8 +240,6 @@ proxy-providers:
 	}
 }
 
-// §4-5: "one compact JSON" stays compact. json.MarshalIndent sneaking in
-// would still decode fine, so the shape itself is pinned.
 func TestProjectionJSONIsActuallyCompact(t *testing.T) {
 	doc := mustOpen(t, "proxies:\n  - {name: A, type: socks5, server: e.test, port: 1080}\n")
 	box, err := doc.ProjectionJSON(projectionKindSource, `["catalog"]`)
