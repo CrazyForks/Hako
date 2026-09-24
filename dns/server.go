@@ -2,7 +2,9 @@ package dns
 
 import (
 	"context"
+	"io"
 	"net"
+	"sync"
 
 	"github.com/TokenPLS/Hako/common/sockopt"
 	"github.com/TokenPLS/Hako/component/resolver"
@@ -20,9 +22,45 @@ var (
 )
 
 type Server struct {
-	service   resolver.Service
+	service resolver.Service
+
+	mu        sync.Mutex
+	shutdown  bool
 	tcpServer *D.Server
 	udpServer *D.Server
+	conns []io.Closer
+	udpCompanions []*D.Server
+}
+
+func (s *Server) register(conn io.Closer, set func()) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.shutdown {
+		_ = conn.Close()
+		return false
+	}
+	s.conns = append(s.conns, conn)
+	set()
+	return true
+}
+
+func (s *Server) close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.shutdown = true
+	for _, started := range append([]*D.Server{s.tcpServer, s.udpServer}, s.udpCompanions...) {
+		if started != nil {
+			_ = started.Shutdown()
+		}
+	}
+	for _, conn := range s.conns {
+		_ = conn.Close()
+	}
+	s.tcpServer, s.udpServer, s.udpCompanions, s.conns = nil, nil, nil, nil
+}
+
+type loopbackPacketCompanions interface {
+	LoopbackPacketCompanions(ctx context.Context, network, address string, primary net.PacketConn) ([]net.PacketConn, error)
 }
 
 type serverHandler struct {
@@ -67,15 +105,7 @@ func ReCreateServer(addr string, lc C.InboundListenConfig, service resolver.Serv
 		return
 	}
 
-	if server.tcpServer != nil {
-		_ = server.tcpServer.Shutdown()
-		server.tcpServer = nil
-	}
-
-	if server.udpServer != nil {
-		_ = server.udpServer.Shutdown()
-		server.udpServer = nil
-	}
+	server.close()
 
 	server.service = nil
 	address = ""
@@ -98,6 +128,7 @@ func ReCreateServer(addr string, lc C.InboundListenConfig, service resolver.Serv
 
 	address = addr
 	server = &Server{service: service}
+	srv := server
 
 	go func() {
 		p, err := lc.ListenPacket(context.Background(), "udp", addr)
@@ -111,8 +142,25 @@ func ReCreateServer(addr string, lc C.InboundListenConfig, service resolver.Serv
 		}
 
 		log.Infoln("DNS server(UDP) listening at: %s", p.LocalAddr().String())
-		server.udpServer = &D.Server{Addr: addr, PacketConn: p, Handler: server.UDPHandler()}
-		_ = server.udpServer.ActivateAndServe()
+		if offer, ok := lc.(loopbackPacketCompanions); ok {
+			companions, err := offer.LoopbackPacketCompanions(context.Background(), "udp", addr, p)
+			if err != nil {
+				log.Errorln("DNS server(UDP) loopback companion for %s: %s", addr, err.Error())
+			}
+			for _, companion := range companions {
+				companionServer := &D.Server{Addr: companion.LocalAddr().String(), PacketConn: companion, Handler: srv.UDPHandler()}
+				if !srv.register(companion, func() { srv.udpCompanions = append(srv.udpCompanions, companionServer) }) {
+					continue
+				}
+				log.Infoln("DNS server(UDP) also listening at: %s", companion.LocalAddr().String())
+				go func() { _ = companionServer.ActivateAndServe() }()
+			}
+		}
+		udpServer := &D.Server{Addr: addr, PacketConn: p, Handler: srv.UDPHandler()}
+		if !srv.register(p, func() { srv.udpServer = udpServer }) {
+			return
+		}
+		_ = udpServer.ActivateAndServe()
 	}()
 
 	go func() {
@@ -123,8 +171,11 @@ func ReCreateServer(addr string, lc C.InboundListenConfig, service resolver.Serv
 		}
 
 		log.Infoln("DNS server(TCP) listening at: %s", l.Addr().String())
-		server.tcpServer = &D.Server{Addr: addr, Listener: l, Handler: server.TCPHandler()}
-		_ = server.tcpServer.ActivateAndServe()
+		tcpServer := &D.Server{Addr: addr, Listener: l, Handler: srv.TCPHandler()}
+		if !srv.register(l, func() { srv.tcpServer = tcpServer }) {
+			return
+		}
+		_ = tcpServer.ActivateAndServe()
 	}()
 
 }

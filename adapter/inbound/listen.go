@@ -23,6 +23,7 @@ var (
 var (
 	DefaultListenerHook    func(network, address string, conn syscall.RawConn) error
 	DefaultListenerWrapper func(network, address string, primary net.Listener, relisten func(context.Context, string, string) (net.Listener, error)) (net.Listener, error)
+	DefaultPacketLoopbackCompanions func(network, address string, primary net.PacketConn, relisten func(context.Context, string, string) (net.PacketConn, error)) ([]net.PacketConn, error)
 )
 
 func SetTfo(open bool) {
@@ -95,6 +96,16 @@ func (l ListenConfig) ListenPacket(ctx context.Context, network, address string)
 		return nil, err
 	}
 	return l.newListenConfig().ListenPacket(ctx, network, address)
+}
+
+func (l ListenConfig) LoopbackPacketCompanions(ctx context.Context, network, address string, primary net.PacketConn) ([]net.PacketConn, error) {
+	hook := DefaultPacketLoopbackCompanions
+	if hook == nil {
+		return nil, nil
+	}
+	return hook(network, address, primary, func(ctx context.Context, network, address string) (net.PacketConn, error) {
+		return l.ListenPacket(ctx, network, address)
+	})
 }
 
 func preResolve(network, address string) (string, error) {

@@ -22,10 +22,12 @@ func installListenerScopeHooks(underNetworkExtension bool) {
 	if !underNetworkExtension {
 		inbound.DefaultListenerHook = nil
 		inbound.DefaultListenerWrapper = nil
+		inbound.DefaultPacketLoopbackCompanions = nil
 		return
 	}
 	inbound.DefaultListenerHook = listenerScopeControl
 	inbound.DefaultListenerWrapper = listenerLoopbackCompanion
+	inbound.DefaultPacketLoopbackCompanions = listenerLoopbackPacketCompanions
 	log.Infoln("[Apple] inbound listeners run under the Network Extension socket scope; loopback faces will be explicitly bound to the loopback interface")
 }
 
@@ -124,6 +126,68 @@ func listenerLoopbackCompanion(network, address string, primary net.Listener, re
 		return primary, nil
 	}
 	return newCompanionListener(primary, companions), nil
+}
+
+func listenerLoopbackPacketCompanions(network, address string, primary net.PacketConn, _ func(context.Context, string, string) (net.PacketConn, error)) ([]net.PacketConn, error) {
+	if !strings.HasPrefix(network, "udp") {
+		return nil, nil
+	}
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, nil
+	}
+	if host != "" {
+		addr, parseErr := netip.ParseAddr(host)
+		if parseErr != nil || !addr.IsUnspecified() {
+			return nil, nil
+		}
+	}
+	udpAddr, ok := primary.LocalAddr().(*net.UDPAddr)
+	if !ok {
+		return nil, nil
+	}
+	port := fmt.Sprintf("%d", udpAddr.Port)
+
+	wantV4, wantV6 := true, udpAddr.IP.To4() == nil
+	switch network {
+	case "udp4":
+		wantV6 = false
+	case "udp6":
+		wantV4 = false
+	}
+	var companions []net.PacketConn
+	var failures []error
+	listen := func(network, address string) {
+		companion, listenErr := listenLoopbackCompanionPacket(network, address)
+		if listenErr != nil {
+			failures = append(failures, fmt.Errorf("hako: loopback companion %s: %w", address, listenErr))
+			return
+		}
+		companions = append(companions, companion)
+	}
+	if wantV4 {
+		listen("udp4", net.JoinHostPort("127.0.0.1", port))
+	}
+	if wantV6 {
+		listen("udp6", net.JoinHostPort("::1", port))
+	}
+	return companions, errors.Join(failures...)
+}
+
+func listenLoopbackCompanionPacket(network, address string) (net.PacketConn, error) {
+	config := net.ListenConfig{Control: func(network, address string, conn syscall.RawConn) error {
+		var opErr error
+		if err := conn.Control(func(fd uintptr) {
+			opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
+		}); err != nil {
+			return err
+		}
+		if opErr != nil {
+			return opErr
+		}
+		return listenerScopeControl(network, address, conn)
+	}}
+	return config.ListenPacket(context.Background(), network, address)
 }
 
 type companionAccept struct {
