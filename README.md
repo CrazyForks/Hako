@@ -6,22 +6,22 @@
 
 English · [简体中文](README.zh-CN.md)
 
-Hako is a proxy kernel based on **mihomo v1.19.30**, with Go bindings and build tooling for Apple applications. It produces `Hako.xcframework` for iOS, macOS and tvOS.
+[![Website](https://img.shields.io/badge/Website-Official-2563EB)](https://clash.md/)
+[![App Store Download](https://img.shields.io/badge/App_Store-Download-black?logo=apple&logoColor=white)](https://apps.apple.com/app/id6794257189)
+[![Telegram Channel](https://img.shields.io/badge/Telegram-Channel-26A5E4?logo=telegram&logoColor=white)](https://t.me/clashbyhako)
+[![Telegram Group](https://img.shields.io/badge/Telegram-Group-26A5E4?logo=telegram&logoColor=white)](https://t.me/+t__WNRvjUbk3M2Nl)
+
+Hako is a proxy kernel based on **mihomo v1.19.31**, with Go bindings and build tooling for Apple applications. It produces `Hako.xcframework` for iOS, macOS and tvOS.
+
+To install the official app, use the App Store link above. This repository is for developers building or integrating the kernel.
 
 ## Upstream history and modifications
 
-Hako is an independent derivative of [MetaCubeX/mihomo](https://github.com/MetaCubeX/mihomo), based on [v1.19.30](https://github.com/MetaCubeX/mihomo/tree/v1.19.30), commit `ac017cdd246ce8bd547653d927e7bf77d7ee73d5`. It is not affiliated with MetaCubeX. The upstream project asks unaffiliated downstream projects not to use “mihomo” in their names.
+Hako is an independent derivative of [MetaCubeX/mihomo](https://github.com/MetaCubeX/mihomo), based on [v1.19.31](https://github.com/MetaCubeX/mihomo/tree/v1.19.31), commit `ab405bad5beeeac8b003bb01f60f134f6df54471`. It is not affiliated with MetaCubeX. The upstream project asks unaffiliated downstream projects not to use “mihomo” in their names.
 
-On 2026-09-06, this repository restored the complete upstream ancestry through that baseline, with original commits and contributor identities intact, and retained its existing public history. The reconciliation preserves the previously published source; it changes only these provenance notes. Hako's accumulated changes include Apple bindings, SDK build tooling and kernel adaptations. Compare the upstream baseline with a Hako revision to inspect the full delta; subsequent changes are recorded as incremental public commits.
+This repository preserves the original upstream commits and contributor identities alongside Hako's existing public history. Stable upstream upgrades are recorded as merge commits: the first parent continues Hako's history and the second points to the official upstream commit. Hako changes continue as incremental commits for separate logical changes. Compare the upstream baseline with a Hako revision to inspect the complete delta, including Apple bindings, SDK build tooling and kernel adaptations.
 
 The upstream GPL-3.0 license remains in [LICENSE](LICENSE). See [NOTICE](NOTICE) and [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for attribution and dependency licenses.
-
-## Official website and client
-
-- [Official website](https://clash.md/)
-- [Download Clash on the App Store](https://apps.apple.com/app/id6794257189)
-
-If you want to use the app, start with the download above. This repository is for developers building or integrating the kernel.
 
 ## Project repositories
 
@@ -42,9 +42,11 @@ The upstream baseline version describes the proxy engine. It is separate from th
 
 An application supplies configuration, storage, the Network Extension integration and signing. Platform capabilities differ; a configuration accepted by the parser does not establish end-to-end support for every protocol or rule on every platform.
 
+The iOS and tvOS SDK slices use `no_easytier` and do not include EasyTier. The macOS slice does not apply that exclusion. Platform permissions, TUN stacks and outbound implementations still determine what is available at runtime.
+
 ## Build the Apple SDK
 
-Use macOS with the full Xcode installation and the iOS, macOS and tvOS SDKs. The current build was checked with Xcode 26.6. The binding module declares Go 1.25.0 and selects toolchain Go 1.26.6 in [`bind/hako/go.mod`](bind/hako/go.mod); allow Go to obtain that toolchain, or install it explicitly.
+Use macOS with the full Xcode installation and the iOS, macOS and tvOS SDKs. The current build was checked with Xcode 27.0. The binding module declares Go 1.25.0 and selects toolchain Go 1.26.6 in [`bind/hako/go.mod`](bind/hako/go.mod); allow Go to obtain that toolchain, or install it explicitly.
 
 Clone the repository with its history and tags, then install the pinned gomobile tools:
 
@@ -56,7 +58,7 @@ go install github.com/sagernet/gomobile/cmd/gobind@v0.1.13
 make lib_apple
 ```
 
-The build reads version information from Git tags. Keep the tags available when checking out a pinned revision.
+The core version comes from `UPSTREAM_VERSION`, shipped with the source, so a source upgrade does not inherit an older SDK tag. The SDK release version still comes from a release tag at the current commit; ordinary source builds are labeled `dev-<commit>`.
 
 The output is `Hako.xcframework`, containing five platform slices:
 
@@ -68,7 +70,7 @@ The output is `Hako.xcframework`, containing five platform slices:
 | tvOS device | arm64 |
 | tvOS Simulator | arm64, x86_64 |
 
-Link the framework into each target that uses the API, including the Packet Tunnel extension. The framework is static: choose **Do Not Embed** and link `libresolv`. Use the generated headers for the API of your pinned revision. For a working application integration, see [Hako-Client](https://github.com/TokenPLS/Hako-Client).
+The SDK framework is static: choose **Do Not Embed** when linking it directly, and link `libresolv`. An app and its extension can share a dynamic framework wrapping the static SDK to avoid packaging the kernel twice; the iOS and macOS Client projects use this arrangement. Use the generated headers for the API of your pinned revision. For a working application integration, see [Hako-Client](https://github.com/TokenPLS/Hako-Client).
 
 ## Development and feedback
 
