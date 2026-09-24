@@ -187,8 +187,8 @@ func (m *pressureMachine) step(sample pressureSample, now time.Time) pressureDec
 			ratePerSecond := float64(growth) / elapsed.Seconds()
 			if ratePerSecond > 0 {
 				headroom := m.limit - sample.usage
-				timeToLimit := time.Duration(float64(headroom)/ratePerSecond) * time.Second
-				if timeToLimit < pressureMinInterval {
+				secondsUntilLimit := float64(headroom) / ratePerSecond
+				if secondsUntilLimit < pressureMinInterval.Seconds() {
 					m.state = pressureStateTriggered
 					decision.triggered = true
 					decision.predicted = true

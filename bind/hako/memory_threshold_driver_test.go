@@ -127,8 +127,10 @@ func TestPredictedTriggersAreCountedSeparately(t *testing.T) {
 	machine.notifyPressure()
 	stepPressureThreshold(machine)
 
-	setPressureSampleForTest(func() pressureSample { return atUsage(39 << 20) })
-	time.Sleep(2 * pressureMinInterval)
+	setPressureSampleForTest(func() pressureSample {
+		machine.baselineAt = time.Now().Add(-pressureMinInterval)
+		return atUsage(44 << 20)
+	})
 	stepPressureThreshold(machine)
 
 	if got := pressureThresholdPredictedCount.Load() - beforePredicted; got != 1 {

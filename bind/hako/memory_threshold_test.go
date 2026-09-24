@@ -268,3 +268,19 @@ func TestZeroHeadroomIsNotAReading(t *testing.T) {
 }
 
 func timeUnix() time.Time { return time.Unix(1_800_000_000, 0) }
+
+func TestPredictorPreservesFractionalSeconds(t *testing.T) {
+	for _, elapsed := range []time.Duration{50 * time.Millisecond, 99 * time.Millisecond, 100 * time.Millisecond, 101 * time.Millisecond, 500 * time.Millisecond, 999 * time.Millisecond, time.Second, 1500 * time.Millisecond} {
+		t.Run(elapsed.String(), func(t *testing.T) {
+			machine := newPressureMachine(thresholdModeLimit, 50<<20)
+			now := time.Unix(1_800_000_000, 0)
+			machine.notifyPressure()
+			machine.step(atUsage(30<<20), now)
+			decision := machine.step(atUsage(40<<20), now.Add(elapsed))
+			want := elapsed < pressureMinInterval
+			if decision.predicted != want || decision.triggered != want {
+				t.Fatalf("time-to-limit=%v minimum interval=%v: decision=%+v, want trigger=%t", elapsed, pressureMinInterval, decision, want)
+			}
+		})
+	}
+}

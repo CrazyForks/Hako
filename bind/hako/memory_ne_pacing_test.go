@@ -1,11 +1,52 @@
 package hako
 
 import (
+	"runtime"
 	"runtime/debug"
+	"runtime/metrics"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestThresholdFixtureRestoresRuntimeTuning(t *testing.T) {
+	priorState := runtimeSetupSnapshot()
+	priorLimit := debug.SetMemoryLimit(-1)
+	priorProcs := runtime.GOMAXPROCS(0)
+	samples := []metrics.Sample{{Name: "/gc/gogc:percent"}}
+	metrics.Read(samples)
+	priorGC := int(samples[0].Value.Uint64())
+	t.Cleanup(func() {
+		debug.SetMemoryLimit(priorLimit)
+		debug.SetGCPercent(priorGC)
+		runtime.GOMAXPROCS(priorProcs)
+	})
+	t.Run("limited session", func(t *testing.T) {
+		disarmThresholdMonitor(t, pressureThresholdShedEnabled.Load())
+		options := testOptions(t)
+		options.MemoryLimit = 48 * 1024 * 1024
+		options.MaxProcs = 1
+		if err := Setup(options); err != nil {
+			t.Fatal(err)
+		}
+		if got := debug.SetMemoryLimit(-1); got != 36*1024*1024 {
+			t.Fatalf("fixture did not apply the memory limit: %d", got)
+		}
+	})
+	if got := debug.SetMemoryLimit(-1); got != priorLimit {
+		t.Errorf("fixture leaked memory limit: %d, want %d", got, priorLimit)
+	}
+	metrics.Read(samples)
+	if got := int(samples[0].Value.Uint64()); got != priorGC {
+		t.Errorf("fixture leaked GC percent: %d, want %d", got, priorGC)
+	}
+	if got := runtime.GOMAXPROCS(0); got != priorProcs {
+		t.Errorf("fixture leaked processor limit: %d, want %d", got, priorProcs)
+	}
+	if got := runtimeSetupSnapshot(); got != priorState {
+		t.Errorf("fixture leaked runtime setup metadata: %+v, want %+v", got, priorState)
+	}
+}
 
 
 func TestNEPacingSoftLimitDecision(t *testing.T) {
@@ -32,17 +73,23 @@ func TestNEPacingSoftLimitDecision(t *testing.T) {
 }
 
 func disarmThresholdMonitor(t *testing.T, priorShed bool) {
+	priorLimit := debug.SetMemoryLimit(-1)
+	priorProcs := runtime.GOMAXPROCS(0)
+	samples := []metrics.Sample{{Name: "/gc/gogc:percent"}}
+	metrics.Read(samples)
+	priorGC := int(samples[0].Value.Uint64())
 	setupMu.Lock()
-	priorSoft := currentRuntimeSetup.softMemoryLimit
-	priorProvenance := currentRuntimeSetup.softMemoryLimitIsPacingDefault
+	priorState := currentRuntimeSetup
 	setupMu.Unlock()
 	t.Cleanup(func() {
 		setupMu.Lock()
-		currentRuntimeSetup.softMemoryLimit = priorSoft
-		currentRuntimeSetup.softMemoryLimitIsPacingDefault = priorProvenance
+		currentRuntimeSetup = priorState
 		setupMu.Unlock()
 		startPressureThresholdMonitor(0, priorShed)
 		pressureThresholdShedEnabled.Store(priorShed)
+		debug.SetMemoryLimit(priorLimit)
+		debug.SetGCPercent(priorGC)
+		runtime.GOMAXPROCS(priorProcs)
 	})
 }
 
