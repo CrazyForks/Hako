@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -148,6 +149,25 @@ type catalogView struct {
 	Providers map[string]map[string]any `json:"providers"`
 }
 
+func stopHealthChecks(t *testing.T, closers []io.Closer) {
+	t.Helper()
+	for _, closer := range closers {
+		_ = closer.Close()
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	buf := make([]byte, 1<<22)
+	for {
+		stacks := string(buf[:runtime.Stack(buf, true)])
+		if !strings.Contains(stacks, "adapter/provider.(*HealthCheck)") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the yardstick's health checks did not stop within ten seconds of their providers closing")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func tunnelView(t *testing.T, content, resourceMap string, selections map[string]string) catalogView {
 	t.Helper()
 	finalized, err := FinalizeForIOS(content, resourceMap)
@@ -161,12 +181,14 @@ func tunnelView(t *testing.T, content, resourceMap string, selections map[string
 	if runtime != nil {
 		t.Cleanup(runtime.close)
 	}
+	var closers []io.Closer
 	for _, provider := range cfg.Providers {
 		_ = provider.Initial()
 		if closer, ok := provider.(io.Closer); ok {
-			t.Cleanup(func() { _ = closer.Close() })
+			closers = append(closers, closer)
 		}
 	}
+	defer stopHealthChecks(t, closers)
 	if cfg.Profile.StoreSelected {
 		for group, member := range selections {
 			if selectable, ok := cfg.Proxies[group].Adapter().(outboundgroup.SelectAble); ok {
