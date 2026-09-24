@@ -321,8 +321,8 @@ func TestEncodeAppleBuildInfo(t *testing.T) {
 	if strings.Join(info.BuildTags, ",") != strings.Join(wantTags, ",") {
 		t.Fatalf("build tags = %v, want %v", info.BuildTags, wantTags)
 	}
-	if strings.Join(info.BuildTagsNotMacos, ",") != "with_low_memory" {
-		t.Fatalf("build tags (not macOS) = %v, want [with_low_memory]", info.BuildTagsNotMacos)
+	if strings.Join(info.BuildTagsNotMacos, ",") != "no_easytier,with_low_memory" {
+		t.Fatalf("build tags (not macOS) = %v, want [no_easytier with_low_memory]", info.BuildTagsNotMacos)
 	}
 	if info.GoToolchain != "go1.26.6" {
 		t.Fatalf("go toolchain = %q, want go1.26.6", info.GoToolchain)

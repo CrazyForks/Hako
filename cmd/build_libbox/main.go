@@ -45,7 +45,7 @@ const (
 
 	baseTags       = "with_gvisor,cmfa,with_quic"
 	baseTagsNoQUIC = "with_gvisor,cmfa"
-	notMacosTags   = "with_low_memory"
+	notMacosTags = "with_low_memory,no_easytier"
 )
 
 func init() {
@@ -181,6 +181,10 @@ func main() {
 	}
 	if target == "apple" || isAppleBindTarget(bindTarget) {
 		if err := verifyAppleCPUOverlayInXCFramework(outPath); err != nil {
+			overlayCleanup()
+			fatal(err)
+		}
+		if err := verifyMDNSClientInXCFramework(outPath); err != nil {
 			overlayCleanup()
 			fatal(err)
 		}
@@ -691,6 +695,11 @@ func effectiveBaseTags(internal bool, includeQUIC bool) string {
 }
 
 func coreVersion(root string) (string, error) {
+	if pinned, err := os.ReadFile(filepath.Join(root, "UPSTREAM_VERSION")); err == nil {
+		return parseCoreVersion(string(pinned))
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("read upstream version: %w", err)
+	}
 	cmd := exec.Command("git", "describe", "--tags", "--abbrev=0", "--match", "v*")
 	cmd.Dir = root
 	out, err := cmd.Output()

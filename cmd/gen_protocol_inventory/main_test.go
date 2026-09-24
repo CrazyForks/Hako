@@ -79,8 +79,11 @@ func TestProxyRootsAreReadFromTheParserSwitch(t *testing.T) {
 	if got := roots["shadowquic"]; got != "ShadowQuicOption" {
 		t.Fatalf("shadowquic maps to %q, want ShadowQuicOption", got)
 	}
-	if len(roots) != 27 {
-		t.Fatalf("expected 27 proxy types at v1.19.30, derived %d: %v", len(roots), sortedKeys(roots))
+	if got := roots["easytier"]; got != "EasyTierOption" {
+		t.Fatalf("easytier maps to %q, want EasyTierOption", got)
+	}
+	if len(roots) != 28 {
+		t.Fatalf("expected 28 proxy types at v1.19.31, derived %d: %v", len(roots), sortedKeys(roots))
 	}
 	for typeName, structName := range roots {
 		if _, ok := gen.structs[structName]; !ok {
@@ -275,7 +278,7 @@ func TestAllSurfacesRenderDeterministically(t *testing.T) {
 	if err := json.Unmarshal(first, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if len(doc["proxies"]) != 27 || len(doc["listeners"]) != 20 {
+	if len(doc["proxies"]) != 28 || len(doc["listeners"]) != 20 {
 		t.Fatalf("all-surface document has %d proxies / %d listeners", len(doc["proxies"]), len(doc["listeners"]))
 	}
 }
