@@ -17,6 +17,7 @@ func NewManagerForTest() *Manager {
 		proxyUploadTotal:   atomic.NewInt64(0),
 		proxyDownloadTotal: atomic.NewInt64(0),
 		lastReadAt:         atomic.NewInt64(0),
+		sampledAt:          atomic.NewInt64(0),
 		sampleWake:         make(chan struct{}, 1),
 	}
 }

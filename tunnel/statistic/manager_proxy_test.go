@@ -30,6 +30,7 @@ func TestManagerProxyRatesAndReset(t *testing.T) {
 	m.downloadBlip.Store(8)
 	m.proxyUploadBlip.Store(3)
 	m.proxyDownloadBlip.Store(4)
+	m.sampledAt.Store(monoNow())
 	m.PushUploaded("Proxy", 11)
 	m.PushDownloaded("Proxy", 12)
 

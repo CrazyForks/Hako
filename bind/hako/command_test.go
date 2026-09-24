@@ -4,7 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
 
+	"github.com/metacubex/http"
+	"github.com/metacubex/http/httptest"
+	"github.com/TokenPLS/Hako/tunnel/statistic"
 	"github.com/sirupsen/logrus"
 )
 
@@ -37,10 +41,13 @@ func TestCommandGettersReturnJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(TrafficJSON()), &traffic); err != nil {
 		t.Fatalf("TrafficJSON invalid: %v", err)
 	}
-	for _, k := range []string{"up", "down", "upTotal", "downTotal"} {
+	for _, k := range []string{"up", "down", "upTotal", "downTotal", "rateFresh", "rateSampledAtUnixMs"} {
 		if _, ok := traffic[k]; !ok {
 			t.Fatalf("traffic missing key %q", k)
 		}
+	}
+	if fresh := traffic["rateFresh"]; fresh != 0 && fresh != 1 {
+		t.Fatalf("rateFresh is %d, want 0 or 1", fresh)
 	}
 
 	var conns map[string]json.RawMessage
@@ -76,4 +83,88 @@ func keysOf(m map[string]json.RawMessage) []string {
 		ks = append(ks, k)
 	}
 	return ks
+}
+
+func TestTrafficSaysWhetherItsRateIsCurrent(t *testing.T) {
+	manager := statistic.DefaultManager
+	manager.Now()
+	deadline := time.Now().Add(3 * time.Second)
+	var traffic map[string]int64
+	for time.Now().Before(deadline) {
+		if err := json.Unmarshal([]byte(TrafficJSON()), &traffic); err != nil {
+			t.Fatalf("TrafficJSON invalid: %v", err)
+		}
+		if traffic["rateFresh"] == 1 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if traffic["rateFresh"] != 1 || traffic["rateSampledAtUnixMs"] == 0 {
+		t.Fatalf("a running sampler's rate is not reported as current: %v", traffic)
+	}
+	if age := time.Since(time.UnixMilli(traffic["rateSampledAtUnixMs"])); age > 3*time.Second {
+		t.Fatalf("rateSampledAtUnixMs is %s old for a running sampler", age)
+	}
+}
+
+type fakeTrafficRates struct {
+	up, down  int64
+	sampledAt time.Time
+	fresh     bool
+}
+
+func (f fakeTrafficRates) LastRate() (int64, int64, time.Time, bool) {
+	return f.up, f.down, f.sampledAt, f.fresh
+}
+
+func (f fakeTrafficRates) Now() (int64, int64) {
+	if !f.fresh {
+		return 0, 0
+	}
+	return f.up, f.down
+}
+
+func (f fakeTrafficRates) Total() (int64, int64) { return 100, 200 }
+
+func useTrafficRates(t *testing.T, source trafficRateSource) {
+	t.Helper()
+	previous := trafficRates
+	trafficRates = source
+	t.Cleanup(func() { trafficRates = previous })
+}
+
+func TestAStaleRateIsMarkedForTheWidgetAndZeroForREST(t *testing.T) {
+	sampled := time.Now().Add(-10 * time.Minute)
+	useTrafficRates(t, fakeTrafficRates{up: 7000, down: 9000, sampledAt: sampled, fresh: false})
+
+	var traffic map[string]int64
+	if err := json.Unmarshal([]byte(TrafficJSON()), &traffic); err != nil {
+		t.Fatalf("TrafficJSON invalid: %v", err)
+	}
+	if traffic["up"] != 7000 || traffic["down"] != 9000 {
+		t.Fatalf("the widget lost the last measured rate: %v", traffic)
+	}
+	if traffic["rateFresh"] != 0 || traffic["rateSampledAtUnixMs"] != sampled.UnixMilli() {
+		t.Fatalf("a stale rate is not marked as such: %v", traffic)
+	}
+
+	recorder := httptest.NewRecorder()
+	serveTrafficSnapshot(recorder, httptest.NewRequest(http.MethodGet, "/hako/v1/traffic", nil))
+	var snapshot map[string]int64
+	if err := json.Unmarshal(recorder.Body.Bytes(), &snapshot); err != nil {
+		t.Fatalf("snapshot invalid: %v", err)
+	}
+	if snapshot["up"] != 0 || snapshot["down"] != 0 || snapshot["rateFresh"] != 0 {
+		t.Fatalf("REST returned a stale rate as current: %v", snapshot)
+	}
+
+	useTrafficRates(t, fakeTrafficRates{up: 7000, down: 9000, sampledAt: time.Now(), fresh: true})
+	if err := json.Unmarshal([]byte(TrafficJSON()), &traffic); err != nil || traffic["rateFresh"] != 1 {
+		t.Fatalf("a current rate is not marked current: %v %v", traffic, err)
+	}
+	recorder = httptest.NewRecorder()
+	serveTrafficSnapshot(recorder, httptest.NewRequest(http.MethodGet, "/hako/v1/traffic", nil))
+	if err := json.Unmarshal(recorder.Body.Bytes(), &snapshot); err != nil || snapshot["up"] != 7000 || snapshot["rateFresh"] != 1 {
+		t.Fatalf("REST did not return a current rate: %v %v", snapshot, err)
+	}
 }

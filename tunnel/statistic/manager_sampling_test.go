@@ -126,6 +126,7 @@ func newTestManager() *Manager {
 		proxyUploadTotal:   atomic.NewInt64(0),
 		proxyDownloadTotal: atomic.NewInt64(0),
 		lastReadAt:         atomic.NewInt64(0),
+		sampledAt:          atomic.NewInt64(0),
 		sampleWake:         make(chan struct{}, 1),
 	}
 }
@@ -168,5 +169,43 @@ func TestMemorySampleIsVisibleInCachedSnapshot(t *testing.T) {
 	}
 	if got := manager.Snapshot().Memory; got != sampled {
 		t.Fatalf("snapshot=%d, last sample=%d", got, sampled)
+	}
+}
+
+func TestAStoppedSamplersRateIsNotReadAsCurrent(t *testing.T) {
+	manager := newTestManager()
+	go manager.handle()
+
+	manager.Now()
+	if !waitUntil(t, 5*time.Second, func() bool {
+		manager.PushUploaded("proxy", 64<<10)
+		manager.PushDownloaded("proxy", 128<<10)
+		up, down := manager.Now()
+		pu, pd := manager.NowTraffic(true)
+		return up > 0 && down > 0 && pu > 0 && pd > 0
+	}) {
+		t.Fatal("the sampler never published a rate while being read")
+	}
+	lastUp, lastDown, sampledAt, fresh := manager.LastRate()
+	if lastUp == 0 || lastDown == 0 || time.Since(sampledAt) > 2*time.Second || !fresh {
+		t.Fatalf("a running sampler's last rate is %d/%d sampled %s ago", lastUp, lastDown, time.Since(sampledAt))
+	}
+	upTotal, downTotal := manager.Total()
+
+	manager.lastReadAt.Store(monoNow() - int64(2*sampleIdleTimeout))
+	time.Sleep(1200 * time.Millisecond)
+	manager.sampledAt.Store(monoNow() - int64(3*time.Second))
+
+	if up, down, at, fresh := manager.LastRate(); up == 0 || down == 0 || time.Since(at) < RateFreshFor || fresh {
+		t.Fatalf("LastRate lost the last measurement or its age: %d/%d sampled %s ago", up, down, time.Since(at))
+	}
+	if up, down := manager.Now(); up != 0 || down != 0 {
+		t.Fatalf("Now() returned a rate nobody measured in the last %s: up=%d down=%d", RateFreshFor, up, down)
+	}
+	if up, down := manager.NowTraffic(true); up != 0 || down != 0 {
+		t.Fatalf("NowTraffic(proxy) returned a stale rate: up=%d down=%d", up, down)
+	}
+	if up, down := manager.Total(); up != upTotal || down != downTotal {
+		t.Fatalf("stopping the sampler changed the totals: %d/%d, were %d/%d", up, down, upTotal, downTotal)
 	}
 }

@@ -27,6 +27,7 @@ func init() {
 		proxyDownloadTotal: atomic.NewInt64(0),
 		pid:                int32(os.Getpid()),
 		lastReadAt:         atomic.NewInt64(0),
+		sampledAt:          atomic.NewInt64(0),
 		sampleWake:         make(chan struct{}, 1),
 	}
 
@@ -58,6 +59,7 @@ type Manager struct {
 	memory              atomic.Uint64
 
 	lastReadAt atomic.Int64
+	sampledAt  atomic.Int64
 	sampleWake chan struct{}
 }
 
@@ -185,8 +187,36 @@ func (m *Manager) noteLeave() {
 }
 
 func (m *Manager) Now() (up int64, down int64) {
+	fresh := m.rateFresh()
 	m.noteRateRead()
+	if !fresh {
+		return 0, 0
+	}
 	return m.uploadBlip.Load(), m.downloadBlip.Load()
+}
+
+const RateFreshFor = 2 * time.Second
+
+func (m *Manager) rateFresh() bool {
+	at := m.sampledAt.Load()
+	return at != 0 && monoNow()-at <= int64(RateFreshFor)
+}
+
+var monoBase = time.Now()
+
+func monoNow() int64 {
+	if elapsed := int64(time.Since(monoBase)); elapsed > 0 {
+		return elapsed
+	}
+	return 1
+}
+
+func (m *Manager) LastRate() (up, down int64, sampledAt time.Time, fresh bool) {
+	at := m.sampledAt.Load()
+	if at != 0 {
+		sampledAt = monoBase.Add(time.Duration(at))
+	}
+	return m.uploadBlip.Load(), m.downloadBlip.Load(), sampledAt, at != 0 && monoNow()-at <= int64(RateFreshFor)
 }
 
 func (m *Manager) Total() (up, down int64) {
@@ -195,7 +225,11 @@ func (m *Manager) Total() (up, down int64) {
 
 func (m *Manager) NowTraffic(onlyProxy bool) (up, down int64) {
 	if onlyProxy {
+		fresh := m.rateFresh()
 		m.noteRateRead()
+		if !fresh {
+			return 0, 0
+		}
 		return m.proxyUploadBlip.Load(), m.proxyDownloadBlip.Load()
 	}
 	return m.Now()
@@ -278,6 +312,7 @@ func (m *Manager) handle() {
 		m.downloadBlip.Store(m.downloadTemp.Swap(0))
 		m.proxyUploadBlip.Store(m.proxyUploadTemp.Swap(0))
 		m.proxyDownloadBlip.Store(m.proxyDownloadTemp.Swap(0))
+		m.sampledAt.Store(monoNow())
 	}
 }
 
@@ -286,11 +321,11 @@ func (m *Manager) sampleIdle() bool {
 	if last == 0 {
 		return true
 	}
-	return time.Since(time.Unix(0, last)) > sampleIdleTimeout
+	return monoNow()-last > int64(sampleIdleTimeout)
 }
 
 func (m *Manager) noteRateRead() {
-	m.lastReadAt.Store(time.Now().UnixNano())
+	m.lastReadAt.Store(monoNow())
 	select {
 	case m.sampleWake <- struct{}{}:
 	default:

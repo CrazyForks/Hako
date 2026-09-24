@@ -3,6 +3,7 @@ package hako
 import (
 	"encoding/json"
 	"sync"
+	"time"
 
 	P "github.com/TokenPLS/Hako/constant/provider"
 	"github.com/TokenPLS/Hako/tunnel"
@@ -17,15 +18,34 @@ func StatusJSON() string {
 	}))
 }
 
+type trafficRateSource interface {
+	LastRate() (up, down int64, sampledAt time.Time, fresh bool)
+	Now() (up, down int64)
+	Total() (up, down int64)
+}
+
+var trafficRates trafficRateSource = statistic.DefaultManager
+
 func TrafficJSON() string {
-	up, down := statistic.DefaultManager.Now()
-	upTotal, downTotal := statistic.DefaultManager.Total()
+	source := trafficRates
+	up, down, sampledAt, current := source.LastRate()
+	source.Now()
+	fresh, sampledAtMs := int64(0), int64(0)
+	if current {
+		fresh = 1
+	}
+	if !sampledAt.IsZero() {
+		sampledAtMs = sampledAt.UnixMilli()
+	}
+	upTotal, downTotal := source.Total()
 	return bridgeSafeString(mustJSON(map[string]int64{
-		"up":        up,
-		"down":      down,
-		"upTotal":   upTotal,
-		"downTotal": downTotal,
-		"memory":    MemoryFootprint(),
+		"up":                  up,
+		"down":                down,
+		"upTotal":             upTotal,
+		"downTotal":           downTotal,
+		"rateFresh":           fresh,
+		"rateSampledAtUnixMs": sampledAtMs,
+		"memory":              MemoryFootprint(),
 	}))
 }
 

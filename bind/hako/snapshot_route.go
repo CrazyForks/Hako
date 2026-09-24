@@ -18,15 +18,21 @@ func init() {
 }
 
 func serveTrafficSnapshot(writer http.ResponseWriter, _ *http.Request) {
-	manager := statistic.DefaultManager
-	up, down := manager.Now()
-	upTotal, downTotal := manager.Total()
+	source := trafficRates
+	_, _, _, current := source.LastRate()
+	up, down := source.Now()
+	fresh := int64(0)
+	if current {
+		fresh = 1
+	}
+	upTotal, downTotal := source.Total()
 	writeSnapshotJSON(writer, struct {
 		Up        int64 `json:"up"`
 		Down      int64 `json:"down"`
 		UpTotal   int64 `json:"upTotal"`
 		DownTotal int64 `json:"downTotal"`
-	}{up, down, upTotal, downTotal})
+		RateFresh int64 `json:"rateFresh"`
+	}{up, down, upTotal, downTotal, fresh})
 }
 
 func serveMemorySnapshot(writer http.ResponseWriter, _ *http.Request) {
