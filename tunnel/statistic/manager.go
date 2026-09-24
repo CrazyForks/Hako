@@ -2,6 +2,7 @@ package statistic
 
 import (
 	"os"
+	syncatomic "sync/atomic"
 	"time"
 
 	"github.com/TokenPLS/Hako/common/atomic"
@@ -61,15 +62,31 @@ type Manager struct {
 	lastReadAt atomic.Int64
 	sampledAt  atomic.Int64
 	sampleWake chan struct{}
+
+	connectionObserver syncatomic.Pointer[func(joined bool, c Tracker)]
+}
+
+func (m *Manager) SetConnectionObserver(observe func(joined bool, c Tracker)) {
+	if observe == nil {
+		m.connectionObserver.Store(nil)
+		return
+	}
+	m.connectionObserver.Store(&observe)
 }
 
 func (m *Manager) Join(c Tracker) {
 	m.connections.Store(c.ID(), c)
+	if observe := m.connectionObserver.Load(); observe != nil {
+		(*observe)(true, c)
+	}
 }
 
 func (m *Manager) Leave(c Tracker) {
 	if _, present := m.connections.LoadAndDelete(c.ID()); present {
 		m.noteLeave()
+		if observe := m.connectionObserver.Load(); observe != nil {
+			(*observe)(false, c)
+		}
 	}
 }
 

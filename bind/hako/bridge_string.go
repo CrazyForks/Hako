@@ -97,6 +97,19 @@ func bridgeSafeNQHandler(handler NetworkQualityTestHandler) NetworkQualityTestHa
 	return bridgeSafeNQHandlerDecorator{handler}
 }
 
+type bridgeSafeConnectionEventsDecorator struct{ ConnectionEventsWriter }
+
+func (w bridgeSafeConnectionEventsDecorator) WriteConnectionEvents(message string) {
+	w.ConnectionEventsWriter.WriteConnectionEvents(bridgeSafeString(message))
+}
+
+func bridgeSafeConnectionEvents(writer ConnectionEventsWriter) ConnectionEventsWriter {
+	if _, ok := writer.(bridgeSafeConnectionEventsDecorator); ok {
+		return writer
+	}
+	return bridgeSafeConnectionEventsDecorator{writer}
+}
+
 type bridgeSafeLogBatchDecorator struct{ LogBatchWriter }
 
 func (w bridgeSafeLogBatchDecorator) WriteLogBatch(linesJSON string) {

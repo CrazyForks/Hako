@@ -31,7 +31,12 @@ const (
 	CommandStatus
 	CommandConnections
 	CommandMode
+	CommandConnectionEvents
 )
+
+type ConnectionEventsWriter interface {
+	WriteConnectionEvents(message string)
+}
 
 type ClashAPIClientOptions struct {
 	LogLevel            string
@@ -87,6 +92,8 @@ type ClashAPIClient struct {
 
 	scopeMu sync.Mutex
 	onlyStatisticsProxy atomic.Bool
+
+	connectionEvents atomic.Pointer[ConnectionEventsWriter]
 
 	providerIndexMu sync.Mutex
 	providerIndex   map[string]string
@@ -279,22 +286,52 @@ func (c *ClashAPIClient) streamSpecs(ctx context.Context) ([]clashAPIStreamSpec,
 				write: c.handler.WriteMode,
 			})
 		case CommandConnections:
-			interval := c.options.StatusInterval
-			if interval == 0 {
-				interval = 1000
-			}
-			if interval < 100 || interval > 60_000 {
-				return nil, fmt.Errorf("hako: connections interval %dms is outside 100...60000", interval)
+			interval, err := c.connectionsInterval()
+			if err != nil {
+				return nil, err
 			}
 			specs = append(specs, clashAPIStreamSpec{
 				path:  "/connections?" + url.Values{"interval": []string{fmt.Sprint(interval)}}.Encode(),
 				write: c.handler.WriteConnections,
+			})
+		case CommandConnectionEvents:
+			writer := c.connectionEvents.Load()
+			if writer == nil {
+				return nil, errors.New("hako: CommandConnectionEvents needs SetConnectionEventsWriter before Connect")
+			}
+			interval, err := c.connectionsInterval()
+			if err != nil {
+				return nil, err
+			}
+			specs = append(specs, clashAPIStreamSpec{
+				path:  "/hako/v1/connections/events?" + url.Values{"interval": []string{fmt.Sprint(interval)}}.Encode(),
+				write: (*writer).WriteConnectionEvents,
 			})
 		default:
 			return nil, fmt.Errorf("hako: unknown Clash API command %d", command)
 		}
 	}
 	return specs, nil
+}
+
+func (c *ClashAPIClient) connectionsInterval() (int64, error) {
+	interval := c.options.StatusInterval
+	if interval == 0 {
+		interval = 1000
+	}
+	if interval < 100 || interval > 60_000 {
+		return 0, fmt.Errorf("hako: connections interval %dms is outside 100...60000", interval)
+	}
+	return interval, nil
+}
+
+func (c *ClashAPIClient) SetConnectionEventsWriter(writer ConnectionEventsWriter) {
+	if writer == nil {
+		c.connectionEvents.Store(nil)
+		return
+	}
+	writer = bridgeSafeConnectionEvents(writer)
+	c.connectionEvents.Store(&writer)
 }
 
 func trafficStreamPath(onlyProxy bool) string {
