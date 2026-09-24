@@ -31,7 +31,9 @@ The upstream GPL-3.0 license remains in [LICENSE](LICENSE). See [NOTICE](NOTICE)
 | [Hako-Adapter](https://github.com/TokenPLS/Hako-Adapter) | Swift packet-flow bridge and provider lifecycle components |
 | [Hako-Client](https://github.com/TokenPLS/Hako-Client) | Native iOS, iPadOS, macOS and tvOS applications and extensions |
 
-The upstream baseline version describes the proxy engine. It is separate from the App Store app version and the SDK release tag. This source distribution is pre-release; pin a specific revision when integrating it.
+The upstream baseline version describes the proxy engine. It is separate from the App Store app version and the SDK release tag. Untagged source on `main` is pre-release; pin a specific revision when integrating it. Published SDK versions and downloads are listed in [Releases](https://github.com/TokenPLS/Hako/releases).
+
+SDK downloads include all five Apple slices, license notices and a source manifest. Each release also provides the notices separately, the source archive for the embedded EasyTier core used by macOS, and `SHA256SUMS` for checking downloaded assets.
 
 ## What is included
 

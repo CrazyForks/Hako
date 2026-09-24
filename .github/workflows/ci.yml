@@ -70,6 +70,19 @@ jobs:
             test -d "Hako.xcframework/$slice" || { echo "missing slice: $slice"; exit 1; }
           done
           ls Hako.xcframework
+      - name: Package SDK licenses and corresponding source
+        run: |
+          go run ./cmd/package_licenses -output dist/licenses
+          python3 scripts/package_sdk.py --inventory dist/licenses --output dist/sdk
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SDK-Release
+          path: |
+            dist/sdk/*.zip
+            dist/sdk/*.tar.gz
+            dist/sdk/SOURCES.json
+            dist/sdk/SHA256SUMS
+          retention-days: 14
       - uses: actions/upload-artifact@v7
         with:
           name: Hako.xcframework
@@ -85,7 +98,7 @@ jobs:
   # attaches the one built above from the tagged commit by this workflow.
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: xcframework
+    needs: [build, xcframework]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -93,11 +106,11 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          name: Hako.xcframework
-          path: Hako.xcframework
-      - name: Package the framework
-        # One asset, not the ~1.3 GB of loose files the artifact expands into.
-        run: zip -qry Hako.xcframework.zip Hako.xcframework
+          name: SDK-Release
+          path: dist/sdk
+      - name: Verify packaged assets
+        working-directory: dist/sdk
+        run: sha256sum -c SHA256SUMS
       - name: Write the release notes
         # A file rather than --notes with an inline heredoc: a heredoc nested in
         # command substitution is re-parsed by the shell, and an apostrophe in the
@@ -113,12 +126,20 @@ jobs:
             printf 'macOS, tvOS device and simulator.\n\n'
             printf 'Public source changes are retained as incremental commits.\n'
             printf 'Compare release tags to inspect the changes between versions.\n'
+            printf '\nThe SDK archive includes LICENSE, NOTICE and dependency licenses.\n'
+            printf 'THIRD_PARTY_LICENSES.zip provides the notices separately.\n'
+            printf 'SOURCES.json records the exact kernel and dependency sources; the\n'
+            printf 'EasyTier source archive includes the embedded core and build scripts.\n'
+            printf 'EasyTier-dependencies.zip preserves its pinned Cargo dependency sources;\n'
+            printf 'the license bundle includes their notices and exact source inventory.\n'
+            printf 'Verify downloads with SHA256SUMS.\n'
           } > notes.md
           cat notes.md
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" Hako.xcframework.zip \
+          gh release create "$GITHUB_REF_NAME" dist/sdk/*.zip dist/sdk/*.tar.gz \
+            dist/sdk/SOURCES.json dist/sdk/SHA256SUMS \
             --title "Hako ${GITHUB_REF_NAME}" \
             --notes-file notes.md

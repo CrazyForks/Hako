@@ -31,7 +31,9 @@ Hako 是基于 [MetaCubeX/mihomo](https://github.com/MetaCubeX/mihomo) 的独立
 | [Hako-Adapter](https://github.com/TokenPLS/Hako-Adapter) | Swift 数据包桥接与扩展生命周期组件 |
 | [Hako-Client](https://github.com/TokenPLS/Hako-Client) | iOS、iPadOS、macOS 和 tvOS 原生应用及扩展 |
 
-上游基线版本表示代理引擎版本，与 App Store 应用版本、SDK 发布标签分别管理。当前源码分发仍处于预发布阶段；集成时请固定具体提交。
+上游基线版本表示代理引擎版本，与 App Store 应用版本、SDK 发布标签分别管理。`main` 上未打发布标签的源码按预发布版本管理；集成时请固定具体提交。已发布的 SDK 版本及下载见[发行版页面](https://github.com/TokenPLS/Hako/releases)。
+
+SDK 下载包包含五个 Apple 平台切片、许可证声明和源码清单。每次发布另附独立的许可证压缩包、macOS 所用 EasyTier 内嵌内核的对应源码包，以及用于核对下载文件的 `SHA256SUMS`。
 
 ## 仓库内容
 
