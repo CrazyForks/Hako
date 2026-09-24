@@ -12,21 +12,31 @@ import (
 	ruleprovider "github.com/TokenPLS/Hako/rules/provider"
 )
 
-type mrsCursor struct {
-	data   []byte
-	offset int
+type mrsDecodedReader struct {
+	reader io.Reader
+	read   int64
+	err    error
 }
 
-func (c *mrsCursor) remaining() int {
-	return len(c.data) - c.offset
+func (r *mrsDecodedReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	r.read += int64(n)
+	if err != nil && err != io.EOF && r.err == nil {
+		r.err = err
+	}
+	return n, err
+}
+
+type mrsCursor struct {
+	reader  *io.LimitedReader
+	scratch [8]byte
 }
 
 func (c *mrsCursor) take(size int, label string) ([]byte, error) {
-	if size < 0 || size > c.remaining() {
+	value := c.scratch[:size]
+	if _, err := io.ReadFull(c.reader, value); err != nil {
 		return nil, fmt.Errorf("MRS %s exceeds the decoded payload", label)
 	}
-	value := c.data[c.offset : c.offset+size]
-	c.offset += size
 	return value, nil
 }
 
@@ -46,14 +56,37 @@ func (c *mrsCursor) int64(label string) (int64, error) {
 	return int64(binary.BigEndian.Uint64(value)), nil
 }
 
-func (c *mrsCursor) sized(length int64, unit int, label string, allowEmpty bool) ([]byte, error) {
+func (c *mrsCursor) size(length int64, unit int, label string, allowEmpty bool) (int64, error) {
 	if length < 0 || (!allowEmpty && length == 0) {
-		return nil, fmt.Errorf("MRS %s length is invalid", label)
+		return 0, fmt.Errorf("MRS %s length is invalid", label)
 	}
-	if unit <= 0 || length > int64(c.remaining())/int64(unit) {
+	if unit <= 0 || length > c.reader.N/int64(unit) {
+		return 0, fmt.Errorf("MRS %s length exceeds the decoded payload", label)
+	}
+	return length * int64(unit), nil
+}
+
+func (c *mrsCursor) skip(length int64, unit int, label string, allowEmpty bool) error {
+	size, err := c.size(length, unit, label, allowEmpty)
+	if err != nil {
+		return err
+	}
+	if _, err := io.CopyN(io.Discard, c.reader, size); err != nil {
+		return fmt.Errorf("MRS %s length exceeds the decoded payload", label)
+	}
+	return nil
+}
+
+func (c *mrsCursor) sized(length int64, unit int, label string, allowEmpty bool) ([]byte, error) {
+	size, err := c.size(length, unit, label, allowEmpty)
+	if err != nil {
+		return nil, err
+	}
+	value, err := io.ReadAll(io.LimitReader(c.reader, size))
+	if err != nil || int64(len(value)) != size {
 		return nil, fmt.Errorf("MRS %s length exceeds the decoded payload", label)
 	}
-	return c.take(int(length)*unit, label)
+	return value, nil
 }
 
 func validateMRSForIOS(payload []byte, expectedBehavior P.RuleBehavior) error {
@@ -70,15 +103,20 @@ func inspectMRSForIOS(payload []byte, expectedBehavior P.RuleBehavior) (int, err
 		return 0, fmt.Errorf("open MRS zstd payload: %w", err)
 	}
 	defer decoder.Close()
-	decoded, err := io.ReadAll(io.LimitReader(decoder, int64(maximumProviderResourceBytes)+1))
-	if err != nil {
-		return 0, fmt.Errorf("decode MRS payload: %w", err)
+	decoded := &mrsDecodedReader{reader: decoder}
+	limited := &io.LimitedReader{R: decoded, N: int64(maximumProviderResourceBytes) + 1}
+	count, structuralErr := inspectMRSStream(&mrsCursor{reader: limited}, expectedBehavior)
+	_, _ = io.Copy(io.Discard, limited)
+	if decoded.err != nil {
+		return 0, fmt.Errorf("decode MRS payload: %w", decoded.err)
 	}
-	if len(decoded) == 0 || len(decoded) > maximumProviderResourceBytes {
+	if decoded.read == 0 || decoded.read > maximumProviderResourceBytes {
 		return 0, fmt.Errorf("decoded MRS payload exceeds the %d-byte iOS provider limit", maximumProviderResourceBytes)
 	}
+	return count, structuralErr
+}
 
-	cursor := &mrsCursor{data: decoded}
+func inspectMRSStream(cursor *mrsCursor, expectedBehavior P.RuleBehavior) (int, error) {
 	magic, err := cursor.take(len(ruleprovider.MrsMagicBytes), "magic")
 	if err != nil {
 		return 0, err
@@ -101,7 +139,7 @@ func inspectMRSForIOS(payload []byte, expectedBehavior P.RuleBehavior) (int, err
 	if err != nil {
 		return 0, err
 	}
-	if _, err := cursor.sized(extraLength, 1, "extra", true); err != nil {
+	if err := cursor.skip(extraLength, 1, "extra", true); err != nil {
 		return 0, err
 	}
 
@@ -132,8 +170,7 @@ func validateDomainMRSBody(cursor *mrsCursor) error {
 	if err != nil {
 		return err
 	}
-	leaves, err := cursor.sized(leavesLength, 8, "domain leaves", false)
-	if err != nil {
+	if err := cursor.skip(leavesLength, 8, "domain leaves", false); err != nil {
 		return err
 	}
 	bitmapLength, err := cursor.int64("domain label bitmap length")
@@ -148,16 +185,15 @@ func validateDomainMRSBody(cursor *mrsCursor) error {
 	if err != nil {
 		return err
 	}
-	labels, err := cursor.sized(labelsLength, 1, "domain labels", false)
-	if err != nil {
+	if err := cursor.skip(labelsLength, 1, "domain labels", false); err != nil {
 		return err
 	}
 
-	nodes := len(labels) + 1
-	if len(leaves)/8*64 < nodes {
+	nodes := int(labelsLength) + 1
+	if leavesLength*64 < int64(nodes) {
 		return fmt.Errorf("MRS domain leaves bitmap is too short")
 	}
-	logicalBitmapBits := 2*len(labels) + 1
+	logicalBitmapBits := 2*int(labelsLength) + 1
 	if len(bitmap)/8*64 < logicalBitmapBits {
 		return fmt.Errorf("MRS domain label bitmap is too short")
 	}
@@ -171,7 +207,7 @@ func validateDomainMRSBody(cursor *mrsCursor) error {
 			childrenSeen++
 			nextLevel++
 			bitPosition++
-			if childrenSeen > len(labels) {
+			if childrenSeen > int(labelsLength) {
 				return fmt.Errorf("MRS domain tree has too many children")
 			}
 		}
@@ -188,7 +224,7 @@ func validateDomainMRSBody(cursor *mrsCursor) error {
 			nextLevel = 0
 		}
 	}
-	if childrenSeen != len(labels) || bitPosition != logicalBitmapBits || levelRemaining != 0 || nextLevel != 0 {
+	if childrenSeen != int(labelsLength) || bitPosition != logicalBitmapBits || levelRemaining != 0 || nextLevel != 0 {
 		return fmt.Errorf("MRS domain tree topology is inconsistent")
 	}
 	return nil
@@ -206,19 +242,32 @@ func validateIPCIDRMRSBody(cursor *mrsCursor) error {
 	if err != nil {
 		return err
 	}
-	ranges, err := cursor.sized(rangeCount, 32, "IP-CIDR ranges", false)
+	_, err = cursor.size(rangeCount, 32, "IP-CIDR ranges", false)
 	if err != nil {
 		return err
 	}
-	for offset := 0; offset < len(ranges); offset += 32 {
-		var fromBytes, toBytes [16]byte
-		copy(fromBytes[:], ranges[offset:offset+16])
-		copy(toBytes[:], ranges[offset+16:offset+32])
-		from := netip.AddrFrom16(fromBytes).Unmap()
-		to := netip.AddrFrom16(toBytes).Unmap()
-		if from.BitLen() != to.BitLen() || from.Compare(to) > 0 {
-			return fmt.Errorf("MRS IP-CIDR range is invalid")
+	invalidRange := false
+	var block [8 * 1024]byte
+	for remaining := rangeCount; remaining > 0; {
+		ranges := min(remaining, int64(len(block)/32))
+		data := block[:ranges*32]
+		if _, err := io.ReadFull(cursor.reader, data); err != nil {
+			return fmt.Errorf("MRS IP-CIDR ranges length exceeds the decoded payload")
 		}
+		remaining -= ranges
+		for offset := 0; offset < len(data); offset += 32 {
+			var fromBytes, toBytes [16]byte
+			copy(fromBytes[:], data[offset:offset+16])
+			copy(toBytes[:], data[offset+16:offset+32])
+			from := netip.AddrFrom16(fromBytes).Unmap()
+			to := netip.AddrFrom16(toBytes).Unmap()
+			if from.BitLen() != to.BitLen() || from.Compare(to) > 0 {
+				invalidRange = true
+			}
+		}
+	}
+	if invalidRange {
+		return fmt.Errorf("MRS IP-CIDR range is invalid")
 	}
 	return nil
 }
