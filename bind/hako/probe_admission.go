@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/TokenPLS/Hako/adapter"
-	"github.com/TokenPLS/Hako/log"
 )
 
 const (
@@ -142,16 +141,20 @@ func probeAdmissionShouldArm(budgetedPlatform, underNetworkExtension bool) bool 
 }
 
 func armProbeAdmission() {
-	cfg := defaultProbeAdmissionConfig()
-	adapter.SetURLTestAdmission(func(ctx context.Context) error {
+	adapter.SetURLTestAdmission(newProbeAdmissionHook(defaultProbeAdmissionConfig()))
+}
+
+func newProbeAdmissionHook(cfg probeAdmissionConfig) func(context.Context) error {
+	var diagnostics probeAdmissionDiagnostics
+	return func(ctx context.Context) error {
 		background := adapter.IsBackgroundProbe(ctx)
 		waited, verdict := probeAdmissionAdmit(ctx, cfg, background)
 		if waited >= cfg.poll || verdict == probeDeferred {
-			log.Infoln("[Memory] probe admission: waited %dms verdict=%d background=%t footprint=%d charges=%d", waited.Milliseconds(), verdict, background, cfg.footprint(), probeAdmissionCharges.Load())
+			diagnostics.record(waited, verdict, background, cfg.footprint)
 		}
 		if verdict == probeDeferred {
 			return adapter.ErrURLTestDeferred
 		}
 		return nil
-	})
+	}
 }
