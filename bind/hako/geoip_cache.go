@@ -116,6 +116,8 @@ func collectFallbackFilterGeoIPCode(content string, collect func(string)) {
 }
 
 func PrepareGeoIPCache(content string, geodataMode bool) (string, error) {
+	appParseMu.Lock()
+	defer appParseMu.Unlock()
 	if !geodataMode {
 		return "geoip: skipped, tunnel reads geoip.metadb", nil
 	}
@@ -131,12 +133,13 @@ func PrepareGeoIPCache(content string, geodataMode bool) (string, error) {
 	if info, err := os.Stat(C.Path.GeoIP()); err == nil {
 		sourceModified = info.ModTime()
 	}
+	source := compiledSourceIdentity(C.Path.GeoIP())
 
 	prepared, reused := 0, 0
 	var failures []string
 	for _, country := range countries {
 		if path, err := compiled.IPCIDRPath(geodata.CompiledGeoIPDir(), country); err == nil {
-			if info, err := os.Stat(path); err == nil && info.ModTime().After(sourceModified) {
+			if info, err := os.Stat(path); err == nil && compiledFromSource(path, source) && info.ModTime().After(sourceModified) {
 				if count, err := compiled.EntryCountIPCIDR(
 					geodata.CompiledGeoIPDir(), country,
 				); err == nil && count > 0 {
@@ -147,7 +150,13 @@ func PrepareGeoIPCache(content string, geodataMode bool) (string, error) {
 		}
 		if err := geodata.CompileGeoIP(country); err != nil {
 			failures = append(failures, fmt.Sprintf("%s: %s", country, err))
+			if path, err := compiled.IPCIDRPath(geodata.CompiledGeoIPDir(), country); err == nil && !compiledFromSource(path, source) {
+				retireCompiledArtifact(path)
+			}
 			continue
+		}
+		if path, err := compiled.IPCIDRPath(geodata.CompiledGeoIPDir(), country); err == nil {
+			stampCompiledSource(path, source)
 		}
 		prepared++
 	}
@@ -182,7 +191,7 @@ func GeoIPCountryForIP(ip string) *StringBox {
 		return nil
 	}
 	address = address.Unmap()
-	reader := mmdb.IPInstance()
+	reader := appIPReader()
 	if !reader.Available() {
 		return nil
 	}
@@ -191,4 +200,40 @@ func GeoIPCountryForIP(ip string) *StringBox {
 		return nil
 	}
 	return WrapString(codes[0])
+}
+
+func GeoIPNetworkCount(code string) int {
+	code = strings.ToLower(strings.TrimSpace(code))
+	if code == "" || code == "lan" {
+		return -1
+	}
+	counts, ok := appIPReader().NetworkCounts()
+	if !ok {
+		return -1
+	}
+	return counts[code]
+}
+
+func ASNNetworkCount(asn string) int {
+	asn = strings.TrimSpace(asn)
+	if asn == "" {
+		return -1
+	}
+	counts, ok := appASNReader().NetworkCounts()
+	if !ok {
+		return -1
+	}
+	return counts[asn]
+}
+
+func appIPReader() mmdb.IPReader {
+	appParseMu.Lock()
+	defer appParseMu.Unlock()
+	return mmdb.IPInstance()
+}
+
+func appASNReader() mmdb.ASNReader {
+	appParseMu.Lock()
+	defer appParseMu.Unlock()
+	return mmdb.ASNInstance()
 }

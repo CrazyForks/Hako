@@ -283,26 +283,9 @@ func emptyDomainSet() *trie.DomainSet {
 }
 
 func CompileGeoSite(category string) error {
-	listName, attrs, err := splitGeoSiteCategory(category)
+	listName, attrs, domains, err := geoSiteSourceDomains(category)
 	if err != nil {
 		return err
-	}
-	geoLoader, err := GetGeoDataLoader(geoLoaderName)
-	if err != nil {
-		return err
-	}
-	domains, err := geoLoader.LoadGeoSite(listName)
-	if err != nil {
-		return err
-	}
-	if !attrs.IsEmpty() {
-		filtered := make([]*router.Domain, 0, len(domains))
-		for _, domain := range domains {
-			if attrs.Match(domain) {
-				filtered = append(filtered, domain)
-			}
-		}
-		domains = filtered
 	}
 	if len(domains) == 0 {
 		return fmt.Errorf("geosite %s holds no entries", category)
@@ -315,6 +298,51 @@ func CompileGeoSite(category string) error {
 		CompiledGeoSiteDir(), canonicalGeoSiteKey(listName, attrs),
 		set, count, fromRouterResidual(residual),
 	)
+}
+
+func CountGeoSite(category string) (int, error) {
+	_, _, domains, err := geoSiteSourceDomains(category)
+	if err != nil {
+		return 0, err
+	}
+	if len(domains) == 0 {
+		return 0, nil
+	}
+	_, count, _, err := router.CompileDomains(domains)
+	return count, err
+}
+
+func geoSiteSourceDomains(category string) (string, *AttributeList, []*router.Domain, error) {
+	listName, attrs, err := splitGeoSiteCategory(category)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	geoLoader, err := GetGeoDataLoader(geoLoaderName)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	domains, err := geoLoader.LoadGeoSite(listName)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if !attrs.IsEmpty() {
+		filtered := make([]*router.Domain, 0, len(domains))
+		for _, domain := range domains {
+			if attrs.Match(domain) {
+				filtered = append(filtered, domain)
+			}
+		}
+		domains = filtered
+	}
+	return listName, attrs, domains, nil
+}
+
+func CompiledGeoSiteKey(category string) (string, error) {
+	listName, attrs, err := splitGeoSiteCategory(category)
+	if err != nil {
+		return "", err
+	}
+	return canonicalGeoSiteKey(listName, attrs), nil
 }
 
 func canonicalGeoSiteKey(listName string, attrs *AttributeList) string {
@@ -367,11 +395,7 @@ func CompileGeoIP(country string) error {
 	if name == "" {
 		return fmt.Errorf("country code could not be empty")
 	}
-	geoLoader, err := GetGeoDataLoader(geoLoaderName)
-	if err != nil {
-		return err
-	}
-	cidrList, err := geoLoader.LoadGeoIP(name)
+	cidrList, err := geoIPSourceList(name)
 	if err != nil {
 		return err
 	}
@@ -392,6 +416,35 @@ func CompileGeoIP(country string) error {
 		return err
 	}
 	return compiled.StoreIPCIDR(CompiledGeoIPDir(), name, set, len(cidrList))
+}
+
+func CountGeoIP(country string) (int, error) {
+	name := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(country)), "!")
+	if name == "" {
+		return 0, fmt.Errorf("country code could not be empty")
+	}
+	cidrList, err := geoIPSourceList(name)
+	if err != nil {
+		return 0, err
+	}
+	for _, entry := range cidrList {
+		addr, ok := netip.AddrFromSlice(entry.Ip)
+		if !ok {
+			return 0, fmt.Errorf("geoip %s: invalid IP", name)
+		}
+		if !netip.PrefixFrom(addr, int(entry.Prefix)).IsValid() {
+			return 0, fmt.Errorf("geoip %s: invalid prefix", name)
+		}
+	}
+	return len(cidrList), nil
+}
+
+func geoIPSourceList(name string) ([]*router.CIDR, error) {
+	geoLoader, err := GetGeoDataLoader(geoLoaderName)
+	if err != nil {
+		return nil, err
+	}
+	return geoLoader.LoadGeoIP(name)
 }
 
 func SetGeodataProgressReporter(report func(string)) {

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/TokenPLS/Hako/common/atomic"
 	"github.com/TokenPLS/Hako/common/pool"
 	"github.com/TokenPLS/Hako/common/yaml"
 	"github.com/TokenPLS/Hako/component/resource"
@@ -62,7 +63,7 @@ type mrsRuleStrategy interface {
 
 type baseProvider struct {
 	behavior P.RuleBehavior
-	strategy ruleStrategy
+	strategy atomic.TypedValue[ruleStrategy]
 }
 
 func (bp *baseProvider) Type() P.ProviderType {
@@ -74,15 +75,16 @@ func (bp *baseProvider) Behavior() P.RuleBehavior {
 }
 
 func (bp *baseProvider) Count() int {
-	return bp.strategy.Count()
+	return bp.strategy.Load().Count()
 }
 
 func (bp *baseProvider) Match(metadata *C.Metadata, helper C.RuleMatchHelper) bool {
-	return bp.strategy != nil && bp.strategy.Match(metadata, helper)
+	strategy := bp.strategy.Load()
+	return strategy != nil && strategy.Match(metadata, helper)
 }
 
 func (bp *baseProvider) Strategy() any {
-	return bp.strategy
+	return bp.strategy.Load()
 }
 
 type ruleSetProvider struct {
@@ -118,7 +120,7 @@ func (rp *ruleSetProvider) metadataSnapshot() (metadata providerForApi, hash str
 	rp.ReadLoadedContent(func(loadedHash string, updatedAt time.Time) {
 		metadata = providerForApi{
 			Behavior: rp.behavior.String(), Format: rp.format.String(), Name: rp.Name(),
-			RuleCount: rp.strategy.Count(), Type: rp.Type().String(),
+			RuleCount: rp.Count(), Type: rp.Type().String(),
 			UpdatedAt: updatedAt, VehicleType: rp.VehicleType().String(),
 		}
 		hash = loadedHash
@@ -155,14 +157,15 @@ func NewRuleSetProvider(name string, behavior P.RuleBehavior, format P.RuleForma
 	}
 
 	onUpdate := func(strategy ruleStrategy) {
-		rp.strategy = strategy
+		rp.strategy.Store(strategy)
 		tunnel.RuleUpdateCallback().Emit(rp)
 	}
 
-	rp.strategy = newStrategy(behavior, parse)
+	strategy := newStrategy(behavior, parse)
 	if len(payload) > 0 { // using as fallback rules
-		rp.strategy = rulesParseInline(payload, rp.strategy)
+		strategy = rulesParseInline(payload, strategy)
 	}
+	rp.strategy.Store(strategy)
 	rp.Fetcher = resource.NewFetcher(name, interval, vehicle, bundleFile, func(bytes []byte) (ruleStrategy, error) {
 		return rulesParse(bytes, newStrategy(behavior, parse), format)
 	}, onUpdate)
@@ -344,7 +347,7 @@ func (i *inlineProvider) LoadedMetadataJSON() ([]byte, error) {
 		providerForApi
 		Loaded bool `json:"loaded"`
 	}{providerForApi: providerForApi{
-		Behavior: i.behavior.String(), Name: i.Name(), RuleCount: i.strategy.Count(),
+		Behavior: i.behavior.String(), Name: i.Name(), RuleCount: i.Count(),
 		Type: i.Type().String(), VehicleType: i.VehicleType().String(), UpdatedAt: i.updatedAtSnapshot(),
 	}, Loaded: true})
 }
@@ -354,7 +357,7 @@ func (i *inlineProvider) MarshalJSON() ([]byte, error) {
 		providerForApi{
 			Behavior:    i.behavior.String(),
 			Name:        i.Name(),
-			RuleCount:   i.strategy.Count(),
+			RuleCount:   i.Count(),
 			Type:        i.Type().String(),
 			VehicleType: i.VehicleType().String(),
 			UpdatedAt:   i.updatedAtSnapshot(),
@@ -366,13 +369,12 @@ func NewInlineProvider(name string, behavior P.RuleBehavior, payload []string, p
 	ip := &inlineProvider{
 		baseProvider: baseProvider{
 			behavior: behavior,
-			strategy: newStrategy(behavior, parse),
 		},
 		payload:  payload,
 		name:     name,
 		updateAt: time.Now(),
 	}
-	ip.strategy = rulesParseInline(payload, ip.strategy)
+	ip.strategy.Store(rulesParseInline(payload, newStrategy(behavior, parse)))
 
 	wrapper := &InlineProvider{
 		ip,

@@ -52,10 +52,14 @@ func (r IPReader) LookupCode(ipAddress net.IP) []string {
 }
 
 func lookupCode(reader *maxminddb.Reader, kind databaseType, ipAddress net.IP) []string {
+	return decodeCodes(kind, func(result any) error { return reader.Lookup(ipAddress, result) })
+}
+
+func decodeCodes(kind databaseType, decode func(result any) error) []string {
 	switch kind {
 	case typeMaxmind:
 		var country geoip2Country
-		_ = reader.Lookup(ipAddress, &country)
+		_ = decode(&country)
 		if country.Country.IsoCode == "" {
 			return []string{}
 		}
@@ -63,7 +67,7 @@ func lookupCode(reader *maxminddb.Reader, kind databaseType, ipAddress net.IP) [
 
 	case typeSing:
 		var code string
-		_ = reader.Lookup(ipAddress, &code)
+		_ = decode(&code)
 		if code == "" {
 			return []string{}
 		}
@@ -71,7 +75,7 @@ func lookupCode(reader *maxminddb.Reader, kind databaseType, ipAddress net.IP) [
 
 	case typeMetaV0:
 		var record any
-		_ = reader.Lookup(ipAddress, &record)
+		_ = decode(&record)
 		switch record := record.(type) {
 		case string:
 			return []string{record}
@@ -108,20 +112,26 @@ func (r ASNReader) LookupASN(ip net.IP) (string, string) {
 }
 
 func lookupASN(reader *maxminddb.Reader, ip net.IP) (string, string) {
-	switch reader.Metadata.DatabaseType {
-	case "GeoLite2-ASN", "DBIP-ASN-Lite (compat=GeoLite2-ASN)":
-		var result GeoLite2
-		_ = reader.Lookup(ip, &result)
-		return fmt.Sprint(result.AutonomousSystemNumber), result.AutonomousSystemOrganization
-	case "ipinfo generic_asn_free.mmdb":
-		var result IPInfo
-		_ = reader.Lookup(ip, &result)
-		if len(result.ASN) < 2 || !strings.HasPrefix(result.ASN, "AS") {
-			return "", result.Name
-		}
-		return result.ASN[2:], result.Name
-	default:
+	asn, name, supported := decodeASN(reader.Metadata.DatabaseType, func(result any) error { return reader.Lookup(ip, result) })
+	if !supported {
 		log.Warnln("Unsupported ASN type: %s", reader.Metadata.DatabaseType)
 	}
-	return "", ""
+	return asn, name
+}
+
+func decodeASN(databaseType string, decode func(result any) error) (asn, name string, supported bool) {
+	switch databaseType {
+	case "GeoLite2-ASN", "DBIP-ASN-Lite (compat=GeoLite2-ASN)":
+		var result GeoLite2
+		_ = decode(&result)
+		return fmt.Sprint(result.AutonomousSystemNumber), result.AutonomousSystemOrganization, true
+	case "ipinfo generic_asn_free.mmdb":
+		var result IPInfo
+		_ = decode(&result)
+		if len(result.ASN) < 2 || !strings.HasPrefix(result.ASN, "AS") {
+			return "", result.Name, true
+		}
+		return result.ASN[2:], result.Name, true
+	}
+	return "", "", false
 }

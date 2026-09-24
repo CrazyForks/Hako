@@ -3,7 +3,10 @@ package hako
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/TokenPLS/Hako/component/geodata"
@@ -119,6 +122,8 @@ func collectFallbackFilterGeoSite(content string, collect func(string)) {
 }
 
 func PrepareGeoSiteCache(content string) (string, error) {
+	appParseMu.Lock()
+	defer appParseMu.Unlock()
 	categories := GeoSiteCategoriesIn(content)
 	if len(categories) == 0 {
 		return "geosite: no categories named", nil
@@ -131,14 +136,19 @@ func PrepareGeoSiteCache(content string) (string, error) {
 	if info, err := os.Stat(C.Path.GeoSite()); err == nil {
 		sourceModified = info.ModTime()
 	}
+	source := compiledSourceIdentity(C.Path.GeoSite())
 
 	prepared, reused := 0, 0
 	var failures []string
 	for _, category := range categories {
-		if path, err := compiled.Path(geodata.CompiledGeoSiteDir(), category); err == nil {
-			if info, err := os.Stat(path); err == nil && info.ModTime().After(sourceModified) {
+		key, keyErr := geodata.CompiledGeoSiteKey(category)
+		if keyErr != nil {
+			key = category
+		}
+		if path, err := compiled.Path(geodata.CompiledGeoSiteDir(), key); err == nil {
+			if info, err := os.Stat(path); err == nil && compiledFromSource(path, source) && info.ModTime().After(sourceModified) {
 				if count, err := compiled.EntryCount(
-					geodata.CompiledGeoSiteDir(), category,
+					geodata.CompiledGeoSiteDir(), key,
 				); err == nil && count > 0 {
 					reused++
 					continue
@@ -147,7 +157,13 @@ func PrepareGeoSiteCache(content string) (string, error) {
 		}
 		if err := geodata.CompileGeoSite(category); err != nil {
 			failures = append(failures, fmt.Sprintf("%s: %s", category, err))
+			if path, err := compiled.Path(geodata.CompiledGeoSiteDir(), key); err == nil && !compiledFromSource(path, source) {
+				retireCompiledArtifact(path)
+			}
 			continue
+		}
+		if path, err := compiled.Path(geodata.CompiledGeoSiteDir(), key); err == nil {
+			stampCompiledSource(path, source)
 		}
 		prepared++
 	}
@@ -166,4 +182,108 @@ func PrepareGeoSiteCache(content string) (string, error) {
 
 func GeoSiteCategoryLines(content string) string {
 	return bridgeSafeString(strings.Join(GeoSiteCategoriesIn(content), "\n"))
+}
+
+var geoCountMemo = struct {
+	sync.Mutex
+	sources map[string]string
+	counts  map[string]map[string]int
+}{sources: map[string]string{}, counts: map[string]map[string]int{}}
+
+func resetGeoCountMemo() {
+	geoCountMemo.Lock()
+	defer geoCountMemo.Unlock()
+	geoCountMemo.sources = map[string]string{}
+	geoCountMemo.counts = map[string]map[string]int{}
+}
+
+func geodataCount(kind string, sourcePath func() string, key string, count func(string) (int, error)) (answer int) {
+	defer func() {
+		if recover() != nil {
+			answer = -1
+		}
+	}()
+	appParseMu.Lock()
+	defer appParseMu.Unlock()
+
+	path := sourcePath()
+	identity := compiledSourceIdentity(path)
+	if identity == "" {
+		return -1
+	}
+	source := path + "|" + identity
+	geoCountMemo.Lock()
+	if geoCountMemo.sources[kind] != source {
+		geoCountMemo.sources[kind], geoCountMemo.counts[kind] = source, map[string]int{}
+	}
+	remembered, known := geoCountMemo.counts[kind][key]
+	geoCountMemo.Unlock()
+	if known {
+		return remembered
+	}
+	answer = -1
+	if n, err := count(key); err == nil {
+		answer = n
+	}
+	geoCountMemo.Lock()
+	if geoCountMemo.sources[kind] == source {
+		geoCountMemo.counts[kind][key] = answer
+	}
+	geoCountMemo.Unlock()
+	return answer
+}
+
+func GeoSiteDomainCount(category string) int {
+	category = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(category)), "!")
+	if category == "" {
+		return -1
+	}
+	return geodataCount("geosite", C.Path.GeoSite, category, geodata.CountGeoSite)
+}
+
+func GeoIPDatEntryCount(code string) int {
+	code = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(code)), "!")
+	if code == "" || code == "lan" {
+		return -1
+	}
+	return geodataCount("geoip-dat", C.Path.GeoIP, code, geodata.CountGeoIP)
+}
+
+func compiledSourceIdentity(path string) string {
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	identity := fmt.Sprintf("%d|%d", info.Size(), info.ModTime().UnixNano())
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+		identity += fmt.Sprintf("|%d", stat.Ino)
+	}
+	return identity
+}
+
+func compiledSourceStampPath(artifact string) string { return artifact + ".source" }
+
+func retireCompiledArtifact(artifact string) {
+	if err := os.Remove(artifact); err != nil && !os.IsNotExist(err) {
+		log.Warnln("[Apple] could not retire the stale compiled list %s (%v)", filepath.Base(artifact), err)
+		return
+	}
+	_ = os.Remove(compiledSourceStampPath(artifact))
+}
+
+func compiledFromSource(artifact, identity string) bool {
+	if identity == "" {
+		return false
+	}
+	stamp, err := os.ReadFile(compiledSourceStampPath(artifact))
+	return err == nil && string(stamp) == identity
+}
+
+func stampCompiledSource(artifact, identity string) {
+	if identity == "" {
+		return
+	}
+	if err := os.WriteFile(compiledSourceStampPath(artifact), []byte(identity), 0o600); err != nil {
+		log.Warnln("[Apple] could not record which database %s was compiled from (%v); it is recompiled next time", filepath.Base(artifact), err)
+	}
 }
