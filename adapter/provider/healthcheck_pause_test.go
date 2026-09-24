@@ -127,3 +127,50 @@ func TestWakeRunsAHealthCheckInsteadOfOnlyRestartingTheClock(t *testing.T) {
 			"ticker is merely Reset, so the next check is a full interval away", probe.urlTests.Load())
 	}
 }
+
+func TestOvernightNetworkFlapRunsNoHealthCheck(t *testing.T) {
+	t.Cleanup(func() {
+		pause.DeviceWake()
+		pause.NetworkWake()
+	})
+	pause.DeviceWake()
+	pause.NetworkWake()
+
+	healthCheck := NewHealthCheck(nil, "http://127.0.0.1:1/never", 1, 1, false, nil)
+	probe := &countingProxy{}
+	healthCheck.setProxies([]C.Proxy{probe})
+	stopped := make(chan struct{})
+	go func() {
+		healthCheck.process()
+		close(stopped)
+	}()
+	t.Cleanup(func() {
+		healthCheck.close()
+		<-stopped
+	})
+	if !waitFor(func() bool { return probe.urlTests.Load() >= 1 }) {
+		t.Fatal("the health check must run once when it starts")
+	}
+	time.Sleep(1200 * time.Millisecond)
+
+	pause.DevicePause()
+	time.Sleep(50 * time.Millisecond)
+	before := probe.urlTests.Load()
+
+	for range [3]struct{}{} {
+		pause.NetworkPause()
+		time.Sleep(20 * time.Millisecond)
+		pause.NetworkWake()
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(2500 * time.Millisecond)
+
+	if after := probe.urlTests.Load(); after != before {
+		t.Fatalf("health checks ran while the device slept: %d -> %d", before, after)
+	}
+
+	pause.DeviceWake()
+	if !waitFor(func() bool { return probe.urlTests.Load() > before }) {
+		t.Fatal("waking the device must produce a check")
+	}
+}

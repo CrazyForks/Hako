@@ -40,23 +40,36 @@ type HealthCheck struct {
 	expectedStatus utils.IntRanges[uint16]
 	lastTouch      atomic.TypedValue[time.Time]
 	singleDo       *singledo.Single[struct{}]
+	scheduledDo    *singledo.Single[struct{}]
 	timeout        time.Duration
 }
 
 func (hc *HealthCheck) process() {
 	ticker := time.NewTicker(hc.interval)
 
-	stopPauseTracking := pause.RegisterTicker(ticker, hc.interval, func() { go hc.check() })
+	stopPauseTracking := pause.RegisterTicker(ticker, hc.interval, func() {
+		if pause.IsDevicePaused() || pause.IsNetworkPaused() || pause.IsBearerSilent() {
+			return
+		}
+		if hc.lazy && time.Since(hc.lastTouch.Load()) >= hc.interval {
+			log.Debugln("Skip the resume health check because we are lazy")
+			return
+		}
+		go hc.checkScheduled()
+	})
 	defer stopPauseTracking()
 
-	go hc.check()
+	go hc.checkScheduled()
 	for {
 		select {
 		case <-ticker.C:
+			if pause.IsDevicePaused() || pause.IsNetworkPaused() || pause.IsBearerSilent() {
+				continue
+			}
 			lastTouch := hc.lastTouch.Load()
 			since := time.Since(lastTouch)
 			if !hc.lazy || since < hc.interval {
-				hc.check()
+				hc.checkScheduled()
 			} else {
 				log.Debugln("Skip once health check because we are lazy")
 			}
@@ -127,11 +140,15 @@ func (hc *HealthCheck) touch() {
 }
 
 func (hc *HealthCheck) check() {
+	hc.round(hc.singleDo, time.Time{})
+}
+
+func (hc *HealthCheck) round(single *singledo.Single[struct{}], scheduledSince time.Time) {
 	if len(hc.proxies) == 0 {
 		return
 	}
 
-	_, _, _ = hc.singleDo.Do(func() (struct{}, error) {
+	_, _, _ = single.Do(func() (struct{}, error) {
 		id := utils.NewUUIDV4().String()
 		log.Debugln("Start New Health Checking {%s}", id)
 		b := new(errgroup.Group)
@@ -139,12 +156,12 @@ func (hc *HealthCheck) check() {
 
 		// execute default health check
 		option := &extraOption{filters: nil, expectedStatus: hc.expectedStatus}
-		hc.execute(b, hc.url, id, option)
+		hc.execute(b, hc.url, id, option, scheduledSince)
 
 		// execute extra health check
 		if len(hc.extra) != 0 {
 			for url, option := range hc.extra {
-				hc.execute(b, url, id, option)
+				hc.execute(b, url, id, option, scheduledSince)
 			}
 		}
 		_ = b.Wait()
@@ -153,7 +170,7 @@ func (hc *HealthCheck) check() {
 	})
 }
 
-func (hc *HealthCheck) execute(b *errgroup.Group, url, uid string, option *extraOption) {
+func (hc *HealthCheck) execute(b *errgroup.Group, url, uid string, option *extraOption, scheduledSince time.Time) {
 	url = strings.TrimSpace(url)
 	if len(url) == 0 {
 		log.Debugln("Health Check has been skipped due to testUrl is empty, {%s}", uid)
@@ -184,6 +201,9 @@ func (hc *HealthCheck) execute(b *errgroup.Group, url, uid string, option *extra
 
 		p := proxy
 		b.Go(func() error {
+			if !scheduledSince.IsZero() && measuredAliveSince(p, url, expectedStatus.String(), hc.timeout, scheduledSince) {
+				return nil
+			}
 			ctx, cancel := context.WithTimeout(adapter.WithBackgroundProbe(hc.ctx), hc.timeout)
 			defer cancel()
 			log.Debugln("Health Checking, proxy: %s, url: %s, id: {%s}", p.Name(), url, uid)
@@ -219,5 +239,6 @@ func NewHealthCheck(proxies []C.Proxy, url string, timeout uint, interval uint, 
 		lazy:           lazy,
 		expectedStatus: expectedStatus,
 		singleDo:       singledo.NewSingle[struct{}](time.Second),
+		scheduledDo:    singledo.NewSingle[struct{}](time.Second),
 	}
 }

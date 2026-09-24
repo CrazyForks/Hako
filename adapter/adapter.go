@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/TokenPLS/Hako/component/dialer"
 	"net"
 	"net/url"
 	"strings"
@@ -38,6 +39,7 @@ type Proxy struct {
 	history *queue.Queue[C.DelayHistory]
 	extra   xsync.Map[string, *internalProxyState]
 	now func() time.Time
+	urlTests urlTestFlights
 }
 
 type URLTestOutcome struct {
@@ -212,6 +214,10 @@ func IsBackgroundProbe(ctx context.Context) bool {
 }
 
 func (p *Proxy) urlTest(ctx context.Context, url string, expectedStatus utils.IntRanges[uint16]) (t uint16, satisfied bool, status int, err error) {
+	return p.urlTestShared(ctx, url, expectedStatus)
+}
+
+func (p *Proxy) urlTestOnce(ctx context.Context, url string, expectedStatus utils.IntRanges[uint16]) (t uint16, satisfied bool, status int, err error) {
 	if admit := urlTestAdmission.Load(); admit != nil {
 		if admitErr := admit(ctx); admitErr != nil {
 			return 0, false, 0, admitErr
@@ -258,7 +264,7 @@ func (p *Proxy) urlTest(ctx context.Context, url string, expectedStatus utils.In
 	}
 
 	start := p.clock()
-	instance, err := p.DialContext(ctx, &addr)
+	instance, err := p.DialContext(dialer.WithDialKind(ctx, dialer.DialKindProbe), &addr)
 	if err != nil {
 		return
 	}
