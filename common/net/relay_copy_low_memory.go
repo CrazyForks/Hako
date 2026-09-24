@@ -7,6 +7,7 @@ import (
 	"io"
 	"syscall"
 
+	"github.com/metacubex/sing/common/buf"
 	"github.com/metacubex/sing/common/bufio"
 	E "github.com/metacubex/sing/common/exceptions"
 	N "github.com/metacubex/sing/common/network"
@@ -26,6 +27,9 @@ func relayCopy(destination io.Writer, source io.Reader) (n int64, err error) {
 	var readCounters, writeCounters []N.CountFunc
 	possiblyReplaceable := bufio.MaxCopyExtendedOnceTimes
 	for {
+		if buffered, ok := source.(*BufferedConn); ok && buffered.r != nil && buffered.r.Buffered() == 0 {
+			buffered.r = nil
+		}
 		source, readCounters = N.UnwrapCountReader(source, readCounters)
 		destination, writeCounters = N.UnwrapCountWriter(destination, writeCounters)
 
@@ -50,7 +54,8 @@ func relayCopy(destination io.Writer, source io.Reader) (n int64, err error) {
 			(writerPossiblyReplaceable && replaceableWriter.WriterPossiblyReplaceable())) {
 			possiblyReplaceable--
 			var copied int64
-			copied, err = bufio.CopyExtendedOnce(newBoundedRelayWriter(destination), source, readCounters, writeCounters)
+			streamReader := &boundedRelayReader{Reader: source}
+			copied, err = bufio.CopyExtendedOnce(newBoundedRelayWriter(destination), streamReader, readCounters, writeCounters)
 			n += copied
 			if err != nil {
 				if n == copied {
@@ -58,6 +63,12 @@ func relayCopy(destination io.Writer, source io.Reader) (n int64, err error) {
 				}
 				if errors.Is(err, io.EOF) {
 					err = nil
+				}
+				return
+			}
+			if streamReader.pendingError != nil {
+				if !errors.Is(streamReader.pendingError, io.EOF) {
+					err = streamReader.pendingError
 				}
 				return
 			}
@@ -70,13 +81,50 @@ func relayCopy(destination io.Writer, source io.Reader) (n int64, err error) {
 	var copied int64
 	copied, err = bufio.CopyWithCounters(
 		destinationWriter,
-		source,
+		newBoundedRelayReader(source),
 		originSource,
 		readCounters,
 		writeCounters,
 	)
 	n += copied
 	return
+}
+
+type boundedRelayReader struct {
+	io.Reader
+	pendingError error
+}
+
+func (r *boundedRelayReader) ReadBuffer(buffer *buf.Buffer) error {
+	if r.pendingError != nil {
+		return r.pendingError
+	}
+	n, err := r.Reader.Read(buffer.FreeBytes())
+	buffer.Truncate(buffer.Len() + n)
+	if n > 0 {
+		r.pendingError = err
+		return nil
+	}
+	return err
+}
+
+func (r *boundedRelayReader) UpstreamReader() any { return r.Reader }
+
+func (r *boundedRelayReader) CreateReadWaiter() (N.ReadWaiter, bool) {
+	return bufio.CreateReadWaiter(r.Reader)
+}
+
+type boundedRelaySyscallReader struct {
+	*boundedRelayReader
+	syscall.Conn
+}
+
+func newBoundedRelayReader(source io.Reader) N.ExtendedReader {
+	reader := &boundedRelayReader{Reader: source}
+	if conn, ok := source.(syscall.Conn); ok {
+		return &boundedRelaySyscallReader{boundedRelayReader: reader, Conn: conn}
+	}
+	return reader
 }
 
 func newBoundedRelayWriter(destination io.Writer) *boundedRelayWriter {

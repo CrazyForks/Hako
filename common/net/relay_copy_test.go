@@ -5,13 +5,32 @@ import (
 	"errors"
 	"io"
 	stdnet "net"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/metacubex/sing/common/buf"
+	"github.com/metacubex/sing/common/bufio"
 	N "github.com/metacubex/sing/common/network"
 )
+
+func TestRelayCopyPreservesChunkReaderBoundaries(t *testing.T) {
+	for _, size := range []int{0, 1, 1024, 2047, 2048, 2049, 4096, 16384, 32769} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			payload := make([]byte, size)
+			for i := range payload {
+				payload[i] = byte(i*31 ^ i>>7)
+			}
+			source := bufio.NewChunkReader(bytes.NewReader(payload), 16384)
+			var output bytes.Buffer
+			n, err := relayCopy(&output, source)
+			if err != nil || n != int64(size) || !bytes.Equal(output.Bytes(), payload) {
+				t.Fatalf("relayCopy: n=%d output=%d error=%v; want %d intact bytes", n, output.Len(), err, size)
+			}
+		})
+	}
+}
 
 func TestRelayCopyPreservesCachedBytesAndCounters(t *testing.T) {
 	const cached = "cached-"
@@ -123,6 +142,44 @@ func TestRelayPreservesTCPHalfClose(t *testing.T) {
 	case <-relayDone:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Relay() did not return after both TCP half-closes")
+	}
+}
+
+func TestRelayStopsWhenPeerCloses(t *testing.T) {
+	left, leftRelay := stdnet.Pipe()
+	right, rightRelay := stdnet.Pipe()
+	defer right.Close()
+	done := make(chan struct{})
+	go func() { Relay(leftRelay, rightRelay); close(done) }()
+	left.Close()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Relay remained blocked after peer close")
+	}
+}
+
+func BenchmarkRelayCopyStream(b *testing.B) {
+	payload := bytes.Repeat([]byte("relay-data"), 6554)
+	b.SetBytes(int64(len(payload)))
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		n, err := relayCopy(io.Discard, bytes.NewReader(payload))
+		if err != nil || n != int64(len(payload)) {
+			b.Fatalf("n=%d err=%v", n, err)
+		}
+	}
+}
+
+func BenchmarkRelayCopyChunkReader(b *testing.B) {
+	payload := bytes.Repeat([]byte("chunk-data"), 6554)
+	b.SetBytes(int64(len(payload)))
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		n, err := relayCopy(io.Discard, bufio.NewChunkReader(bytes.NewReader(payload), 16384))
+		if err != nil || n != int64(len(payload)) {
+			b.Fatalf("n=%d err=%v", n, err)
+		}
 	}
 }
 
