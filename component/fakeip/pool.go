@@ -122,6 +122,7 @@ func (p *Pool) StoreState() {
 		if p.cycle {
 			s.PutByHost(cycleKey, p.offset)
 		}
+		s.Sync()
 	}
 }
 
