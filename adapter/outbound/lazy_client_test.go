@@ -2,6 +2,9 @@ package outbound
 
 
 import (
+	"context"
+	"errors"
+	C "github.com/TokenPLS/Hako/constant"
 	"runtime"
 	"sync"
 	"testing"
@@ -174,7 +177,11 @@ func TestLazyClientBuildsOnceUnderConcurrency(t *testing.T) {
 		wg2.Add(1)
 		go func() {
 			defer wg2.Done()
-			anyClients <- a.lazyClient()
+			c, err := a.lazyClient()
+			if err != nil {
+				t.Errorf("lazyClient: %v", err)
+			}
+			anyClients <- c
 		}()
 	}
 	wg2.Wait()
@@ -188,4 +195,71 @@ func TestLazyClientBuildsOnceUnderConcurrency(t *testing.T) {
 		}
 	}
 	_ = a.Close()
+}
+
+func TestCloseBeforeTheFirstDialRefusesLaterDialsInsteadOfCrashing(t *testing.T) {
+	a, err := NewAnyTLS(anyTLSOption())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close before any dial: %v", err)
+	}
+	if a.clientBuilt() {
+		t.Fatal("Close must not build the client it is closing")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := a.DialContext(ctx, &C.Metadata{Host: "example.com", DstPort: 443}); !errors.Is(err, errOutboundClosed) {
+		t.Fatalf("a dial after Close must refuse with errOutboundClosed, got %v", err)
+	}
+	if _, err := a.ListenPacketContext(ctx, &C.Metadata{Host: "example.com", DstPort: 443, NetWork: C.UDP}); err == nil {
+		t.Fatal("a packet dial after Close must refuse")
+	}
+	if a.clientBuilt() {
+		t.Fatal("a refused dial must not build the client")
+	}
+
+	h, err := NewHysteria2(hysteria2Option())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Close(); err != nil {
+		t.Fatalf("Hysteria2 Close before any dial: %v", err)
+	}
+	if _, err := h.lazyClient(); !errors.Is(err, errOutboundClosed) {
+		t.Fatalf("Hysteria2 dial after Close must refuse, got %v", err)
+	}
+	if h.clientBuilt() {
+		t.Fatal("Hysteria2: a refused dial must not build the client")
+	}
+}
+
+func TestDialsRacingCloseNeverSeeANilClient(t *testing.T) {
+	for round := 0; round < 20; round++ {
+		a, err := NewAnyTLS(anyTLSOption())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wg sync.WaitGroup
+		for i := 0; i < 8; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				c, err := a.lazyClient()
+				if err == nil && c == nil {
+					t.Error("lazyClient returned neither a client nor an error")
+				}
+			}()
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = a.Close()
+		}()
+		wg.Wait()
+		if _, err := a.lazyClient(); !errors.Is(err, errOutboundClosed) {
+			t.Fatalf("round %d: after Close every dial must refuse, got %v", round, err)
+		}
+	}
 }

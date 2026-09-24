@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/TokenPLS/Hako/component/dialer"
+	"github.com/TokenPLS/Hako/component/resolver"
 
 	"github.com/metacubex/jls-quic-go"
 	"github.com/metacubex/jls-tls"
@@ -17,11 +18,15 @@ type PacketDialer interface {
 }
 
 type DialQuicOption struct {
+	PhysicalPeer       bool
 	Early              bool
 	ConnectionIDLength int
 }
 
 func DialQuic(ctx context.Context, address string, opts []dialer.Option, pDialer PacketDialer, tlsConf *tls.Config, conf *quic.Config, option DialQuicOption) (net.PacketConn, *quic.Conn, error) {
+	if resolver.CurrentIPQueryPolicy() != resolver.IPQueryLegacy && !option.PhysicalPeer && !dialer.IsPhysicalDialer(pDialer) {
+		opts = append(append([]dialer.Option(nil), opts...), dialer.WithLogicalAddress())
+	}
 	d := dialer.NewDialer(
 		dialer.WithOptions(opts...),
 		dialer.WithNetDialer(dialer.NetDialerFunc(func(ctx context.Context, network, address string) (net.Conn, error) {

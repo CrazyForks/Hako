@@ -1,6 +1,6 @@
 package hako
 
-import "gopkg.in/yaml.v3"
+import "go.yaml.in/yaml/v3"
 
 func restoreSourceKeyOrder(source, transformed string) string {
 	return restoreKeyOrderFrom(transformed, source)

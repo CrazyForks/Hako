@@ -464,6 +464,7 @@ func updateGeneral(general *config.General, logging bool) {
 
 	dialer.DefaultInterface.Store(general.Interface)
 	dialer.DefaultRoutingMark.Store(int32(general.RoutingMark))
+	updateNetworkStrategy(general, logging)
 	if logging && general.RoutingMark > 0 {
 		log.Infoln("Use routing mark: %#x", general.RoutingMark)
 	}
@@ -479,6 +480,33 @@ func updateGeneral(general *config.General, logging bool) {
 	geodata.SetASNUrl(general.GeoXUrl.ASN)
 	mihomoHttp.SetUA(general.GlobalUA)
 	resource.SetETag(general.ETagSupport)
+}
+
+func updateNetworkStrategy(general *config.General, logging bool) {
+	strategy, err := dialer.ParseNetworkStrategy(general.NetworkStrategy)
+	if err != nil {
+		log.Errorln("Ignoring network strategy: %s", err.Error())
+		dialer.SetNetworkStrategy(dialer.NetworkStrategyDefault, nil, nil)
+		return
+	}
+	parseTypes := func(names []string) []dialer.InterfaceType {
+		var types []dialer.InterfaceType
+		for _, name := range names {
+			interfaceType, err := dialer.ParseInterfaceType(name)
+			if err != nil {
+				log.Errorln("Ignoring network type: %s", err.Error())
+				continue
+			}
+			types = append(types, interfaceType)
+		}
+		return types
+	}
+	primary := parseTypes(general.NetworkType)
+	fallback := parseTypes(general.FallbackNetworkType)
+	dialer.SetNetworkStrategy(strategy, primary, fallback)
+	if logging && (strategy != dialer.NetworkStrategyDefault || len(primary) != 0) {
+		log.Infoln("Use network strategy: %s", strategy.String())
+	}
 }
 
 func updateUsers(users []auth.AuthUser) {

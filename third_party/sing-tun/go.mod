@@ -7,6 +7,7 @@ require (
 	github.com/google/btree v1.1.3
 	github.com/metacubex/fswatch v0.1.1
 	github.com/metacubex/gvisor v0.0.0-20260807021258-5683e078dbc4
+	github.com/metacubex/mipstack v0.0.0-20260910230046-ba762df4c91d
 	github.com/metacubex/nftables v0.0.0-20260426003805-208c2c1ba2cb
 	github.com/metacubex/sing v0.5.7
 	github.com/sagernet/netlink v0.0.0-20240612041022-b9a21c07ac6a
@@ -30,3 +31,9 @@ require (
 	golang.org/x/time v0.10.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+// Pin the reviewed with_low_memory TCP storage patch; replacements are not inherited.
+replace github.com/metacubex/mipstack => ../mipstack
+
+// Pin the ARM64 race CAS repair; ordinary build source is unchanged.
+replace github.com/metacubex/gvisor => ../gvisor

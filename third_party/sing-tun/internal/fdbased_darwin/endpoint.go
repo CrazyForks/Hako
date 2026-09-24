@@ -321,12 +321,34 @@ func (e *endpoint) writePacket(pkt *stack.PacketBuffer) tcpip.Error {
 		iovecs = rawfile.AppendIovecFromBytes(iovecs, v, numIovecs)
 	}
 	recordEgressWriteAttempt()
-	if errno := rawfile.NonBlockingWriteIovec(fd, iovecs); errno != 0 {
+	if errno := writeIovecWaitingForRoom(fd, iovecs); errno != 0 {
 		recordEgressWriteError()
 		return TranslateErrno(errno)
 	}
 	recordEgressWriteSuccess(1, uint64(payloadBytes))
 	return nil
+}
+
+func writeIovecWaitingForRoom(fd int, iovecs []unix.Iovec) unix.Errno {
+	waits := 0
+	for {
+		errno := rawfile.NonBlockingWriteIovec(fd, iovecs)
+		switch {
+		case errno == 0:
+			return 0
+		case errno == unix.EINTR:
+			continue
+		case !rawfile.BufferFull(errno):
+			return errno
+		case rawfile.WaitBufferFull(waits):
+			waits++
+			recordEgressWriteWait()
+			continue
+		default:
+			recordEgressWriteWaitExhausted()
+			return errno
+		}
+	}
 }
 
 func packetPayloadBytes(pkt *stack.PacketBuffer) uint64 {
@@ -406,13 +428,26 @@ func (e *endpoint) sendBatch(batchFDInfo fdInfo, pkts []*stack.PacketBuffer) (in
 			}
 			packets++
 		} else {
+			waits := 0
 			for len(mmsgHdrs) > 0 {
 				recordEgressWriteAttempt()
 				sent, errno := rawfile.NonBlockingSendMMsg(batchFD, mmsgHdrs)
 				if errno != 0 {
+					if errno == unix.EINTR {
+						continue
+					}
+					if rawfile.BufferFull(errno) && rawfile.WaitBufferFull(waits) {
+						waits++
+						recordEgressWriteWait()
+						continue
+					}
+					if rawfile.BufferFull(errno) {
+						recordEgressWriteWaitExhausted()
+					}
 					recordEgressWriteError()
 					return packets, TranslateErrno(errno)
 				}
+				waits = 0
 				var payloadBytes uint64
 				for _, pkt := range pkts[packets : packets+sent] {
 					payloadBytes += packetPayloadBytes(pkt)

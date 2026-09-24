@@ -201,3 +201,4 @@ func (h *ResolverEnhancer) ShouldSkipFakeIP(host string) bool {
 }
 
 func (h *ResolverEnhancer) IPv6() bool { return h.ipv6 }
+

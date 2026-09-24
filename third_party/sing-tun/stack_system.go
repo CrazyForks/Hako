@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"sync"
 	"syscall"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 var ErrIncludeAllNetworks = E.New("`system` and `mixed` stack are not available when `includeAllNetworks` is enabled. See https://github.com/SagerNet/sing-tun/issues/25")
 
 type System struct {
+	icmpErrors           icmpErrorLimiter
 	ctx                  context.Context
 	tun                  Tun
 	tunName              string
@@ -43,14 +45,19 @@ type System struct {
 	tcpListener6         net.Listener
 	tcpPort              uint16
 	tcpPort6             uint16
-	tcpNat               *TCPNat
-	directNat            *DirectRouteMapping
-	bindInterface        bool
-	interfaceFinder      control.InterfaceFinder
-	enforceBind          bool
-	frontHeadroom        int
-	txChecksumOffload    bool
-	recvMsgX             bool
+	listenConfig      net.ListenConfig
+	tcp6RetryAt       time.Time
+	tcp6Mu            sync.Mutex
+	closed            bool
+	tcpNat4           *TCPNat
+	tcpNat6           *TCPNat
+	directNat         *DirectRouteMapping
+	bindInterface     bool
+	interfaceFinder   control.InterfaceFinder
+	enforceBind       bool
+	frontHeadroom     int
+	txChecksumOffload bool
+	recvMsgX          bool
 }
 
 type Session struct {
@@ -101,9 +108,13 @@ func NewSystem(options StackOptions) (Stack, error) {
 }
 
 func (s *System) Close() error {
+	s.tcp6Mu.Lock()
+	s.closed = true
+	tcpListener6 := s.tcpListener6
+	s.tcp6Mu.Unlock()
 	return common.Close(
 		s.tcpListener,
-		s.tcpListener6,
+		tcpListener6,
 	)
 }
 
@@ -131,6 +142,7 @@ func (s *System) start() error {
 			return nil
 		})
 	}
+	s.listenConfig = listenConfig
 	var tcpListener net.Listener
 	var err error
 	if s.inet4NextAddress.IsValid() {
@@ -150,34 +162,79 @@ func (s *System) start() error {
 		}
 		s.tcpListener = tcpListener
 		s.tcpPort = M.SocksaddrFromNet(tcpListener.Addr()).Port
-		go s.acceptLoop(tcpListener)
+		s.tcpNat4 = NewNat(s.ctx, s.udpTimeout)
+		go s.acceptLoop(tcpListener, s.tcpNat4)
 	}
 	if s.inet6NextAddress.IsValid() {
-		address := net.JoinHostPort(s.inet6Address.String(), "0")
-		if s.enforceBind {
-			address = "[:]:0"
-		}
 		for i := 0; i < 3; i++ {
-			tcpListener, err = s.listenWithTunBind(listenConfig, "tcp6", address, s.inet6Address)
-			if !retryableListenError(err) {
+			tcpListener, err = s.listenWithTunBind(listenConfig, "tcp6", s.tcp6ListenAddress(), s.inet6Address)
+			if errors.Is(err, errTunAddressNotPresent) || !retryableListenError(err) {
 				break
 			}
 			time.Sleep(time.Second)
 		}
-		if err != nil {
+		switch {
+		case errors.Is(err, errTunAddressNotPresent):
+			s.logger.Info("[bindif] no up interface carries ", s.inet6Address, "; the tcp6 forwarder waits for the tunnel to declare it")
+			err = nil
+		case err != nil:
 			if s.tcpListener != nil {
 				_ = s.tcpListener.Close()
 				s.tcpListener = nil
 			}
 			return err
+		default:
+			s.tcpListener6 = tcpListener
+			s.tcpPort6 = M.SocksaddrFromNet(tcpListener.Addr()).Port
+			s.tcpNat6 = NewNat(s.ctx, s.udpTimeout)
+			go s.acceptLoop(tcpListener, s.tcpNat6)
 		}
-		s.tcpListener6 = tcpListener
-		s.tcpPort6 = M.SocksaddrFromNet(tcpListener.Addr()).Port
-		go s.acceptLoop(tcpListener)
 	}
-	s.tcpNat = NewNat(s.ctx, s.udpTimeout)
 	s.directNat = NewDirectRouteMapping(s.icmpTimeout)
 	return nil
+}
+
+func (s *System) tcp6ListenAddress() string {
+	if s.enforceBind {
+		return "[:]:0"
+	}
+	return net.JoinHostPort(s.inet6Address.String(), "0")
+}
+
+func (s *System) ipv6ForwarderListening() bool {
+	if s.tcpPort6 != 0 {
+		return true
+	}
+	if !s.inet6NextAddress.IsValid() {
+		return false
+	}
+	now := time.Now()
+	if now.Before(s.tcp6RetryAt) {
+		return false
+	}
+	s.tcp6RetryAt = now.Add(time.Second)
+	listener, err := s.listenWithTunBind(s.listenConfig, "tcp6", s.tcp6ListenAddress(), s.inet6Address)
+	if err != nil {
+		if errors.Is(err, errTunAddressNotPresent) {
+			s.logger.Debug("[bindif] tcp6 forwarder still waiting: no up interface carries ", s.inet6Address)
+		} else {
+			s.logger.Warn("[bindif] tcp6 forwarder: ", err)
+		}
+		return false
+	}
+	s.tcp6Mu.Lock()
+	if s.closed {
+		s.tcp6Mu.Unlock()
+		_ = listener.Close()
+		return false
+	}
+	s.tcpListener6 = listener
+	s.tcp6Mu.Unlock()
+	s.tcpNat6 = NewNat(s.ctx, s.udpTimeout)
+	s.tcpPort6 = M.SocksaddrFromNet(listener.Addr()).Port
+	s.logger.Info("[bindif] tcp6 forwarder listening on ", listener.Addr(), " now that the tun carries ", s.inet6Address)
+	go s.acceptLoop(listener, s.tcpNat6)
+	return true
 }
 
 func (s *System) listenWithTunBind(base net.ListenConfig, network, address string, tunAddr netip.Addr) (net.Listener, error) {
@@ -265,7 +322,7 @@ func (s *System) wintunLoop(winTun WinTun) {
 
 func (s *System) batchLoopLinux(linuxTUN LinuxTUN, batchSize int) {
 	packetBuffers := make([][]byte, batchSize)
-	writeBuffers := make([][]byte, batchSize)
+	writeBuffers := make([][]byte, 0, batchSize)
 	packetSizes := make([]int, batchSize)
 	for i := range packetBuffers {
 		packetBuffers[i] = make([]byte, s.mtu+s.frontHeadroom)
@@ -345,9 +402,19 @@ func (s *System) processPacket(packet []byte) bool {
 	)
 	switch ipVersion := header.IPVersion(packet); ipVersion {
 	case header.IPv4Version:
-		writeBack, err = s.processIPv4(packet)
+		ipHdr := header.IPv4(packet)
+		if !ipHdr.IsValid(len(packet)) {
+			err = E.New("ip: invalid IPv4 packet")
+			break
+		}
+		writeBack, err = s.processIPv4(ipHdr)
 	case header.IPv6Version:
-		writeBack, err = s.processIPv6(packet)
+		ipHdr := header.IPv6(packet)
+		if !ipHdr.IsValid(len(packet)) {
+			err = E.New("ip: invalid IPv6 packet")
+			break
+		}
+		writeBack, err = s.processIPv6(ipHdr)
 	default:
 		err = E.New("ip: unknown version: ", ipVersion)
 	}
@@ -358,14 +425,14 @@ func (s *System) processPacket(packet []byte) bool {
 	return writeBack
 }
 
-func (s *System) acceptLoop(listener net.Listener) {
+func (s *System) acceptLoop(listener net.Listener, tcpNat *TCPNat) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			return
 		}
 		connPort := M.SocksaddrFromNet(conn.RemoteAddr()).Port
-		session := s.tcpNat.LookupBack(connPort)
+		session := tcpNat.LookupBack(connPort)
 		if session == nil {
 			s.logger.Trace(E.New("unknown session with port ", connPort))
 			continue
@@ -425,12 +492,15 @@ func (s *System) processIPv6(ipHdr header.IPv6) (writeBack bool, err error) {
 }
 
 func (s *System) processIPv4TCP(ipHdr header.IPv4, tcpHdr header.TCP) (bool, error) {
+	if s.tcpNat4 == nil {
+		return false, nil
+	}
 	source := netip.AddrPortFrom(ipHdr.SourceAddr(), tcpHdr.SourcePort())
 	destination := netip.AddrPortFrom(ipHdr.DestinationAddr(), tcpHdr.DestinationPort())
 	if !destination.Addr().IsGlobalUnicast() {
 		return false, nil
 	} else if source.Addr() == s.inet4Address && source.Port() == s.tcpPort {
-		session := s.tcpNat.LookupBack(destination.Port())
+		session := s.tcpNat4.LookupBack(destination.Port())
 		if session == nil {
 			return false, E.New("ipv4: tcp: session not found: ", destination.Port())
 		}
@@ -449,7 +519,10 @@ func (s *System) processIPv4TCP(ipHdr header.IPv4, tcpHdr header.TCP) (bool, err
 			}
 		}
 		if !loopback {
-			natPort := s.tcpNat.Lookup(source, destination)
+			natPort, err := s.tcpNat4.Lookup(source, destination)
+			if err != nil {
+				return false, s.resetIPv4TCP(ipHdr, tcpHdr)
+			}
 			ipHdr.SetSourceAddr(s.inet4NextAddress)
 			tcpHdr.SetSourcePort(natPort)
 			ipHdr.SetDestinationAddr(s.inet4Address)
@@ -513,12 +586,15 @@ func (s *System) resetIPv4TCP(origIPHdr header.IPv4, origTCPHdr header.TCP) erro
 }
 
 func (s *System) processIPv6TCP(ipHdr header.IPv6, tcpHdr header.TCP) (bool, error) {
+	if !s.inet6NextAddress.IsValid() {
+		return false, nil
+	}
 	source := netip.AddrPortFrom(ipHdr.SourceAddr(), tcpHdr.SourcePort())
 	destination := netip.AddrPortFrom(ipHdr.DestinationAddr(), tcpHdr.DestinationPort())
 	if !destination.Addr().IsGlobalUnicast() {
 		return false, nil
-	} else if source.Addr() == s.inet6Address && source.Port() == s.tcpPort6 {
-		session := s.tcpNat.LookupBack(destination.Port())
+	} else if s.tcpPort6 != 0 && source.Addr() == s.inet6Address && source.Port() == s.tcpPort6 {
+		session := s.tcpNat6.LookupBack(destination.Port())
 		if session == nil {
 			return false, E.New("ipv6: tcp: session not found: ", destination.Port())
 		}
@@ -537,7 +613,18 @@ func (s *System) processIPv6TCP(ipHdr header.IPv6, tcpHdr header.TCP) (bool, err
 			}
 		}
 		if !loopback {
-			natPort := s.tcpNat.Lookup(source, destination)
+			if tcpHdr.Flags()&header.TCPFlagSyn != 0 && tcpHdr.Flags()&header.TCPFlagAck == 0 {
+				if _, err := s.handler.PrepareConnection(N.NetworkTCP, M.SocksaddrFromNetIP(source), M.SocksaddrFromNetIP(destination), nil, 0); err != nil {
+					return false, s.resetIPv6TCP(ipHdr, tcpHdr)
+				}
+			}
+			if !s.ipv6ForwarderListening() {
+				return false, nil
+			}
+			natPort, err := s.tcpNat6.Lookup(source, destination)
+			if err != nil {
+				return false, s.resetIPv6TCP(ipHdr, tcpHdr)
+			}
 			ipHdr.SetSourceAddr(s.inet6NextAddress)
 			tcpHdr.SetSourcePort(natPort)
 			ipHdr.SetDestinationAddr(s.inet6Address)
@@ -628,6 +715,7 @@ func (s *System) processIPv4UDP(ipHdr header.IPv4, udpHdr header.UDP) error {
 			headerCopy,
 			source,
 			s.txChecksumOffload,
+			s,
 		}
 	})
 	return nil
@@ -647,6 +735,9 @@ func (s *System) processIPv6UDP(ipHdr header.IPv6, udpHdr header.UDP) error {
 		Source:      M.SocksaddrFromNetIP(source),
 		Destination: M.SocksaddrFromNetIP(destination),
 	}
+	if _, err := s.handler.PrepareConnection(N.NetworkUDP, metadata.Source, metadata.Destination, nil, 0); err != nil {
+		return s.rejectIPv6WithICMP(ipHdr, header.ICMPv6NetworkUnreachable)
+	}
 	s.handler.NewPacket(s.ctx, source, data.ToOwned(), metadata, func(natConn N.PacketConn) N.PacketWriter {
 		headerLen := len(ipHdr) - int(ipHdr.PayloadLength()) + header.UDPMinimumSize
 		headerCopy := make([]byte, headerLen)
@@ -657,6 +748,7 @@ func (s *System) processIPv6UDP(ipHdr header.IPv6, udpHdr header.UDP) error {
 			headerCopy,
 			source,
 			s.txChecksumOffload,
+			s,
 		}
 	})
 	return nil
@@ -697,6 +789,9 @@ func (s *System) processIPv4ICMP(ipHdr header.IPv4, icmpHdr header.ICMPv4) (bool
 }
 
 func (s *System) rejectIPv4WithICMP(ipHdr header.IPv4, code header.ICMPv4Code) error {
+	if !udpUnreachableAnswerable(ipHdr.SourceAddr(), ipHdr.DestinationAddr()) || !s.icmpErrors.allow() {
+		return nil
+	}
 	frontHeadroom := s.frontHeadroom + PacketOffset
 	mtu := s.mtu
 	const maxIPData = header.IPv4MinimumProcessableDatagramSize - header.IPv4MinimumSize
@@ -704,7 +799,8 @@ func (s *System) rejectIPv4WithICMP(ipHdr header.IPv4, code header.ICMPv4Code) e
 		mtu = maxIPData
 	}
 	available := mtu - header.ICMPv4MinimumSize
-	if available < len(ipHdr)+header.ICMPv4MinimumErrorPayloadSize {
+	if len(ipHdr) < int(ipHdr.HeaderLength())+header.ICMPv4MinimumErrorPayloadSize ||
+		available < int(ipHdr.HeaderLength())+header.ICMPv4MinimumErrorPayloadSize {
 		return nil
 	}
 	payload := ipHdr
@@ -717,6 +813,7 @@ func (s *System) rejectIPv4WithICMP(ipHdr header.IPv4, code header.ICMPv4Code) e
 	newIPHdr := header.IPv4(newPacket.Bytes())
 	newIPHdr.Encode(&header.IPv4Fields{
 		TotalLength: uint16(newPacket.Len()),
+		TTL:         64,
 		Protocol:    uint8(header.ICMPv4ProtocolNumber),
 		SrcAddr:     ipHdr.DestinationAddr(),
 		DstAddr:     ipHdr.SourceAddr(),
@@ -725,7 +822,7 @@ func (s *System) rejectIPv4WithICMP(ipHdr header.IPv4, code header.ICMPv4Code) e
 	icmpHdr := header.ICMPv4(newIPHdr.Payload())
 	icmpHdr.SetType(header.ICMPv4DstUnreachable)
 	icmpHdr.SetCode(code)
-	icmpHdr.SetChecksum(header.ICMPv4Checksum(icmpHdr[:header.ICMPv4MinimumSize], checksum.Checksum(ipHdr.Payload(), 0)))
+	icmpHdr.SetChecksum(header.ICMPv4Checksum(icmpHdr[:header.ICMPv4MinimumSize], checksum.Checksum(payload, 0)))
 	copy(icmpHdr.Payload(), payload)
 	if PacketOffset > 0 {
 		PacketFillHeader(newPacket.ExtendHeader(PacketOffset), header.IPv4Version)
@@ -775,6 +872,9 @@ func (s *System) processIPv6ICMP(ipHdr header.IPv6, icmpHdr header.ICMPv6) (bool
 }
 
 func (s *System) rejectIPv6WithICMP(ipHdr header.IPv6, code header.ICMPv6Code) error {
+	if !udpUnreachableAnswerable(ipHdr.SourceAddr(), ipHdr.DestinationAddr()) || !s.icmpErrors.allow() {
+		return nil
+	}
 	frontHeadroom := s.frontHeadroom + PacketOffset
 	mtu := s.mtu
 	const maxIPv6Data = header.IPv6MinimumMTU - header.IPv6FixedHeaderSize
@@ -796,6 +896,7 @@ func (s *System) rejectIPv6WithICMP(ipHdr header.IPv6, code header.ICMPv6Code) e
 	newIPHdr.Encode(&header.IPv6Fields{
 		PayloadLength:     uint16(header.ICMPv6DstUnreachableMinimumSize + len(payload)),
 		TransportProtocol: header.ICMPv6ProtocolNumber,
+		HopLimit:          64,
 		SrcAddr:           ipHdr.DestinationAddr(),
 		DstAddr:           ipHdr.SourceAddr(),
 	})
@@ -824,6 +925,7 @@ type systemUDPPacketWriter4 struct {
 	header            []byte
 	source            netip.AddrPort
 	txChecksumOffload bool
+	system *System
 }
 
 func (w *systemUDPPacketWriter4) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
@@ -856,12 +958,17 @@ func (w *systemUDPPacketWriter4) WritePacket(buffer *buf.Buffer, destination M.S
 	return common.Error(w.tun.Write(newPacket.Bytes()))
 }
 
+func (w *systemUDPPacketWriter4) ReportUnreachable() error {
+	return w.system.rejectIPv4WithICMP(header.IPv4(w.header), header.ICMPv4PortUnreachable)
+}
+
 type systemUDPPacketWriter6 struct {
 	tun               Tun
 	frontHeadroom     int
 	header            []byte
 	source            netip.AddrPort
 	txChecksumOffload bool
+	system *System
 }
 
 func (w *systemUDPPacketWriter6) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
@@ -892,6 +999,10 @@ func (w *systemUDPPacketWriter6) WritePacket(buffer *buf.Buffer, destination M.S
 		newPacket.Advance(-w.frontHeadroom)
 	}
 	return common.Error(w.tun.Write(newPacket.Bytes()))
+}
+
+func (w *systemUDPPacketWriter6) ReportUnreachable() error {
+	return w.system.rejectIPv6WithICMP(header.IPv6(w.header), header.ICMPv6PortUnreachable)
 }
 
 type systemICMPDirectPacketWriter4 struct {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/TokenPLS/Hako/component/dialer"
 	"io"
 	"net"
 	"net/netip"
@@ -131,7 +132,7 @@ func (ss *Socks5) ListenPacketContext(ctx context.Context, metadata *C.Metadata)
 		err = errors.New("invalid UDP bind address")
 		return
 	} else if bindUDPAddr.IP.IsUnspecified() {
-		serverAddr, err := resolveUDPAddr(ctx, "udp", ss.Addr(), C.IPv4Prefer)
+		serverAddr, err := resolveUDPAddr(ctx, "udp", ss.Addr(), C.IPv4Prefer, dialer.IsPhysicalDialer(ss.dialer))
 		if err != nil {
 			return nil, err
 		}

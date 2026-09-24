@@ -13,6 +13,7 @@ import (
 )
 
 func TestResolveMetadataAttributesTheConnectionToThisProcess(t *testing.T) {
+	withDoorTestTunnel(t, "DIRECT")
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -79,6 +80,7 @@ func TestResolveMetadataAttributesTheConnectionToThisProcess(t *testing.T) {
 }
 
 func TestTheCallSiteReadsThePredicateAndNotTheTag(t *testing.T) {
+	withDoorTestTunnel(t, "DIRECT")
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)

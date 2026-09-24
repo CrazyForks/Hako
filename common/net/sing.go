@@ -46,6 +46,33 @@ func NewDeadlineConn(conn net.Conn) ExtendedConn {
 	return deadline.NewConn(conn)
 }
 
+type DeferredHandshakeConn interface {
+	HandshakeDeferred() bool
+	HandshakeSuccess() error
+	HandshakeFailure(err error) error
+}
+
+func HandshakePending(conn any) bool {
+	pending, ok := common.Cast[DeferredHandshakeConn](conn)
+	return ok && pending.HandshakeDeferred()
+}
+
+func ReportDeferredHandshake(conn any, err error) error {
+	deferred, ok := common.Cast[DeferredHandshakeConn](conn)
+	if !ok {
+		return nil
+	}
+	if err != nil {
+		return deferred.HandshakeFailure(err)
+	}
+	return deferred.HandshakeSuccess()
+}
+
+func TransportPending(conn any) bool {
+	pending, ok := common.Cast[interface{ TransportPending() bool }](conn)
+	return ok && pending.TransportPending()
+}
+
 func NeedHandshake(conn any) bool {
 	if earlyConn, isEarlyConn := common.Cast[network.EarlyConn](conn); isEarlyConn && earlyConn.NeedHandshake() {
 		return true

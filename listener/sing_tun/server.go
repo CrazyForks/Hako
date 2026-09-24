@@ -143,6 +143,7 @@ func New(options LC.Tun, tunnel C.Tunnel, additions ...inbound.Addition) (l *Lis
 		}
 	}
 	ctx := context.TODO()
+	tun.SetDeferredCompletionObserver(func(line string) { log.Debugln("[TUN] %s", line) })
 	rpTunnel := tunnel.(P.Tunnel)
 	if options.GSOMaxSize == 0 {
 		options.GSOMaxSize = 65536
@@ -420,6 +421,7 @@ func New(options LC.Tun, tunnel C.Tunnel, additions ...inbound.Addition) (l *Lis
 		InterfaceMonitor:                      defaultInterfaceMonitor,
 		EXP_RecvMsgX:                          options.RecvMsgX,
 		EXP_SendMsgX:                          options.SendMsgX,
+		EXP_ProcessorsPerChannel:              options.ProcessorsPerChannel,
 	}
 
 	if options.AutoRedirect {

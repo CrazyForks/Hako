@@ -12,6 +12,7 @@ import (
 	"github.com/TokenPLS/Hako/adapter/outbound"
 	"github.com/TokenPLS/Hako/common/atomic"
 	"github.com/TokenPLS/Hako/common/utils"
+	"github.com/TokenPLS/Hako/component/pause"
 	C "github.com/TokenPLS/Hako/constant"
 	P "github.com/TokenPLS/Hako/constant/provider"
 	"github.com/TokenPLS/Hako/log"
@@ -34,7 +35,8 @@ type GroupBase struct {
 	failedTesting     atomic.Bool
 	testTimeout       int
 	maxFailedTimes    int
-	emptyFallback     C.Proxy
+	lastSilentCheck atomic.TypedValue[time.Time]
+	emptyFallback   C.Proxy
 
 	// for GetProxies
 	getProxiesMutex  sync.Mutex
@@ -272,6 +274,8 @@ func (gb *GroupBase) URLTest(ctx context.Context, url string, expectedStatus uti
 	}
 }
 
+const silentHealthCheckInterval = time.Minute
+
 func (gb *GroupBase) onDialFailed(adapterType C.AdapterType, err error, fn func()) {
 	if adapterType == C.Direct || adapterType == C.Compatible || adapterType == C.Reject || adapterType == C.Pass || adapterType == C.RejectDrop {
 		return
@@ -302,6 +306,17 @@ func (gb *GroupBase) onDialFailed(adapterType C.AdapterType, err error, fn func(
 
 			log.Debugln("ProxyGroup: %s failed count: %d", gb.Name(), gb.failedTimes)
 			if gb.failedTimes >= gb.maxFailedTimes {
+				if pause.IsDevicePaused() || pause.IsNetworkPaused() {
+					log.Debugln("ProxyGroup: %s failed %d times while paused; no health check", gb.Name(), gb.failedTimes)
+					return
+				}
+				if pause.IsBearerSilent() {
+					if last := gb.lastSilentCheck.Load(); !last.IsZero() && time.Since(last) < silentHealthCheckInterval {
+						log.Debugln("ProxyGroup: %s failed %d times while the bearer is silent; the next check waits", gb.Name(), gb.failedTimes)
+						return
+					}
+					gb.lastSilentCheck.Store(time.Now())
+				}
 				log.Warnln("because %s failed multiple times, activate health check", gb.Name())
 				fn()
 			}

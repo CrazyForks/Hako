@@ -12,7 +12,7 @@ import (
 
 	"github.com/TokenPLS/Hako/component/ca"
 	"github.com/TokenPLS/Hako/tunnel"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 func TestControlledDialerProxyChainInterop(t *testing.T) {

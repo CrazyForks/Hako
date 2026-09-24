@@ -245,5 +245,14 @@ func newHandler(resolver resolver.Resolver, mapper *ResolverEnhancer) handler {
 		middlewares = append(middlewares, withMapping(mapper.mapping))
 	}
 
-	return compose(middlewares, withResolver(resolver, mapper.ipv6))
+	return withIPQueryPolicy(compose(middlewares, withResolver(resolver, mapper.ipv6)))
+}
+
+func withIPQueryPolicy(next handler) handler {
+	return func(ctx *icontext.DNSContext, r *D.Msg) (*D.Msg, error) {
+		if len(r.Question) > 0 && !resolver.CurrentIPQueryPolicy().AllowsQueryType(r.Question[0].Qtype) {
+			return handleMsgWithEmptyAnswer(r), nil
+		}
+		return next(ctx, r)
+	}
 }

@@ -14,7 +14,7 @@ import (
 	rules "github.com/TokenPLS/Hako/rules"
 	rulecommon "github.com/TokenPLS/Hako/rules/common"
 	ruleprovider "github.com/TokenPLS/Hako/rules/provider"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 const maximumProviderResourceBytes = 16 * 1024 * 1024

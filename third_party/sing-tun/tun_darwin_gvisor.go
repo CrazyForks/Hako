@@ -53,7 +53,7 @@ func (t *NativeTun) NewEndpoint() (stack.LinkEndpoint, stack.NICOptions, error) 
 		FDs:                  []int{t.tunFd},
 		MTU:                  t.options.MTU,
 		RXChecksumOffload:    true,
-		ProcessorsPerChannel: 1,
+		ProcessorsPerChannel: t.options.EXP_ProcessorsPerChannel,
 		RecvMsgX:             t.options.EXP_RecvMsgX,
 		SendMsgX:             t.options.EXP_SendMsgX,
 	})
@@ -63,19 +63,21 @@ func (t *NativeTun) NewEndpoint() (stack.LinkEndpoint, stack.NICOptions, error) 
 	GVisorPacketIOSnapshot = func() GVisorPacketIOReport {
 		snapshot := fdbased.PacketIOStatsSnapshot()
 		return GVisorPacketIOReport{
-			IngressReadCalls:       snapshot.IngressReadCalls,
-			IngressReadWouldBlock:  snapshot.IngressReadWouldBlock,
-			IngressReadPackets:     snapshot.IngressReadPackets,
-			IngressReadBytes:       snapshot.IngressReadBytes,
-			IngressReadErrors:      snapshot.IngressReadErrors,
-			IngressDispatchPackets: snapshot.IngressDispatchPackets,
-			IngressDispatchBytes:   snapshot.IngressDispatchBytes,
-			ProcessorQueueDepth:    snapshot.ProcessorQueueDepth,
-			ProcessorQueuePeak:     snapshot.ProcessorQueuePeak,
-			EgressWriteCalls:       snapshot.EgressWriteCalls,
-			EgressWritePackets:     snapshot.EgressWritePackets,
-			EgressWriteBytes:       snapshot.EgressWriteBytes,
-			EgressWriteErrors:      snapshot.EgressWriteErrors,
+			IngressReadCalls:         snapshot.IngressReadCalls,
+			IngressReadWouldBlock:    snapshot.IngressReadWouldBlock,
+			IngressReadPackets:       snapshot.IngressReadPackets,
+			IngressReadBytes:         snapshot.IngressReadBytes,
+			IngressReadErrors:        snapshot.IngressReadErrors,
+			IngressDispatchPackets:   snapshot.IngressDispatchPackets,
+			IngressDispatchBytes:     snapshot.IngressDispatchBytes,
+			ProcessorQueueDepth:      snapshot.ProcessorQueueDepth,
+			ProcessorQueuePeak:       snapshot.ProcessorQueuePeak,
+			EgressWriteCalls:         snapshot.EgressWriteCalls,
+			EgressWritePackets:       snapshot.EgressWritePackets,
+			EgressWriteBytes:         snapshot.EgressWriteBytes,
+			EgressWriteErrors:        snapshot.EgressWriteErrors,
+			EgressWriteWaits:         snapshot.EgressWriteWaits,
+			EgressWriteWaitExhausted: snapshot.EgressWriteWaitExhausted,
 		}
 	}
 	return ep, stack.NICOptions{

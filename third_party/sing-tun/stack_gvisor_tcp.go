@@ -15,6 +15,7 @@ import (
 	"github.com/metacubex/sing-tun/internal/gtcpip/checksum"
 	"github.com/metacubex/sing/common"
 	M "github.com/metacubex/sing/common/metadata"
+	N "github.com/metacubex/sing/common/network"
 )
 
 type TCPForwarder struct {
@@ -25,7 +26,10 @@ type TCPForwarder struct {
 	inet6LoopbackAddress []tcpip.Address
 	tun                  GVisorTun
 	forwarder            *tcp.Forwarder
+	deferred *deferredFlowGroup
 }
+
+func (f *TCPForwarder) Close() { f.deferred.shutdown() }
 
 func NewTCPForwarder(ctx context.Context, stack *stack.Stack, handler Handler) *TCPForwarder {
 	return NewTCPForwarderWithLoopback(ctx, stack, handler, nil, nil, nil)
@@ -39,6 +43,7 @@ func NewTCPForwarderWithLoopback(ctx context.Context, stack *stack.Stack, handle
 		inet4LoopbackAddress: common.Map(inet4LoopbackAddress, AddressFromAddr),
 		inet6LoopbackAddress: common.Map(inet6LoopbackAddress, AddressFromAddr),
 		tun:                  tun,
+		deferred:             newDeferredFlowGroup(),
 	}
 	forwarder.forwarder = tcp.NewForwarder(stack, 0, 1024, forwarder.Forward)
 	return forwarder
@@ -77,6 +82,16 @@ func (f *TCPForwarder) HandlePacket(id stack.TransportEndpointID, pkt *stack.Pac
 }
 
 func (f *TCPForwarder) Forward(r *tcp.ForwarderRequest) {
+	id := r.ID()
+	source := M.SocksaddrFrom(AddrFromAddress(id.RemoteAddress), id.RemotePort)
+	destination := M.SocksaddrFrom(AddrFromAddress(id.LocalAddress), id.LocalPort)
+	if _, err := f.handler.PrepareConnection(N.NetworkTCP, source, destination, nil, 0); err != nil {
+		r.Complete(true)
+		return
+	}
+	if f.forwardTCPDeferred(r, source, destination) {
+		return
+	}
 	var wq waiter.Queue
 	handshakeCtx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -114,4 +129,30 @@ func (f *TCPForwarder) Forward(r *tcp.ForwarderRequest) {
 
 func configureForwardedTCPEndpoint(endpoint tcpip.Endpoint) {
 	endpoint.SocketOptions().SetKeepAlive(true)
+}
+
+func (f *TCPForwarder) forwardTCPDeferred(r *tcp.ForwarderRequest, source, destination M.Socksaddr) bool {
+	deferrer, ok := f.handler.(DeferredHandshakeHandler)
+	if !ok || !deferrer.DeferHandshake(N.NetworkTCP, source, destination) {
+		return false
+	}
+	if !f.deferred.enter() {
+		return false
+	}
+	defer f.deferred.leave()
+	if !acquireDeferredHandshake() {
+		noteDeferredBudgetSpent(f.ctx, f.handler)
+		return false
+	}
+	defer releaseDeferredHandshake()
+	conn := newGVisorLazyConn(f.ctx, r, f.deferred.done(), destination.TCPAddr(), source.TCPAddr())
+	metadata := M.Metadata{Source: source, Destination: destination}
+	go func() {
+		if err := f.handler.NewConnection(f.ctx, conn, metadata); err != nil {
+			_ = conn.SetLinger(0)
+			_ = conn.Close()
+		}
+	}()
+	conn.waitForVerdict(f.deferred.done())
+	return true
 }

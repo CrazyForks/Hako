@@ -44,6 +44,9 @@ func (f *UDPForwarder) HandlePacket(id stack.TransportEndpointID, pkt *stack.Pac
 	if upstreamMetadata.Source.IsIPv4() {
 		proto = header.IPv4ProtocolNumber
 	}
+	if _, err := f.handler.PrepareConnection(N.NetworkUDP, upstreamMetadata.Source, upstreamMetadata.Destination, nil, 0); err != nil {
+		return false
+	}
 	gBuffer := pkt.Data().ToBuffer()
 	sBuffer := buf.NewSize(int(gBuffer.Size()))
 	gBuffer.Apply(func(view *buffer.View) {
@@ -56,10 +59,12 @@ func (f *UDPForwarder) HandlePacket(id stack.TransportEndpointID, pkt *stack.Pac
 		upstreamMetadata,
 		func(natConn N.PacketConn) N.PacketWriter {
 			return &UDPBackWriter{
-				stack:         f.stack,
-				source:        id.RemoteAddress,
-				sourcePort:    id.RemotePort,
-				sourceNetwork: proto,
+				stack:           f.stack,
+				source:          id.RemoteAddress,
+				sourcePort:      id.RemotePort,
+				sourceNetwork:   proto,
+				destination:     id.LocalAddress,
+				destinationPort: id.LocalPort,
 			}
 		},
 	)
@@ -72,6 +77,67 @@ type UDPBackWriter struct {
 	source        tcpip.Address
 	sourcePort    uint16
 	sourceNetwork tcpip.NetworkProtocolNumber
+	destination     tcpip.Address
+	destinationPort uint16
+}
+
+func (w *UDPBackWriter) ReportUnreachable() error {
+	if w.destination.Len() == 0 {
+		return os.ErrInvalid
+	}
+	appAddr := AddrFromAddress(w.source)
+	remoteAddr := AddrFromAddress(w.destination)
+	if !udpUnreachableAnswerable(appAddr, remoteAddr) || !w.stack.AllowICMPMessage() {
+		return nil
+	}
+	quote := udpUnreachableQuote(netip.AddrPortFrom(appAddr, w.sourcePort), netip.AddrPortFrom(remoteAddr, w.destinationPort))
+
+	route, err := w.stack.FindRoute(DefaultNIC, w.destination, w.source, w.sourceNetwork, false)
+	if err != nil {
+		return gonet.TranslateNetstackError(err)
+	}
+	defer route.Release()
+
+	var (
+		message  []byte
+		protocol tcpip.TransportProtocolNumber
+	)
+	if w.sourceNetwork == header.IPv4ProtocolNumber {
+		message = make([]byte, header.ICMPv4MinimumSize+len(quote))
+		icmpHdr := header.ICMPv4(message)
+		icmpHdr.SetType(header.ICMPv4DstUnreachable)
+		icmpHdr.SetCode(header.ICMPv4PortUnreachable)
+		copy(icmpHdr.Payload(), quote)
+		icmpHdr.SetChecksum(header.ICMPv4Checksum(icmpHdr[:header.ICMPv4MinimumSize], checksum.Checksum(quote, 0)))
+		protocol = header.ICMPv4ProtocolNumber
+	} else {
+		message = make([]byte, header.ICMPv6DstUnreachableMinimumSize+len(quote))
+		icmpHdr := header.ICMPv6(message)
+		icmpHdr.SetType(header.ICMPv6DstUnreachable)
+		icmpHdr.SetCode(header.ICMPv6PortUnreachable)
+		copy(icmpHdr.Payload(), quote)
+		icmpHdr.SetChecksum(header.ICMPv6Checksum(header.ICMPv6ChecksumParams{
+			Header:      icmpHdr[:header.ICMPv6DstUnreachableMinimumSize],
+			Src:         route.LocalAddress(),
+			Dst:         route.RemoteAddress(),
+			PayloadCsum: checksum.Checksum(quote, 0),
+			PayloadLen:  len(quote),
+		}))
+		protocol = header.ICMPv6ProtocolNumber
+	}
+	packet := stack.NewPacketBuffer(stack.PacketBufferOptions{
+		ReserveHeaderBytes: int(route.MaxHeaderLength()),
+		Payload:            buffer.MakeWithData(message),
+	})
+	defer packet.DecRef()
+	packet.TransportProtocolNumber = protocol
+	if err := route.WritePacket(stack.NetworkHeaderParams{
+		Protocol: protocol,
+		TTL:      route.DefaultTTL(),
+	}, packet); err != nil {
+		return gonet.TranslateNetstackError(err)
+	}
+	return nil
 }
 
 func (w *UDPBackWriter) WritePacket(packetBuffer *buf.Buffer, destination M.Socksaddr) error {

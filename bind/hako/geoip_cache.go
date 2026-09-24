@@ -13,7 +13,7 @@ import (
 	"github.com/TokenPLS/Hako/config"
 	C "github.com/TokenPLS/Hako/constant"
 	"github.com/TokenPLS/Hako/log"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 func GeoIPCountriesIn(content string) []string {

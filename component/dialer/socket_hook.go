@@ -2,6 +2,7 @@ package dialer
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/netip"
 	"syscall"
@@ -20,6 +21,8 @@ var SocketHookScopesInterfaceOnly bool
 type AddressTransform func(network string, destination netip.Addr) (netip.Addr, error)
 
 var DefaultAddressTransform AddressTransform
+
+var ErrPhysicalIPv6Unavailable = errors.New("physical path does not support IPv6")
 
 func TransformPhysicalAddress(network string, destination netip.Addr) (netip.Addr, error) {
 	if DefaultAddressTransform == nil || !destination.IsValid() {

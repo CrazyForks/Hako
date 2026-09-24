@@ -149,3 +149,57 @@ func TestRegisteringWhileAlreadyPausedStopsImmediately(t *testing.T) {
 			"sleeps would restart the very traffic the pause exists to stop", got)
 	}
 }
+
+func TestBothPausesAreVisibleIndependently(t *testing.T) {
+	t.Cleanup(func() {
+		DeviceWake()
+		NetworkWake()
+	})
+	DeviceWake()
+	NetworkWake()
+	if IsDevicePaused() || IsNetworkPaused() {
+		t.Fatal("precondition: nothing paused")
+	}
+
+	DevicePause()
+	if !IsDevicePaused() || IsNetworkPaused() {
+		t.Fatal("a device pause must not read as a network pause")
+	}
+
+	NetworkPause()
+	if !IsDevicePaused() || !IsNetworkPaused() {
+		t.Fatal("both pauses must be in force")
+	}
+	NetworkWake()
+	if !IsDevicePaused() {
+		t.Fatal("a network wake must not lift the device pause -- this is the overnight case")
+	}
+	if IsNetworkPaused() {
+		t.Fatal("the network pause must be lifted")
+	}
+
+	DeviceWake()
+	if IsDevicePaused() || IsNetworkPaused() {
+		t.Fatal("both must be clear once the device wakes")
+	}
+}
+
+func TestPauseCallsAreIdempotent(t *testing.T) {
+	t.Cleanup(func() {
+		DeviceWake()
+		NetworkWake()
+	})
+	NetworkWake()
+	for range [3]struct{}{} {
+		NetworkPause()
+	}
+	if !IsNetworkPaused() {
+		t.Fatal("repeated pauses must leave it paused")
+	}
+	for range [3]struct{}{} {
+		NetworkWake()
+	}
+	if IsNetworkPaused() {
+		t.Fatal("repeated wakes must leave it awake")
+	}
+}

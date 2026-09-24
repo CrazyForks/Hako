@@ -306,6 +306,24 @@ func (c *packet) Drop() {
 	c.buff.Release()
 }
 
+type udpUnreachableReporter interface {
+	ReportUnreachable() error
+}
+
+func (c *packet) ReportUnreachable() error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	writer := *c.writer
+	if writer == nil {
+		return nil
+	}
+	reporter, ok := common.Cast[udpUnreachableReporter](writer)
+	if !ok {
+		return nil
+	}
+	return reporter.ReportUnreachable()
+}
+
 func (c *packet) InAddr() net.Addr {
 	return c.lAddr
 }

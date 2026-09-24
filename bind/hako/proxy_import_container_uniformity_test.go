@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 const canonicalProxyCorpusForContainerUniformity = `[

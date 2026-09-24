@@ -21,6 +21,9 @@ type snapshot struct {
 	retired      bool
 	closed       bool
 	close        func()
+
+	countsOnce sync.Once
+	counts     map[string]int
 }
 
 type readerHolder struct {

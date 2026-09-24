@@ -57,6 +57,16 @@ type Resolver interface {
 
 // LookupIPv4WithResolver same as LookupIPv4, but with a resolver
 func LookupIPv4WithResolver(ctx context.Context, host string, r Resolver) ([]netip.Addr, error) {
+	if CurrentIPQueryPolicy() == IPQueryIPv6Only {
+		return nil, ErrIPVersion
+	}
+	if CurrentIPQueryPolicy() != IPQueryLegacy {
+		return lookupPolicyFamily(ctx, host, r, true)
+	}
+	return lookupIPv4WithResolver(ctx, host, r)
+}
+
+func lookupIPv4WithResolver(ctx context.Context, host string, r Resolver) ([]netip.Addr, error) {
 	if node, ok := DefaultHosts.Search(host, false); ok {
 		if addrs := utils.Filter(node.IPs, func(ip netip.Addr) bool {
 			return ip.Is4()
@@ -104,9 +114,17 @@ func ResolveIPv4(ctx context.Context, host string) (netip.Addr, error) {
 
 // LookupIPv6WithResolver same as LookupIPv6, but with a resolver
 func LookupIPv6WithResolver(ctx context.Context, host string, r Resolver) ([]netip.Addr, error) {
-	if DisableIPv6 {
+	policy := CurrentIPQueryPolicy()
+	if policy == IPQueryIPv4Only || (policy == IPQueryLegacy && DisableIPv6) {
 		return nil, ErrIPv6Disabled
 	}
+	if policy != IPQueryLegacy {
+		return lookupPolicyFamily(ctx, host, r, false)
+	}
+	return lookupIPv6WithResolver(ctx, host, r)
+}
+
+func lookupIPv6WithResolver(ctx context.Context, host string, r Resolver) ([]netip.Addr, error) {
 
 	if node, ok := DefaultHosts.Search(host, false); ok {
 		if addrs := utils.Filter(node.IPs, func(ip netip.Addr) bool {
@@ -153,6 +171,9 @@ func ResolveIPv6(ctx context.Context, host string) (netip.Addr, error) {
 
 // LookupIPWithResolver same as LookupIP, but with a resolver
 func LookupIPWithResolver(ctx context.Context, host string, r Resolver) ([]netip.Addr, error) {
+	if policy := CurrentIPQueryPolicy(); policy != IPQueryLegacy {
+		return LookupIPWithPolicy(ctx, host, r, policy)
+	}
 	if node, ok := DefaultHosts.Search(host, false); ok {
 		return node.IPs, nil
 	}
@@ -187,6 +208,11 @@ func ResolveIPWithResolver(ctx context.Context, host string, r Resolver) (netip.
 	} else if len(ips) == 0 {
 		return netip.Addr{}, fmt.Errorf("%w: %s", ErrIPNotFound, host)
 	}
+	if CurrentIPQueryPolicy() != IPQueryLegacy {
+		family := ips[0].Unmap().Is4()
+		choices := utils.Filter(ips, func(ip netip.Addr) bool { return ip.Unmap().Is4() == family })
+		return choices[randv2.IntN(len(choices))], nil
+	}
 	ipv4s, ipv6s := SortationAddr(ips)
 	if len(ipv4s) > 0 {
 		return ipv4s[randv2.IntN(len(ipv4s))], nil
@@ -206,6 +232,11 @@ func ResolveIPPrefer6WithResolver(ctx context.Context, host string, r Resolver) 
 		return netip.Addr{}, err
 	} else if len(ips) == 0 {
 		return netip.Addr{}, fmt.Errorf("%w: %s", ErrIPNotFound, host)
+	}
+	if CurrentIPQueryPolicy() != IPQueryLegacy {
+		family := ips[0].Unmap().Is4()
+		choices := utils.Filter(ips, func(ip netip.Addr) bool { return ip.Unmap().Is4() == family })
+		return choices[randv2.IntN(len(choices))], nil
 	}
 	ipv4s, ipv6s := SortationAddr(ips)
 	if len(ipv6s) > 0 {

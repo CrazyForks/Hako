@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	syncatomic "sync/atomic"
@@ -17,8 +18,10 @@ import (
 	"github.com/TokenPLS/Hako/common/atomic"
 	N "github.com/TokenPLS/Hako/common/net"
 	"github.com/TokenPLS/Hako/common/utils"
+	"github.com/TokenPLS/Hako/component/dialer"
 	"github.com/TokenPLS/Hako/component/loopback"
 	"github.com/TokenPLS/Hako/component/nat"
+	"github.com/TokenPLS/Hako/component/pause"
 	"github.com/TokenPLS/Hako/component/process"
 	"github.com/TokenPLS/Hako/component/proxydialer"
 	"github.com/TokenPLS/Hako/component/resolver"
@@ -82,6 +85,10 @@ var _ proxydialer.Tunnel = Tunnel
 func (t tunnel) HandleTCPConn(conn net.Conn, metadata *C.Metadata) {
 	connCtx := icontext.NewConnContext(conn, metadata)
 	handleTCPConn(connCtx)
+}
+
+func (t tunnel) HandleTCPConnContext(ctx context.Context, conn net.Conn, metadata *C.Metadata) {
+	handleTCPConnContext(ctx, icontext.NewConnContext(conn, metadata))
 }
 
 func initUDP() {
@@ -302,6 +309,9 @@ func needLookupIP(metadata *C.Metadata) bool {
 }
 
 func preHandleMetadata(metadata *C.Metadata) error {
+	if !resolver.IsFakeIP(metadata.DstIP) && !resolver.CurrentIPQueryPolicy().AllowsAddress(metadata.DstIP) {
+		return resolver.ErrIPVersion
+	}
 	// preprocess enhanced-mode metadata
 	if needLookupIP(metadata) {
 		host, exist := resolver.FindHostByIP(metadata.DstIP)
@@ -314,7 +324,7 @@ func preHandleMetadata(metadata *C.Metadata) error {
 				metadata.DNSMode = C.DNSFakeIP
 			} else if node, ok := resolver.DefaultHosts.Search(host, false); ok {
 				// redir-host should lookup the hosts
-				metadata.DstIP, _ = node.RandIP()
+				metadata.DstIP, _ = ipStackHostAddress(node)
 			} else if node != nil && node.IsDomain {
 				metadata.Host = node.Domain
 			}
@@ -335,13 +345,26 @@ func ownerLookupUsesPackageName(cmfa bool, goos string) bool {
 
 var resolvesOwnerByPackageName = ownerLookupUsesPackageName(features.CMFA, runtime.GOOS)
 
+func lookupProxy(name string) (C.Proxy, error) {
+	configMux.RLock()
+	defer configMux.RUnlock()
+	return lookupProxyLocked(name)
+}
+
+func lookupProxyLocked(name string) (C.Proxy, error) {
+	if proxy := proxies[name]; proxy != nil {
+		return proxy, nil
+	}
+	return nil, fmt.Errorf("proxy %s not found", name)
+}
+
 func resolveMetadata(metadata *C.Metadata) (proxy C.Proxy, rule C.Rule, err error) {
+	return resolveMetadataContext(context.Background(), metadata)
+}
+
+func resolveMetadataContext(parent context.Context, metadata *C.Metadata) (proxy C.Proxy, rule C.Rule, err error) {
 	if metadata.SpecialProxy != "" {
-		var exist bool
-		proxy, exist = proxies[metadata.SpecialProxy]
-		if !exist {
-			err = fmt.Errorf("proxy %s not found", metadata.SpecialProxy)
-		}
+		proxy, err = lookupProxy(metadata.SpecialProxy)
 		return
 	}
 	var (
@@ -350,14 +373,14 @@ func resolveMetadata(metadata *C.Metadata) (proxy C.Proxy, rule C.Rule, err erro
 	)
 
 	if node, ok := resolver.DefaultHosts.Search(metadata.Host, false); ok {
-		metadata.DstIP, _ = node.RandIP()
+		metadata.DstIP, _ = ipStackHostAddress(node)
 		resolved = true
 	}
 
 	helper := C.RuleMatchHelper{
 		ResolveIP: func() {
 			if !resolved && metadata.Host != "" && !metadata.Resolved() {
-				ctx, cancel := context.WithTimeout(context.Background(), resolver.DefaultDNSTimeout)
+				ctx, cancel := context.WithTimeout(parent, resolver.DefaultDNSTimeout)
 				defer cancel()
 				ip, err := resolver.ResolveIP(ctx, metadata.Host)
 				if err != nil {
@@ -374,7 +397,8 @@ func resolveMetadata(metadata *C.Metadata) (proxy C.Proxy, rule C.Rule, err erro
 				attemptProcessLookup = false
 				if !resolvesOwnerByPackageName {
 					// normal check for process
-					uid, path, err := process.FindProcessName(metadata.NetWork.String(), metadata.SrcIP, int(metadata.SrcPort))
+					ownerDstIP, ownerDstPort := ownerDestination(metadata)
+					uid, path, err := process.FindConnectionOwner(metadata.NetWork.String(), metadata.SrcIP, int(metadata.SrcPort), ownerDstIP, ownerDstPort)
 					if err != nil {
 						log.Debugln("[Process] find process error for %s: %v", metadata.String(), err)
 					} else {
@@ -423,9 +447,9 @@ func resolveMetadata(metadata *C.Metadata) (proxy C.Proxy, rule C.Rule, err erro
 
 	switch mode {
 	case Direct:
-		proxy = proxies["DIRECT"]
+		proxy, err = lookupProxy("DIRECT")
 	case Global:
-		proxy = proxies["GLOBAL"]
+		proxy, err = lookupProxy("GLOBAL")
 	// Rule
 	default:
 		proxy, rule, err = match(metadata, helper)
@@ -478,7 +502,9 @@ func handleUDPConn(packet C.PacketAdapter) {
 				return nil, nil, err
 			}
 
-			_ = preHandleMetadata(metadata) // error was pre-checked
+			if err := preHandleMetadata(metadata); err != nil {
+				return nil, nil, err
+			}
 
 			proxy, rule, err := resolveMetadata(metadata)
 			if err != nil {
@@ -489,6 +515,10 @@ func handleUDPConn(packet C.PacketAdapter) {
 			dialMetadata := metadata.Pure()
 			ctx, cancel := context.WithTimeout(context.Background(), C.DefaultUDPTimeout)
 			defer cancel()
+			dialMetadata, err = ipStackDialMetadata(ctx, dialMetadata, !proxy.IsL3Protocol(dialMetadata))
+			if err != nil {
+				return nil, nil, err
+			}
 			rawPc, err := retry(ctx, func(ctx context.Context) (C.PacketConn, error) {
 				return proxy.ListenPacketContext(ctx, dialMetadata)
 			}, func(err error) {
@@ -498,6 +528,9 @@ func handleUDPConn(packet C.PacketAdapter) {
 				return nil, nil, err
 			}
 			logMetadata(metadata, rule, rawPc)
+			if terminalAdapterType(proxy, dialMetadata) == C.Reject {
+				reportUDPUnreachable(packet, metadata, "rejected by rule")
+			}
 
 			pc := statistic.NewUDPTracker(rawPc, statistic.DefaultManager, metadata, rule, 0, 0, true)
 
@@ -512,6 +545,7 @@ func handleUDPConn(packet C.PacketAdapter) {
 		go func() {
 			pc, proxy, err := dial()
 			if err != nil {
+				reportUDPUnreachable(packet, metadata, "the outbound could not be opened")
 				sender.Close()
 				natTable.Delete(key)
 				return
@@ -523,6 +557,10 @@ func handleUDPConn(packet C.PacketAdapter) {
 }
 
 func handleTCPConn(connCtx C.ConnContext) {
+	handleTCPConnContext(context.Background(), connCtx)
+}
+
+func handleTCPConnContext(parent context.Context, connCtx C.ConnContext) {
 	if !isHandle(connCtx.Metadata().Type) {
 		_ = connCtx.Conn().Close()
 		return
@@ -547,12 +585,15 @@ func handleTCPConn(connCtx C.ConnContext) {
 	preHandleFailed := false
 	if err := preHandleMetadata(metadata); err != nil {
 		log.Debugln("[Metadata PreHandle] error: %s", err)
+		if errors.Is(err, resolver.ErrIPVersion) {
+			return
+		}
 		preHandleFailed = true
 	}
 
 	conn := connCtx.Conn()
 	conn.ResetPeeked() // reset before sniffer
-	if sniffingEnable && snifferDispatcher.Enable() {
+	if sniffingEnable && snifferDispatcher.Enable() && !sniffingStandsAside(conn, metadata) {
 		// Try to sniff a domain when `preHandleMetadata` failed, this is usually
 		// caused by a "Fake DNS record missing" error when enhanced-mode is fake-ip.
 		if snifferDispatcher.TCPSniff(conn, metadata) {
@@ -569,7 +610,7 @@ func handleTCPConn(connCtx C.ConnContext) {
 	}
 
 	peekMutex := sync.Mutex{}
-	if !conn.Peeked() {
+	if !conn.Peeked() && !N.HandshakePending(conn) {
 		peekMutex.Lock()
 		go func() {
 			defer peekMutex.Unlock()
@@ -579,7 +620,7 @@ func handleTCPConn(connCtx C.ConnContext) {
 		}()
 	}
 
-	proxy, rule, err := resolveMetadata(metadata)
+	proxy, rule, err := resolveMetadataContext(parent, metadata)
 	if err != nil {
 		log.Warnln("[Metadata] parse failed: %s", err.Error())
 		return
@@ -588,7 +629,7 @@ func handleTCPConn(connCtx C.ConnContext) {
 	dialMetadata := metadata
 	if len(metadata.Host) > 0 {
 		if node, ok := resolver.DefaultHosts.Search(metadata.Host, false); ok {
-			if dstIp, _ := node.RandIP(); !resolver.IsFakeIP(dstIp) {
+			if dstIp, _ := ipStackHostAddress(node); !resolver.IsFakeIP(dstIp) {
 				dialMetadata.DstIP = dstIp
 				dialMetadata.DNSMode = C.DNSHosts
 				dialMetadata = dialMetadata.Pure()
@@ -599,15 +640,28 @@ func handleTCPConn(connCtx C.ConnContext) {
 	var peekBytes []byte
 	var peekLen int
 
-	ctx, cancel := context.WithTimeout(context.Background(), C.DefaultTCPTimeout)
+	ctx, cancel := context.WithTimeout(parent, C.DefaultTCPTimeout)
 	defer cancel()
+	dialMetadata, err = ipStackDialMetadata(ctx, dialMetadata, !proxy.IsL3Protocol(dialMetadata))
+	if err != nil {
+		logMetadataErr(metadata, rule, proxy, err)
+		return
+	}
+	deferred := N.HandshakePending(conn)
+	ctx = dialer.WithDialKind(ctx, dialKindOf(proxy, dialMetadata))
 	remoteConn, err := retry(ctx, func(ctx context.Context) (remoteConn C.Conn, err error) {
 		remoteConn, err = proxy.DialContext(ctx, dialMetadata)
 		if err != nil {
+			if deferred && errors.Is(err, syscall.ECONNREFUSED) && terminalAdapterType(proxy, dialMetadata) == C.Direct {
+				err = finalDialError{err}
+			}
 			return
 		}
 
 		if N.NeedHandshake(remoteConn) {
+			handshakeConn := remoteConn
+			stop := context.AfterFunc(ctx, func() { _ = handshakeConn.Close() })
+			defer stop()
 			defer func() {
 				if err != nil {
 					_ = remoteConn.Close()
@@ -620,6 +674,17 @@ func handleTCPConn(connCtx C.ConnContext) {
 					remoteConn = nil
 				}
 			}()
+			if N.HandshakePending(conn) && !N.TransportPending(remoteConn) {
+				if reportErr := N.ReportDeferredHandshake(conn, nil); reportErr != nil {
+					err = clientLeftError{reportErr}
+					return
+				}
+				if !serverSpeaksFirst(metadata.DstPort) {
+					_ = conn.SetReadDeadline(time.Now().Add(firstBytesWait))
+					_, _ = conn.Peek(1)
+					_ = conn.SetReadDeadline(time.Time{})
+				}
+			}
 			peekMutex.Lock()
 			defer peekMutex.Unlock()
 			peekBytes, _ = conn.Peek(conn.Buffered())
@@ -633,14 +698,46 @@ func handleTCPConn(connCtx C.ConnContext) {
 		}
 		return
 	}, func(err error) {
-		logMetadataErr(metadata, rule, proxy, err)
+		var left clientLeftError
+		if !errors.As(err, &left) {
+			logMetadataErr(metadata, rule, proxy, err)
+		}
 	})
-	if err != nil {
+	var left clientLeftError
+	if errors.As(err, &left) {
+		log.Debugln("[TCP] %s --> %s handshake with the client failed after the dial: %s", metadata.SourceDetail(), metadata.RemoteAddress(), left.error)
 		return
 	}
+	if err != nil {
+		if N.HandshakePending(conn) {
+			log.Debugln("[TCP] %s --> %s reset before its handshake: the dial failed", metadata.SourceDetail(), metadata.RemoteAddress())
+		}
+		_ = N.ReportDeferredHandshake(conn, err)
+		return
+	}
+	tracked := false
+	defer func(remoteConn C.Conn) {
+		if !tracked {
+			_ = remoteConn.Close()
+		}
+	}(remoteConn)
+
+	if N.HandshakePending(conn) && terminalAdapterType(proxy, dialMetadata) == C.Reject {
+		logMetadata(metadata, rule, remoteConn)
+		log.Debugln("[TCP] %s --> %s reset before its handshake: rejected by rule", metadata.SourceDetail(), metadata.RemoteAddress())
+		_ = N.ReportDeferredHandshake(conn, errRejectedByRule)
+		return
+	}
+
+	if err = N.ReportDeferredHandshake(conn, nil); err != nil {
+		log.Debugln("[TCP] %s --> %s handshake with the client failed after the dial: %s", metadata.SourceDetail(), metadata.RemoteAddress(), err)
+		return
+	}
+
 	logMetadata(metadata, rule, remoteConn)
 
 	remoteConn = statistic.NewTCPTracker(remoteConn, statistic.DefaultManager, metadata, rule, int64(peekLen), 0, true)
+	tracked = true
 	defer func(remoteConn C.Conn) {
 		_ = remoteConn.Close()
 	}(remoteConn)
@@ -653,6 +750,13 @@ func handleTCPConn(connCtx C.ConnContext) {
 }
 
 var dialOutcomeObserver syncatomic.Pointer[func(error)]
+
+func dialKindOf(proxy C.ProxyAdapter, metadata *C.Metadata) string {
+	if adapter, ok := proxy.(C.Proxy); ok && terminalAdapterType(adapter, metadata) == C.Direct {
+		return dialer.DialKindDirect
+	}
+	return dialer.DialKindProxy
+}
 
 func SetDialOutcomeObserver(observe func(error)) {
 	if observe == nil {
@@ -709,7 +813,7 @@ func match(metadata *C.Metadata, helper C.RuleMatchHelper) (C.Proxy, C.Rule, err
 		for _, rule := range getRules(metadata) {
 			if matched, ada := rule.Match(metadata, helper); matched {
 				adapter, ok := proxies[ada]
-				if !ok {
+				if !ok || adapter == nil {
 					continue
 				}
 
@@ -752,7 +856,8 @@ func match(metadata *C.Metadata, helper C.RuleMatchHelper) (C.Proxy, C.Rule, err
 			log.Debugln("[Rule] rematch proxy %s update metadata to rematch-name=%q sub-rule=%q", rematchProxy.Name(), metadata.InName, metadata.SpecialRules)
 			continue
 		}
-		return proxies["DIRECT"], nil, nil
+		proxy, err := lookupProxyLocked("DIRECT")
+		return proxy, nil, err
 	}
 }
 
@@ -766,7 +871,63 @@ func getRules(metadata *C.Metadata) []C.Rule {
 	}
 }
 
+func sniffingStandsAside(conn any, metadata *C.Metadata) bool {
+	return metadata.Host == "" &&
+		dialer.IsPhysicalGlobalIPv6(metadata.DstIP) &&
+		N.HandshakePending(conn) &&
+		WouldDialPhysically(metadata)
+}
+
+var errRejectedByRule = errors.New("rejected by rule")
+
+const firstBytesWait = 50 * time.Millisecond
+
+func serverSpeaksFirst(port uint16) bool {
+	switch port {
+	case 21, 22, 25, 110, 143, 587, 3306:
+		return true
+	}
+	return false
+}
+
+type clientLeftError struct{ error }
+
+func (e clientLeftError) Unwrap() error { return e.error }
+
+type finalDialError struct{ error }
+
+func (e finalDialError) Unwrap() error { return e.error }
+
+func terminalAdapterType(proxy C.Proxy, metadata *C.Metadata) C.AdapterType {
+	adapterType := proxy.Type()
+	for adapter := proxy.Unwrap(metadata, false); adapter != nil; adapter = adapter.Unwrap(metadata, false) {
+		adapterType = adapter.Type()
+	}
+	return adapterType
+}
+
+func reportUDPUnreachable(packet C.UDPPacket, metadata *C.Metadata, why string) {
+	if pause.IsNetworkPaused() {
+		return
+	}
+	if err := C.ReportUDPUnreachable(packet); err != nil {
+		log.Debugln("[UDP] %s --> %s could not be answered unreachable: %s", metadata.SourceDetail(), metadata.RemoteAddress(), err)
+		return
+	}
+	if metadata.Type == C.TUN {
+		log.Debugln("[UDP] %s --> %s answered port unreachable: %s", metadata.SourceDetail(), metadata.RemoteAddress(), why)
+	}
+}
+
 func shouldStopRetry(err error) bool {
+	var final finalDialError
+	if errors.As(err, &final) {
+		return true
+	}
+	var left clientLeftError
+	if errors.As(err, &left) {
+		return true
+	}
 	if errors.Is(err, resolver.ErrIPNotFound) {
 		return true
 	}

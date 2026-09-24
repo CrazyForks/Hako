@@ -3,6 +3,7 @@ package dns
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/netip"
 	"reflect"
 	"sync"
@@ -103,7 +104,7 @@ func (r *Resolver) LookupIP(ctx context.Context, host string) (ips []netip.Addr,
 	select {
 	case ipv6s, open := <-ch:
 		if !open && err != nil {
-			return nil, resolver.ErrIPNotFound
+			return nil, fmt.Errorf("%w: %w", resolver.ErrIPNotFound, err)
 		}
 		ips = append(ips, ipv6s...)
 	case <-waitIPv6.C:
@@ -158,6 +159,9 @@ func (r *Resolver) ResolveECH(ctx context.Context, host string) ([]byte, error) 
 func (r *Resolver) ExchangeContext(ctx context.Context, m *D.Msg) (msg *D.Msg, err error) {
 	if len(m.Question) == 0 {
 		return nil, errors.New("should have one question at least")
+	}
+	if msg, ok, err := exchangeLocalZone(ctx, m); ok {
+		return msg, err
 	}
 	continueFetch := false
 	defer func() {
@@ -594,6 +598,7 @@ func NewResolver(config Config) (rs Resolvers) {
 		NameServer
 		dnsClient
 	}
+	var substituteClients []*systemSubstituteClient
 	cacheTransform := func(nameserver []NameServer) (result []dnsClient) {
 	LOOP:
 		for _, ns := range nameserver {
@@ -615,6 +620,10 @@ func NewResolver(config Config) (rs Resolvers) {
 					continue
 				}
 				dc = built[0]
+			}
+			if wrapper := newSystemSubstitute(ns, dc); wrapper != nil {
+				dc = wrapper
+				substituteClients = append(substituteClients, wrapper)
 			}
 			nameServerCache = append(nameServerCache, struct {
 				NameServer
@@ -645,7 +654,9 @@ func NewResolver(config Config) (rs Resolvers) {
 				if triePolicy == nil {
 					triePolicy = trie.New[[]dnsClient]()
 				}
-				_ = triePolicy.Insert(policy.Domain, cacheTransform(policy.NameServers))
+				if err := triePolicy.Insert(policy.Domain, cacheTransform(policy.NameServers)); err != nil {
+					log.Warnln("[DNS] skip invalid nameserver policy: %s", err)
+				}
 			}
 		}
 		insertPolicy(nil)
@@ -691,6 +702,12 @@ func NewResolver(config Config) (rs Resolvers) {
 		r.fallbackLazyQuery = config.FallbackLazyQuery
 	}
 
+	for i, ns := range config.Default {
+		if i < len(defaultResolver.main) {
+			defaultResolver.main[i] = wrapSystemSubstitute(ns, defaultResolver.main[i])
+		}
+	}
+	wireSubstituteFallbacks(rs, substituteClients)
 	return
 }
 

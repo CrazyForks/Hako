@@ -116,6 +116,8 @@ type Options struct {
 
 	EXP_RecvMsgX bool
 	EXP_SendMsgX bool
+
+	EXP_ProcessorsPerChannel int
 }
 
 func (o *Options) Inet4GatewayAddr() netip.Addr {

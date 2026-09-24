@@ -10,7 +10,7 @@ import (
 	"github.com/TokenPLS/Hako/component/geodata/compiled"
 	C "github.com/TokenPLS/Hako/constant"
 	"github.com/TokenPLS/Hako/log"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 func GeoSiteCategoriesIn(content string) []string {

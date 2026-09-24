@@ -41,6 +41,9 @@ func (d *DNSDialer) DialContext(ctx context.Context, network, addr string) (net.
 	if err != nil {
 		return nil, err
 	}
+	if !resolver.CurrentIPQueryPolicy().AllowsAddress(metadata.DstIP) {
+		return nil, resolver.ErrIPVersion
+	}
 	if !strings.Contains(network, "tcp") {
 		metadata.NetWork = C.UDP
 		if !metadata.Resolved() {
@@ -140,6 +143,9 @@ func (d *DNSDialer) ListenPacket(ctx context.Context, network, addr string) (net
 	err := metadata.SetRemoteAddress(addr)
 	if err != nil {
 		return nil, err
+	}
+	if !resolver.CurrentIPQueryPolicy().AllowsAddress(metadata.DstIP) {
+		return nil, resolver.ErrIPVersion
 	}
 	if !metadata.Resolved() {
 		// udp must resolve host first

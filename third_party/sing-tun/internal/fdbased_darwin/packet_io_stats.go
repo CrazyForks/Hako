@@ -20,19 +20,23 @@ type PacketIOStats struct {
 	EgressWritePackets     uint64
 	EgressWriteBytes       uint64
 	EgressWriteErrors      uint64
+	EgressWriteWaits         uint64
+	EgressWriteWaitExhausted uint64
 }
 
 var packetIOCounters struct {
-	ingressReadPackets     atomic.Uint64
-	ingressReadBytes       atomic.Uint64
-	ingressDispatchPackets atomic.Uint64
-	ingressDispatchBytes   atomic.Uint64
-	processorQueueDepth    atomic.Uint64
-	processorQueuePeak     atomic.Uint64
-	egressWriteCalls       atomic.Uint64
-	egressWritePackets     atomic.Uint64
-	egressWriteBytes       atomic.Uint64
-	egressWriteErrors      atomic.Uint64
+	ingressReadPackets       atomic.Uint64
+	ingressReadBytes         atomic.Uint64
+	ingressDispatchPackets   atomic.Uint64
+	ingressDispatchBytes     atomic.Uint64
+	processorQueueDepth      atomic.Uint64
+	processorQueuePeak       atomic.Uint64
+	egressWriteCalls         atomic.Uint64
+	egressWritePackets       atomic.Uint64
+	egressWriteBytes         atomic.Uint64
+	egressWriteErrors        atomic.Uint64
+	egressWriteWaits         atomic.Uint64
+	egressWriteWaitExhausted atomic.Uint64
 }
 
 func ResetPacketIOStats() {
@@ -47,24 +51,28 @@ func ResetPacketIOStats() {
 	packetIOCounters.egressWritePackets.Store(0)
 	packetIOCounters.egressWriteBytes.Store(0)
 	packetIOCounters.egressWriteErrors.Store(0)
+	packetIOCounters.egressWriteWaits.Store(0)
+	packetIOCounters.egressWriteWaitExhausted.Store(0)
 }
 
 func PacketIOStatsSnapshot() PacketIOStats {
 	read := rawfile.PacketReadStatsSnapshot()
 	return PacketIOStats{
-		IngressReadCalls:       read.Syscalls,
-		IngressReadWouldBlock:  read.WouldBlock,
-		IngressReadPackets:     packetIOCounters.ingressReadPackets.Load(),
-		IngressReadBytes:       packetIOCounters.ingressReadBytes.Load(),
-		IngressReadErrors:      read.Errors,
-		IngressDispatchPackets: packetIOCounters.ingressDispatchPackets.Load(),
-		IngressDispatchBytes:   packetIOCounters.ingressDispatchBytes.Load(),
-		ProcessorQueueDepth:    packetIOCounters.processorQueueDepth.Load(),
-		ProcessorQueuePeak:     packetIOCounters.processorQueuePeak.Load(),
-		EgressWriteCalls:       packetIOCounters.egressWriteCalls.Load(),
-		EgressWritePackets:     packetIOCounters.egressWritePackets.Load(),
-		EgressWriteBytes:       packetIOCounters.egressWriteBytes.Load(),
-		EgressWriteErrors:      packetIOCounters.egressWriteErrors.Load(),
+		IngressReadCalls:         read.Syscalls,
+		IngressReadWouldBlock:    read.WouldBlock,
+		IngressReadPackets:       packetIOCounters.ingressReadPackets.Load(),
+		IngressReadBytes:         packetIOCounters.ingressReadBytes.Load(),
+		IngressReadErrors:        read.Errors,
+		IngressDispatchPackets:   packetIOCounters.ingressDispatchPackets.Load(),
+		IngressDispatchBytes:     packetIOCounters.ingressDispatchBytes.Load(),
+		ProcessorQueueDepth:      packetIOCounters.processorQueueDepth.Load(),
+		ProcessorQueuePeak:       packetIOCounters.processorQueuePeak.Load(),
+		EgressWriteCalls:         packetIOCounters.egressWriteCalls.Load(),
+		EgressWritePackets:       packetIOCounters.egressWritePackets.Load(),
+		EgressWriteBytes:         packetIOCounters.egressWriteBytes.Load(),
+		EgressWriteErrors:        packetIOCounters.egressWriteErrors.Load(),
+		EgressWriteWaits:         packetIOCounters.egressWriteWaits.Load(),
+		EgressWriteWaitExhausted: packetIOCounters.egressWriteWaitExhausted.Load(),
 	}
 }
 
@@ -110,4 +118,12 @@ func recordEgressWriteSuccess(packets uint64, bytes uint64) {
 
 func recordEgressWriteError() {
 	packetIOCounters.egressWriteErrors.Add(1)
+}
+
+func recordEgressWriteWait() {
+	packetIOCounters.egressWriteWaits.Add(1)
+}
+
+func recordEgressWriteWaitExhausted() {
+	packetIOCounters.egressWriteWaitExhausted.Add(1)
 }

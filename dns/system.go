@@ -3,6 +3,7 @@ package dns
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -66,9 +67,47 @@ func newSystemClient() *systemClient {
 }
 
 func init() {
+	SetSystemResolverDefaults(nil)
+}
+
+func SetSystemResolverDefaults(servers []string) {
+	nameServers := make([]NameServer, 0, len(servers))
+	for _, server := range servers {
+		if server == "" {
+			continue
+		}
+		if _, _, err := net.SplitHostPort(server); err != nil {
+			server = net.JoinHostPort(strings.Trim(server, "[]"), "53")
+		}
+		nameServers = append(nameServers, NameServer{Addr: server})
+	}
+	if len(nameServers) == 0 {
+		nameServers = []NameServer{{Addr: "114.114.114.114:53"}, {Addr: "8.8.8.8:53"}}
+	}
 	r := NewResolver(Config{})
 	c := newSystemClient()
-	c.defaultNS = transform([]NameServer{{Addr: "114.114.114.114:53"}, {Addr: "8.8.8.8:53"}}, nil)
+	c.defaultNS = transform(nameServers, nil)
+	for i, ns := range nameServers {
+		c.defaultNS[i] = wrapSystemSubstitute(ns, c.defaultNS[i])
+	}
 	r.main = []dnsClient{c}
 	resolver.SystemResolver = r
+	addrs := make([]string, 0, len(nameServers))
+	for _, ns := range nameServers {
+		addrs = append(addrs, ns.Addr)
+	}
+	systemResolverDefaultsMu.Lock()
+	systemResolverDefaults = addrs
+	systemResolverDefaultsMu.Unlock()
 }
+
+func SystemResolverDefaultAddresses() []string {
+	systemResolverDefaultsMu.Lock()
+	defer systemResolverDefaultsMu.Unlock()
+	return append([]string(nil), systemResolverDefaults...)
+}
+
+var (
+	systemResolverDefaultsMu sync.Mutex
+	systemResolverDefaults   []string
+)

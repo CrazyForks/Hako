@@ -10,7 +10,7 @@ import (
 
 	P "github.com/TokenPLS/Hako/constant/provider"
 	ruleprovider "github.com/TokenPLS/Hako/rules/provider"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 func TestFinalizeRewritesHTTPProviderToFile(t *testing.T) {

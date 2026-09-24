@@ -27,6 +27,8 @@ type GVisorPacketIOReport struct {
 	EgressWritePackets     uint64
 	EgressWriteBytes       uint64
 	EgressWriteErrors      uint64
+	EgressWriteWaits         uint64
+	EgressWriteWaitExhausted uint64
 }
 
 var GVisorPacketIOSnapshot func() GVisorPacketIOReport

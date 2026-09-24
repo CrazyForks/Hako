@@ -11,7 +11,7 @@ import (
 	P "github.com/TokenPLS/Hako/constant/provider"
 	"github.com/TokenPLS/Hako/log"
 	ruleprovider "github.com/TokenPLS/Hako/rules/provider"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 const maximumExpandedRoutePrefixes = 65_536

@@ -1,6 +1,7 @@
 package tun
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -151,7 +152,45 @@ func (t *NativeTun) Read(p []byte) (n int, err error) {
 }
 
 func (t *NativeTun) Write(p []byte) (n int, err error) {
-	return t.tunFile.Write(p)
+	for waits := 0; ; {
+		n, err = t.tunFile.Write(p)
+		if err == nil || !tunWriteBufferFull(err) {
+			return
+		}
+		if !rawfile.WaitBufferFull(waits) {
+			recordTunEgressWaitExhausted()
+			return
+		}
+		waits++
+		recordTunEgressWait()
+	}
+}
+
+func tunWriteBufferFull(err error) bool {
+	var errno syscall.Errno
+	return errors.As(err, &errno) && rawfile.BufferFull(unix.Errno(errno))
+}
+
+func writeIovecWaitingForRoom(fd int, iovecs []unix.Iovec) unix.Errno {
+	waits := 0
+	for {
+		errno := rawfile.NonBlockingWriteIovec(fd, iovecs)
+		switch {
+		case errno == 0:
+			return 0
+		case errno == unix.EINTR:
+			continue
+		case !rawfile.BufferFull(errno):
+			return errno
+		case rawfile.WaitBufferFull(waits):
+			waits++
+			recordTunEgressWait()
+			continue
+		default:
+			recordTunEgressWaitExhausted()
+			return errno
+		}
+	}
 }
 
 var (
@@ -391,7 +430,7 @@ func (t *NativeTun) BatchWrite(buffers []*buf.Buffer) error {
 			t.iovecsOutput[i].nextIovecsOutput(buffer)
 		}
 		for i := range buffers {
-			errno := rawfile.NonBlockingWriteIovec(t.tunFd, t.iovecsOutput[i].iovecs)
+			errno := writeIovecWaitingForRoom(t.tunFd, t.iovecsOutput[i].iovecs)
 			if errno != 0 {
 				return errno
 			}
@@ -403,12 +442,24 @@ func (t *NativeTun) BatchWrite(buffers []*buf.Buffer) error {
 			t.msgHdrsOutput[i].Msg.Iov = &iovecs[0]
 			t.msgHdrsOutput[i].Msg.Iovlen = 2
 		}
-		var n int
+		var n, waits int
 		for n != len(buffers) {
 			sent, errno := rawfile.NonBlockingSendMMsg(t.tunFd, t.msgHdrsOutput[n:len(buffers)])
 			if errno != 0 {
+				if errno == unix.EINTR {
+					continue
+				}
+				if rawfile.BufferFull(errno) && rawfile.WaitBufferFull(waits) {
+					waits++
+					recordTunEgressWait()
+					continue
+				}
+				if rawfile.BufferFull(errno) {
+					recordTunEgressWaitExhausted()
+				}
 				return errno
 			}
+			waits = 0
 			n += sent
 		}
 	}

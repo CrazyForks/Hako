@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	URL "net/url"
@@ -78,8 +79,8 @@ func HttpRequest(ctx context.Context, url, method string, header map[string][]st
 			if opt.dialer != nil {
 				return opt.dialer.DialContext(ctx, network, address)
 			}
-			if conn, err := inner.HandleTcp(inner.GetTunnel(), address, opt.specialProxy); err == nil {
-				return conn, nil
+			if conn, err := inner.HandleTcpContext(ctx, inner.GetTunnel(), address, opt.specialProxy); !errors.Is(err, inner.ErrNoTunnel) {
+				return conn, err
 			}
 			return dialer.DialContext(ctx, network, address)
 		},

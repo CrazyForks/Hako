@@ -10,7 +10,7 @@ import (
 	"github.com/TokenPLS/Hako/config"
 	"github.com/TokenPLS/Hako/dns"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 func supplySystemResolvers(t *testing.T, lines ...string) {

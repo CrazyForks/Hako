@@ -17,7 +17,7 @@ import (
 
 	"github.com/TokenPLS/Hako/adapter"
 	C "github.com/TokenPLS/Hako/constant"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 const (

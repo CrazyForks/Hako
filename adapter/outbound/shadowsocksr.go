@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/TokenPLS/Hako/component/dialer"
 	"net"
 	"strconv"
 
@@ -84,7 +85,7 @@ func (ssr *ShadowSocksR) ListenPacketContext(ctx context.Context, metadata *C.Me
 	if err := ssr.ResolveUDP(ctx, metadata); err != nil {
 		return nil, err
 	}
-	addr, err := resolveUDPAddr(ctx, "udp", ssr.addr, ssr.prefer)
+	addr, err := resolveUDPAddr(ctx, "udp", ssr.addr, ssr.prefer, dialer.IsPhysicalDialer(ssr.dialer))
 	if err != nil {
 		return nil, err
 	}

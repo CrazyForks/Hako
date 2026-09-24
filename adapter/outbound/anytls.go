@@ -21,11 +21,14 @@ import (
 
 type AnyTLS struct {
 	*Base
+	clientMu    sync.Mutex
 	client      *anytls.Client
-	clientOnce  sync.Once
+	closed      bool
 	buildClient func() *anytls.Client
 	option      *AnyTLSOption
 }
+
+var errOutboundClosed = errors.New("outbound is closed")
 
 type AnyTLSOption struct {
 	BasicOption
@@ -54,7 +57,11 @@ type AnyTLSOption struct {
 }
 
 func (t *AnyTLS) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.Conn, err error) {
-	c, err := t.lazyClient().CreateProxy(ctx, M.ParseSocksaddrHostPort(metadata.String(), metadata.DstPort))
+	client, err := t.lazyClient()
+	if err != nil {
+		return nil, err
+	}
+	c, err := client.CreateProxy(ctx, M.ParseSocksaddrHostPort(metadata.String(), metadata.DstPort))
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +74,11 @@ func (t *AnyTLS) ListenPacketContext(ctx context.Context, metadata *C.Metadata) 
 	}
 
 	// create tcp
-	c, err := t.lazyClient().CreateProxy(ctx, uot.RequestDestination(2))
+	client, err := t.lazyClient()
+	if err != nil {
+		return nil, err
+	}
+	c, err := client.CreateProxy(ctx, uot.RequestDestination(2))
 	if err != nil {
 		return nil, err
 	}
@@ -91,10 +102,15 @@ func (t *AnyTLS) ProxyInfo() C.ProxyInfo {
 
 // Close implements C.ProxyAdapter
 func (t *AnyTLS) Close() error {
-	if t.clientBuilt() {
-		return t.client.Close()
+	t.clientMu.Lock()
+	defer t.clientMu.Unlock()
+	t.closed = true
+	if t.client == nil {
+		return nil
 	}
-	return nil
+	client := t.client
+	t.client = nil
+	return client.Close()
 }
 
 func NewAnyTLS(option AnyTLSOption) (*AnyTLS, error) {
@@ -182,15 +198,20 @@ func NewAnyTLS(option AnyTLSOption) (*AnyTLS, error) {
 	return outbound, nil
 }
 
-func (t *AnyTLS) lazyClient() *anytls.Client {
-	t.clientOnce.Do(func() {
+func (t *AnyTLS) lazyClient() (*anytls.Client, error) {
+	t.clientMu.Lock()
+	defer t.clientMu.Unlock()
+	if t.closed {
+		return nil, errOutboundClosed
+	}
+	if t.client == nil {
 		t.client = t.buildClient()
-	})
-	return t.client
+	}
+	return t.client, nil
 }
 
 func (t *AnyTLS) clientBuilt() bool {
-	built := true
-	t.clientOnce.Do(func() { built = false })
-	return built
+	t.clientMu.Lock()
+	defer t.clientMu.Unlock()
+	return t.client != nil
 }

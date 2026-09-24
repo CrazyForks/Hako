@@ -39,6 +39,10 @@
 
 - `SagerNet/sing-box-for-apple`, `SagerNet/sing-box` — NE utun handoff + libbox API surface referenced.
 - `SagerNet/sing-box/common/networkquality` at `4bccd6fae19526425acf76efc263333c7aea6fce` — HTTP network-quality algorithm adapted into `bind/hako/internal/networkquality` and statically linked; GPL-3.0-or-later.
+- `SagerNet/sing-box/dns/transport/local/local_darwin.go` at `5ee65a5ca9e6a448a5fa2f47b55b51fe2fcf578d` — the mDNSResponder IPC client (framing, reply parsing, record assembly) adapted into `bind/hako/mdns_darwin.go` and statically linked; GPL-3.0-or-later. The wire protocol itself is Apple's, from its open-source mDNSResponder client stub; what is adapted here is the Go expression of it.
+- `SagerNet/sing-box/dns/transport/local/systemconfig/source_darwin.go` at `5ee65a5ca9e6a448a5fa2f47b55b51fe2fcf578d` — the dns_configuration reader (packed DNSINFO layouts, dlsym lookup, scoped-then-unscoped selection) adapted into `bind/hako/system_resolver_dnsinfo_darwin.go` and statically linked; GPL-3.0-or-later.
+- `SagerNet/sing-box/common/dialer/default.go` and `default_parallel_interface.go` at `5ee65a5ca9e6a448a5fa2f47b55b51fe2fcf578d` — the network_strategy multi-interface dial algorithm and its two timings adapted into `component/dialer/network_strategy.go` and statically linked; GPL-3.0-or-later.
+- `SagerNet/sing-box-for-apple` at `8ce05ea68cd6fe8b7aa71e279c7404274b4c5d24` — referenced for the Network Extension's socket-scoping posture; no code adapted.
 
 ## Generate the authoritative complete bundle
 

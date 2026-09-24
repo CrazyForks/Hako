@@ -53,6 +53,7 @@ const (
 	OpenVPN
 	Tailscale
 	ZeroTier
+	EasyTier
 	GostRelay
 )
 
@@ -237,6 +238,8 @@ func (at AdapterType) String() string {
 		return "Tailscale"
 	case ZeroTier:
 		return "ZeroTier"
+	case EasyTier:
+		return "EasyTier"
 	case GostRelay:
 		return "GostRelay"
 	case Relay:
@@ -299,6 +302,20 @@ func (s *packetAdapter) Metadata() *Metadata {
 // Key is a SNAT key
 func (s *packetAdapter) Key() string {
 	return s.key
+}
+
+func (s *packetAdapter) ReportUnreachable() error {
+	if reporter, ok := s.UDPPacket.(interface{ ReportUnreachable() error }); ok {
+		return reporter.ReportUnreachable()
+	}
+	return nil
+}
+
+func ReportUDPUnreachable(packet UDPPacket) error {
+	if reporter, ok := packet.(interface{ ReportUnreachable() error }); ok {
+		return reporter.ReportUnreachable()
+	}
+	return nil
 }
 
 func NewPacketAdapter(packet UDPPacket, metadata *Metadata) PacketAdapter {

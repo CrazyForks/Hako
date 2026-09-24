@@ -45,7 +45,15 @@ func (d *Direct) ListenPacketContext(ctx context.Context, metadata *C.Metadata) 
 	}
 	physicalDestination, err := dialer.TransformPhysicalAddress("udp", metadata.DstIP)
 	if err != nil {
-		return nil, err
+		ip, fallbackErr := physicalIPv4Fallback(ctx, metadata.Host, d.prefer, resolver.DirectHostResolver, err)
+		if fallbackErr != nil {
+			return nil, fallbackErr
+		}
+		metadata.DstIP = ip
+		physicalDestination, err = dialer.TransformPhysicalAddress("udp", ip)
+		if err != nil {
+			return nil, err
+		}
 	}
 	logicalRemote := metadata.AddrPort()
 	physicalRemote := netip.AddrPortFrom(physicalDestination, metadata.DstPort)
@@ -60,12 +68,21 @@ func (d *Direct) ListenPacketContext(ctx context.Context, metadata *C.Metadata) 
 }
 
 func (d *Direct) ResolveUDP(ctx context.Context, metadata *C.Metadata) error {
-	if (!metadata.Resolved() || resolver.DirectHostResolver != resolver.DefaultResolver) && metadata.Host != "" {
+	policy := resolver.CurrentIPQueryPolicy()
+	explicit := policy != resolver.IPQueryLegacy
+	if explicit && ((policy == resolver.IPQueryIPv4Only && d.prefer == C.IPv6Only) || (policy == resolver.IPQueryIPv6Only && d.prefer == C.IPv4Only)) {
+		return resolver.ErrIPVersion
+	}
+	familyMismatch := explicit && metadata.DstIP.IsValid() && (!policy.AllowsAddress(metadata.DstIP) || (d.prefer == C.IPv4Only && !metadata.DstIP.Unmap().Is4()) || (d.prefer == C.IPv6Only && !metadata.DstIP.Unmap().Is6()))
+	if (!metadata.Resolved() || resolver.DirectHostResolver != resolver.DefaultResolver || familyMismatch) && metadata.Host != "" {
 		ip, err := resolveIPWithResolver(ctx, metadata.Host, d.prefer, resolver.DirectHostResolver)
 		if err != nil {
 			return fmt.Errorf("can't resolve ip: %w", err)
 		}
 		metadata.DstIP = ip
+	}
+	if explicit && (!policy.AllowsAddress(metadata.DstIP) || (d.prefer == C.IPv4Only && !metadata.DstIP.Unmap().Is4()) || (d.prefer == C.IPv6Only && !metadata.DstIP.Unmap().Is6())) {
+		return resolver.ErrIPVersion
 	}
 	return nil
 }

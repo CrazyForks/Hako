@@ -10,7 +10,7 @@ import (
 
 	"github.com/TokenPLS/Hako/adapter"
 	"github.com/TokenPLS/Hako/common/convert"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 func TestThisTreeNeverRefusesAShareLinkUpstreamAccepts(t *testing.T) {

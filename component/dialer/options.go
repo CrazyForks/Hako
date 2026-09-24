@@ -31,16 +31,17 @@ func (f NetDialerFunc) DialContext(ctx context.Context, network, address string)
 }
 
 type option struct {
-	interfaceName string
-	fallbackBind  bool
-	addrReuse     bool
-	routingMark   int
-	network       int
-	prefer        int
-	tfo           bool
-	mpTcp         bool
-	resolver      resolver.Resolver
-	netDialer     NetDialer
+	interfaceName        string
+	fallbackBind         bool
+	addrReuse            bool
+	routingMark          int
+	network              int
+	prefer               int
+	tfo                  bool
+	mpTcp                bool
+	resolver             resolver.Resolver
+	netDialer            NetDialer
+	skipAddressTransform bool
 }
 
 type Option func(opt *option)
@@ -139,4 +140,27 @@ func applyOptions(options ...Option) option {
 		o(&opt)
 	}
 	return opt
+}
+
+func WithLogicalAddress() Option { return func(opt *option) { opt.skipAddressTransform = true } }
+
+func IsPhysicalDialer(candidate any) bool {
+	var opt option
+	switch d := candidate.(type) {
+	case Dialer:
+		opt = d.Opt
+	case *Dialer:
+		if d == nil {
+			return false
+		}
+		opt = d.Opt
+	default:
+		return false
+	}
+	switch opt.netDialer.(type) {
+	case nil, *net.Dialer:
+		return !opt.skipAddressTransform
+	default:
+		return false
+	}
 }

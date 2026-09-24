@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/TokenPLS/Hako/component/dialer"
 	"net"
 	"net/netip"
 	"strconv"
@@ -34,23 +35,31 @@ type Hysteria2 struct {
 	*Base
 
 	option *Hysteria2Option
+	clientMu    sync.Mutex
 	client      *hysteria2.Client
-	clientOnce  sync.Once
 	clientErr   error
+	clientTried bool
+	closed      bool
 	buildClient func() (*hysteria2.Client, error)
 }
 
 func (h *Hysteria2) lazyClient() (*hysteria2.Client, error) {
-	h.clientOnce.Do(func() {
+	h.clientMu.Lock()
+	defer h.clientMu.Unlock()
+	if h.closed {
+		return nil, errOutboundClosed
+	}
+	if !h.clientTried {
+		h.clientTried = true
 		h.client, h.clientErr = h.buildClient()
-	})
+	}
 	return h.client, h.clientErr
 }
 
 func (h *Hysteria2) clientBuilt() bool {
-	built := true
-	h.clientOnce.Do(func() { built = false })
-	return built
+	h.clientMu.Lock()
+	defer h.clientMu.Unlock()
+	return h.client != nil
 }
 
 type Hysteria2Option struct {
@@ -138,10 +147,15 @@ func (h *Hysteria2) ListenPacketContext(ctx context.Context, metadata *C.Metadat
 
 // Close implements C.ProxyAdapter
 func (h *Hysteria2) Close() error {
-	if h.clientBuilt() && h.client != nil {
-		return h.client.CloseWithError(errors.New("proxy removed"))
+	h.clientMu.Lock()
+	defer h.clientMu.Unlock()
+	h.closed = true
+	if h.client == nil {
+		return nil
 	}
-	return nil
+	client := h.client
+	h.client = nil
+	return client.CloseWithError(errors.New("proxy removed"))
 }
 
 // ProxyInfo implements C.ProxyAdapter
@@ -248,12 +262,12 @@ func NewHysteria2(option Hysteria2Option) (*Hysteria2, error) {
 			UdpMTU:             option.UdpMTU,
 			ServerAddress:      M.ParseSocksaddr(addr),
 			PacketListener:     outbound.dialer,
-			QuicDialer: qtls.QuicDialerFunc(func(ctx context.Context, addr string, dialer qtls.PacketDialer, tlsCfg *tls.Config, cfg *quic.Config, early bool) (net.PacketConn, *quic.Conn, error) {
+			QuicDialer: qtls.QuicDialerFunc(func(ctx context.Context, addr string, packetDialer qtls.PacketDialer, tlsCfg *tls.Config, cfg *quic.Config, early bool) (net.PacketConn, *quic.Conn, error) {
 				err := echConfig.ClientHandle(ctx, tlsCfg)
 				if err != nil {
 					return nil, nil, err
 				}
-				return common.DialQuic(ctx, addr, outbound.DialOptions(), dialer, tlsCfg, cfg, common.DialQuicOption{Early: early})
+				return common.DialQuic(ctx, addr, outbound.DialOptions(), packetDialer, tlsCfg, cfg, common.DialQuicOption{Early: early, PhysicalPeer: dialer.IsPhysicalDialer(outbound.dialer)})
 			}),
 			SetBBRCongestion: func(quicConn *quic.Conn) {
 				common.SetCongestionController(quicConn, "bbr", option.CWND, option.BBRProfile)

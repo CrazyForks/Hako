@@ -70,4 +70,15 @@ func (c *systemClient) getDnsClients() ([]dnsClient, error) {
 	return nil, err
 }
 
-func (c *systemClient) ResetConnection() {}
+func (c *systemClient) ResetConnection() {
+	c.mu.Lock()
+	clients := make([]dnsClient, 0, len(c.dnsClients)+len(c.defaultNS))
+	for _, client := range c.dnsClients {
+		clients = append(clients, client.dnsClient)
+	}
+	clients = append(clients, c.defaultNS...)
+	c.mu.Unlock()
+	for _, client := range clients {
+		client.ResetConnection()
+	}
+}

@@ -29,6 +29,7 @@ const (
 	ExplainSourceHosts  = "hosts"
 	ExplainSourceFakeIP = "fake-ip"
 	ExplainSourceIPv6Disabled = "ipv6-disabled"
+	ExplainSourceIPStack      = "ip-stack"
 )
 
 type middlewareAware interface {
@@ -44,6 +45,9 @@ func shortCircuitedAboveTheResolver(m *D.Msg) string {
 		return ""
 	}
 	q := m.Question[0]
+	if !resolver.CurrentIPQueryPolicy().AllowsQueryType(q.Qtype) {
+		return ExplainSourceIPStack
+	}
 	host := strings.TrimRight(q.Name, ".")
 
 	aware, _ := resolver.DefaultHostMapper.(middlewareAware)

@@ -41,6 +41,18 @@ func DevicePause() { manager.DevicePause() }
 
 func DeviceWake() { manager.DeviceWake() }
 
+func NetworkPause() { manager.NetworkPause() }
+
+func NetworkWake() { manager.NetworkWake() }
+
+func IsNetworkPaused() bool { return manager.IsNetworkPaused() }
+
+var bearerSilent atomic.Bool
+
+func SetBearerSilent(silent bool) { bearerSilent.Store(silent) }
+
+func IsBearerSilent() bool { return bearerSilent.Load() }
+
 func IsDevicePaused() bool { return manager.IsDevicePaused() }
 
 func RegisterTicker(ticker *time.Ticker, duration time.Duration, resume func()) func() {

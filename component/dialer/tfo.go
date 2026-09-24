@@ -74,6 +74,8 @@ func (c *tfoConn) LocalAddr() net.Addr {
 	return c.Conn.LocalAddr()
 }
 
+func (c *tfoConn) TransportPending() bool { return c.Conn == nil }
+
 func (c *tfoConn) RemoteAddr() net.Addr {
 	if c.Conn == nil {
 		return &net.TCPAddr{}

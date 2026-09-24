@@ -1,42 +1,137 @@
 package inner
 
 import (
+	"context"
 	"errors"
 	"net"
+	"sync"
+	"time"
 
 	N "github.com/TokenPLS/Hako/common/net"
 	C "github.com/TokenPLS/Hako/constant"
+	"github.com/TokenPLS/Hako/log"
 )
 
-var tunnel C.Tunnel
+var ErrNoTunnel = errors.New("tunnel uninitialized")
+
+var tcpLifecycle struct {
+	sessionMu sync.Mutex
+	mu        sync.Mutex
+	tunnel    C.Tunnel
+	closed    bool
+	active    map[*tcpConnection]struct{}
+}
 
 func New(t C.Tunnel) {
-	tunnel = t
+	tcpLifecycle.sessionMu.Lock()
+	defer tcpLifecycle.sessionMu.Unlock()
+	tcpLifecycle.mu.Lock()
+	defer tcpLifecycle.mu.Unlock()
+	tcpLifecycle.tunnel = t
+	tcpLifecycle.closed = false
 }
 
 func GetTunnel() C.Tunnel {
-	return tunnel
+	tcpLifecycle.mu.Lock()
+	defer tcpLifecycle.mu.Unlock()
+	return tcpLifecycle.tunnel
 }
 
-func HandleTcp(tunnel C.Tunnel, address string, proxy string) (conn net.Conn, err error) {
-	if tunnel == nil {
-		return nil, errors.New("tunnel uninitialized")
+func CloseTCPConnections() {
+	tcpLifecycle.sessionMu.Lock()
+	defer tcpLifecycle.sessionMu.Unlock()
+	tcpLifecycle.mu.Lock()
+	tcpLifecycle.closed = true
+	active := make([]*tcpConnection, 0, len(tcpLifecycle.active))
+	for conn := range tcpLifecycle.active {
+		active = append(active, conn)
 	}
-	// executor Parsed
-	conn1, conn2 := N.Pipe()
+	tcpLifecycle.mu.Unlock()
+	for _, conn := range active {
+		_ = conn.Close()
+	}
+	deadline := time.NewTimer(closeTCPConnectionsJoinTimeout)
+	defer deadline.Stop()
+	for _, conn := range active {
+		select {
+		case <-conn.done:
+		case <-deadline.C:
+			log.Warnln("[Inner] %d internal TCP handler(s) still running after %s; continuing shutdown without them", len(active), closeTCPConnectionsJoinTimeout)
+			return
+		}
+	}
+}
 
-	metadata := &C.Metadata{}
-	metadata.NetWork = C.TCP
-	metadata.Type = C.INNER
-	metadata.DNSMode = C.DNSNormal
-	metadata.Process = C.MihomoName
-	if proxy != "" {
-		metadata.SpecialProxy = proxy
+const closeTCPConnectionsJoinTimeout = 3 * time.Second
+
+type tcpConnection struct {
+	net.Conn
+	server net.Conn
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+func (c *tcpConnection) Upstream() any           { return c.Conn }
+func (c *tcpConnection) ReaderReplaceable() bool { return true }
+func (c *tcpConnection) WriterReplaceable() bool { return true }
+
+func (c *tcpConnection) Close() error {
+	c.cancel()
+	_ = c.server.Close()
+	return c.Conn.Close()
+}
+
+type contextTunnel interface {
+	HandleTCPConnContext(context.Context, net.Conn, *C.Metadata)
+}
+
+func HandleTcp(tunnel C.Tunnel, address string, proxy string) (net.Conn, error) {
+	return HandleTcpContext(context.Background(), tunnel, address, proxy)
+}
+
+func HandleTcpContext(parent context.Context, tunnel C.Tunnel, address string, proxy string) (net.Conn, error) {
+	if err := parent.Err(); err != nil {
+		return nil, err
 	}
-	if err = metadata.SetRemoteAddress(address); err != nil {
+	metadata := &C.Metadata{NetWork: C.TCP, Type: C.INNER, DNSMode: C.DNSNormal, Process: C.MihomoName, SpecialProxy: proxy}
+	if err := metadata.SetRemoteAddress(address); err != nil {
 		return nil, err
 	}
 
-	go tunnel.HandleTCPConn(conn2, metadata)
-	return conn1, nil
+	handler, managed := tunnel.(contextTunnel)
+	tcpLifecycle.mu.Lock()
+	defer tcpLifecycle.mu.Unlock()
+	if tcpLifecycle.closed && (managed || tunnel == nil) {
+		return nil, net.ErrClosed
+	}
+	if tunnel == nil {
+		return nil, ErrNoTunnel
+	}
+	conn1, conn2 := N.Pipe()
+	ctx, cancel := context.WithCancel(parent)
+	conn := &tcpConnection{Conn: conn1, server: conn2, cancel: cancel, done: make(chan struct{})}
+	if managed {
+		if tcpLifecycle.active == nil {
+			tcpLifecycle.active = make(map[*tcpConnection]struct{})
+		}
+		tcpLifecycle.active[conn] = struct{}{}
+	}
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	go func() {
+		defer func() {
+			stop()
+			cancel()
+			_ = conn2.Close()
+			tcpLifecycle.mu.Lock()
+			delete(tcpLifecycle.active, conn)
+			close(conn.done)
+			tcpLifecycle.mu.Unlock()
+		}()
+		if managed {
+			handler.HandleTCPConnContext(ctx, conn2, metadata)
+		} else {
+			tunnel.HandleTCPConn(conn2, metadata)
+		}
+	}()
+	return conn, nil
 }

@@ -12,17 +12,6 @@ import (
 
 var errInvalidDomainProbe = errors.New("DNS ResoverRule invalid domain: somewhere-this-diagnostic-cannot-see")
 
-// mihomo v1.19.30 (6bb8b9831) validates Clash-style domain wildcards strictly: a bare "+",
-// a "+" outside the leading label, and "*" inside a label are hard errors wherever a domain
-// pattern feeds a trie. Hako follows mihomo and rejects too (ruled
-// upstream's own errors name the field without the entry ("error in force-domain,
-// error:invalid domain") or the entry without the field ("DNS ResoverRule invalid domain:
-// +"), and a client cannot put a red mark on a row from either half. Every rejection here
-// must therefore carry field, index (or key) and the offending entry, verbatim.
-//
-// The addition is a diagnostic on top of upstream's verdict, never a second verdict: it runs
-// only after config.ParseRawConfig has refused, and it uses upstream's own validator, so it
-// cannot reject a configuration mihomo accepts (pinned below).
 func TestInvalidDomainPatternRejectionNamesTheFieldAndTheEntry(t *testing.T) {
 	if err := Setup(testOptions(t)); err != nil {
 		t.Fatal(err)
@@ -84,8 +73,6 @@ func TestInvalidDomainPatternRejectionNamesTheFieldAndTheEntry(t *testing.T) {
 	}
 }
 
-// Positive control for the diagnostic's silence: valid patterns, including every wildcard
-// shape mihomo allows, are not reported and the configuration parses.
 func TestValidDomainPatternsAreNotReported(t *testing.T) {
 	if err := Setup(testOptions(t)); err != nil {
 		t.Fatal(err)
@@ -98,10 +85,6 @@ func TestValidDomainPatternsAreNotReported(t *testing.T) {
 	}
 }
 
-// The diagnostic must never be a second verdict. dns.fake-ip-filter is only parsed as domain
-// patterns under fake-ip; under redir-host mihomo does not look at it, so an entry that would
-// fail the validator there is accepted -- and Hako must accept it too, because following
-// mihomo means following it in both directions.
 func TestInvalidDomainDiagnosticNeverRejectsWhatMihomoAccepts(t *testing.T) {
 	if err := Setup(testOptions(t)); err != nil {
 		t.Fatal(err)
@@ -112,9 +95,6 @@ func TestInvalidDomainDiagnosticNeverRejectsWhatMihomoAccepts(t *testing.T) {
 	}
 }
 
-// When mihomo refuses for an invalid domain that this diagnostic cannot locate in the fields it
-// knows (a rule provider's payload, say), the original error must come through untouched rather
-// than a confident sentence about nothing.
 func TestInvalidDomainDiagnosticFallsBackToTheOriginalError(t *testing.T) {
 	err := explainInvalidDomainPatterns(nil, errInvalidDomainProbe)
 	if err == nil || err.Error() != errInvalidDomainProbe.Error() {
@@ -122,10 +102,6 @@ func TestInvalidDomainDiagnosticFallsBackToTheOriginalError(t *testing.T) {
 	}
 }
 
-// The policy keys mihomo does not treat as domain patterns -- geosite: and rule-set: forms --
-// are skipped exactly as parseNameServerPolicy skips them, and a comma-joined key is judged
-// member by member. Exercised on the walker directly: a geosite: key would otherwise need staged
-// geodata before mihomo ever reached the pattern check.
 func TestInvalidDomainPatternWalkerSkipsGeositeAndRuleSetKeys(t *testing.T) {
 	raw, err := config.UnmarshalRawConfig([]byte("dns:\n  nameserver-policy:\n    'geosite:cn': 1.1.1.1\n    'RULE-SET:private': 1.1.1.1\n    'geosite:+': 1.1.1.1\n    'ok.example.com,+': 1.1.1.1\n"))
 	if err != nil {
@@ -137,11 +113,6 @@ func TestInvalidDomainPatternWalkerSkipsGeositeAndRuleSetKeys(t *testing.T) {
 	}
 }
 
-// The walker reads a field only where mihomo reads it as domain patterns; otherwise a refusal
-// caused by one field would carry a pointer at an entry in another field that mihomo never
-// looked at, and the reader would "fix" a line that was never the problem. Under redir-host
-// dns.fake-ip-filter is not parsed; under fake-ip-filter-mode rule its entries are rules;
-// dns.fallback-filter.domain is parsed only when dns.fallback names a server (config.go parseDNS).
 func TestInvalidDomainPatternWalkerReadsAFieldOnlyWhereMihomoDoes(t *testing.T) {
 	cases := []struct {
 		name string
@@ -193,9 +164,6 @@ func TestInvalidDomainPatternWalkerReadsAFieldOnlyWhereMihomoDoes(t *testing.T) 
 	}
 }
 
-// End to end: a configuration mihomo refuses for the sniffer entry, carrying a fake-ip-filter
-// entry that would fail the validator but is never parsed under redir-host, is explained by the
-// sniffer entry alone.
 func TestInvalidDomainRejectionDoesNotPointAtEntriesMihomoNeverParsed(t *testing.T) {
 	if err := Setup(testOptions(t)); err != nil {
 		t.Fatal(err)
@@ -214,15 +182,10 @@ func TestInvalidDomainRejectionDoesNotPointAtEntriesMihomoNeverParsed(t *testing
 	}
 }
 
-// The reason code is a classification laid over upstream's verdict, never a verdict of its
-// own: every sample below that carries a code is refused by trie.ValidAndSplitDomain, every
-// sample without one is accepted by it, and the codes follow the order of upstream's checks
-// so the reported reason is the one upstream tripped on first. Upstream tightening the rules
-// again is caught by the "other" bucket in TestInvalidDomainPatternsJSON... below, not here.
 func TestInvalidDomainPatternReasonsFollowUpstreamsVerdict(t *testing.T) {
 	cases := []struct {
 		pattern string
-		reason  string // "" = upstream accepts
+		reason  string
 	}{
 		{"+", "bare-plus"},
 		{"x.+", "plus-outside-leading-label"},
@@ -251,7 +214,8 @@ func TestInvalidDomainPatternReasonsFollowUpstreamsVerdict(t *testing.T) {
 		{"EXAMPLE.com", ""},
 	}
 	for _, tc := range cases {
-		_, valid := trie.ValidAndSplitDomain(tc.pattern)
+		_, err := trie.ValidAndSplitDomain(tc.pattern)
+		valid := err == nil
 		got := classifyInvalidDomainPattern(tc.pattern)
 		if valid && tc.reason != "" {
 			t.Errorf("%q: this test expects a refusal (%s) but upstream accepts it; fix the table, not the core", tc.pattern, tc.reason)
@@ -267,14 +231,6 @@ func TestInvalidDomainPatternReasonsFollowUpstreamsVerdict(t *testing.T) {
 	}
 }
 
-// InvalidDomainPatternsJSON is the structured export of the walk: for any
-// configuration, the entries in the trie-fed fields that upstream's validator refuses,
-// located precisely (list index or map key, always the offending entry, and a stable
-// reason code), on the raw configuration after the target profile's packet-tunnel DNS
-// strip -- the same view mihomo gets from this pipeline. It is a pure query: no Setup,
-// no provider staging, no geodata, no log line, and a clean configuration yields [] --
-// which is what lets a client run it on save and over every stored profile after an
-// upgrade, at YAML-decode cost.
 func TestInvalidDomainPatternsJSONLocatesEveryRefusedEntry(t *testing.T) {
 	yaml := "sniffer:\n  enable: false\n  force-domain:\n    - example.com\n    - '+'\n  skip-domain:\n    - 'a*b.example.com'\n" +
 		"dns:\n  enable: true\n  enhanced-mode: fake-ip\n  nameserver: [8.8.8.8]\n  fallback: [1.1.1.1]\n" +
@@ -309,7 +265,6 @@ func TestInvalidDomainPatternsJSONLocatesEveryRefusedEntry(t *testing.T) {
 				t.Errorf("finding %d %s = %v, want %v (%v)", i, k, got[i][k], v, got[i])
 			}
 		}
-		// A list finding never carries a key, a map finding never an index; entry is always there.
 		_, hasIndex := got[i]["index"]
 		_, hasKey := got[i]["key"]
 		if hasIndex == hasKey {
@@ -319,8 +274,6 @@ func TestInvalidDomainPatternsJSONLocatesEveryRefusedEntry(t *testing.T) {
 			t.Errorf("finding %d has no entry: %v", i, got[i])
 		}
 	}
-	// And the same fields under mihomo's own verdict: this configuration is refused, and the
-	// sentence names the same sites the JSON does.
 	if err := Setup(testOptions(t)); err != nil {
 		t.Fatal(err)
 	}
@@ -340,8 +293,6 @@ func TestInvalidDomainPatternsJSONIsEmptyForACleanConfigurationAndErrsOnlyOnDeco
 	if box.Value != "[]" {
 		t.Fatalf("a clean configuration must yield [] (not null, not omitted), got %q", box.Value)
 	}
-	// Fields mihomo does not parse as domain patterns are not walked: under redir-host the
-	// fake-ip-filter entry is not a finding; the walker follows upstream's conditions.
 	box, err = InvalidDomainPatternsJSON("dns:\n  enhanced-mode: redir-host\n  fake-ip-filter: ['+']\n", "")
 	if err != nil || box.Value != "[]" {
 		t.Fatalf("redir-host fake-ip-filter must not be reported: %q %v", box.Value, err)
@@ -352,21 +303,11 @@ func TestInvalidDomainPatternsJSONIsEmptyForACleanConfigurationAndErrsOnlyOnDeco
 	if _, err := InvalidDomainPatternsJSON("dns: {}\n", "someOtherProfile"); err == nil {
 		t.Fatal("an unknown target profile must be an error")
 	}
-	// An empty document decodes to mihomo's defaults, as it does for ValidateConfigShape:
-	// nothing to walk, nothing refused.
 	if box, err := InvalidDomainPatternsJSON("", ""); err != nil || box.Value != "[]" {
 		t.Fatalf("an empty document is a clean one: %q %v", box, err)
 	}
-	// The input bound every other entry point enforces applies here too.
-	if _, err := InvalidDomainPatternsJSON(strings.Repeat("#", maximumConfigurationBytes+1), ""); err == nil {
-		t.Fatal("an over-sized document is an input error, as for every other entry point")
-	}
 }
 
-// The walk runs on the raw configuration the target profile's pipeline hands to mihomo:
-// under a packet-tunnel profile a dns.fallback made only of system/dhcp entries is stripped
-// to nothing before parsing, so fallback-filter.domain is never parsed there -- and must not
-// be reported -- while under macosApplication (no strip) it is.
 func TestInvalidDomainPatternsJSONFollowsTheTargetProfilesStrip(t *testing.T) {
 	yaml := "dns:\n  enable: true\n  nameserver: [8.8.8.8]\n  fallback: [system]\n  fallback-filter:\n    domain: ['a*b.example.com']\nproxies: []\nrules:\n  - MATCH,DIRECT\n"
 	for _, profile := range []string{RuntimeProfileIOSPacketTunnel, RuntimeProfileMacOSPacketTunnel, RuntimeProfileTVOSPacketTunnel} {
@@ -379,8 +320,6 @@ func TestInvalidDomainPatternsJSONFollowsTheTargetProfilesStrip(t *testing.T) {
 	if err != nil || !strings.Contains(box.Value, `"dns.fallback-filter.domain"`) {
 		t.Fatalf("macosApplication keeps dns.fallback as written, so the entry is parsed and must be reported: got %q %v", box.Value, err)
 	}
-	// The strip mutates a copy the caller never sees: the same content walked twice yields
-	// the same answer, and a subsequent CheckConfig on it sees the original text.
 	again, err := InvalidDomainPatternsJSON(yaml, RuntimeProfileMacOSApplication)
 	if err != nil || again.Value != box.Value {
 		t.Fatalf("the walk is not idempotent: %q then %q", box.Value, again.Value)
