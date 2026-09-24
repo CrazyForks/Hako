@@ -3,7 +3,9 @@
 package hako
 
 import (
+	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/TokenPLS/Hako/adapter"
 	"github.com/TokenPLS/Hako/config"
+	"github.com/metacubex/ssh"
 )
 
 func TestOfficialOutboundCatalogParses(t *testing.T) {
@@ -38,6 +41,20 @@ func TestOfficialOutboundCatalogParses(t *testing.T) {
 			continue
 		}
 		normalizeOfficialCatalogPlaceholders(typeName, mapping)
+		if typeName == "ssh" {
+			if value, _ := mapping["private-key"].(string); value != "" {
+				passphrase, _ := mapping["private-key-passphrase"].(string)
+				key := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
+				block, err := ssh.MarshalPrivateKey(key, "schema-fixture")
+				if passphrase != "" {
+					block, err = ssh.MarshalPrivateKeyWithPassphrase(key, "schema-fixture", []byte(passphrase))
+				}
+				if err != nil {
+					t.Fatalf("create SSH schema fixture: %v", err)
+				}
+				mapping["private-key"] = string(pem.EncodeToMemory(block))
+			}
+		}
 		if typeName == "openvpn" {
 			mapping["ca"] = "-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----"
 			mapping["cert"] = ""
@@ -56,7 +73,7 @@ func TestOfficialOutboundCatalogParses(t *testing.T) {
 		"ss", "ssr", "socks5", "http", "vmess", "vless", "snell", "trojan",
 		"hysteria", "hysteria2", "wireguard", "tuic", "shadowquic", "gost-relay", "direct",
 		"dns", "reject", "rematch", "ssh", "mieru", "anytls", "sudoku", "masque",
-		"trusttunnel", "openvpn", "tailscale", "zerotier",
+		"trusttunnel", "openvpn", "tailscale", "zerotier", "easytier",
 	}
 	for _, typeName := range expectedTypes {
 		if seenByType[typeName] == 0 {
