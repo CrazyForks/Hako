@@ -361,6 +361,12 @@ func sweepStagedProviderRuntime(parent, stagedDirectory string, referenced map[s
 		if _, keep := referenced[file.Name()]; keep {
 			continue
 		}
+		if _, keep := referenced[strings.TrimSuffix(file.Name(), providerRuntimeCompiledSuffix)]; keep {
+			continue
+		}
+		if _, keep := referenced[file.Name()+providerRuntimeCompiledSuffix]; keep {
+			continue
+		}
 		_ = os.Remove(filepath.Join(stagedDirectory, file.Name()))
 	}
 }
@@ -434,6 +440,12 @@ func stageProviderRuntime(raw *config.RawConfig, policy appleRuntimePolicy, comp
 			fileName := providerRuntimeFileName(namespace.kind, name)
 			runtimePath := filepath.Join(stagedDirectory, fileName)
 			key := providerRuntimeKey(namespace.kind, name)
+			hitFileName, hitRuntimePath := fileName, runtimePath
+			if record, hit := manifest.Entries[key]; hit &&
+				record.File == providerRuntimeCompiledFileName(namespace.kind, name) {
+				hitFileName = record.File
+				hitRuntimePath = filepath.Join(stagedDirectory, hitFileName)
+			}
 			sideUpdateSafe := namespace.kind == "proxy"
 			if namespace.kind == "rule" {
 				sideUpdateSafe, _ = definition[providerSideUpdateSafeField].(bool)
@@ -442,7 +454,7 @@ func stageProviderRuntime(raw *config.RawConfig, policy appleRuntimePolicy, comp
 			hitStart := time.Now()
 			if record, hit := manifest.Entries[key]; hit &&
 				stagedProviderRecordMatches(record, sourcePath, behavior, format) &&
-				stagedFileMatches(runtimePath, record) &&
+				stagedFileMatches(hitRuntimePath, record) &&
 				!(compileRuleSets && namespace.kind == "rule" &&
 					record.CompileVerdict == "" && record.UnreadableWarn == "") {
 				cost.hitCount++
@@ -464,13 +476,13 @@ func stageProviderRuntime(raw *config.RawConfig, policy appleRuntimePolicy, comp
 					entryBehavior, entryFormat = record.CompiledBehavior, "mrs"
 				}
 				next.Entries[key] = record
-				referenced[fileName] = struct{}{}
+				referenced[hitFileName] = struct{}{}
 				runtime.entries[key] = providerRuntimeEntry{
 					behavior: entryBehavior, format: entryFormat, sideUpdateSafe: sideUpdateSafe,
-					compiled:    record.CompileVerdict == compileVerdictCompiled,
-					runtimePath: runtimePath,
+					compiled:    record.CompileVerdict == compileVerdictCompiled && record.Format != "mrs",
+					runtimePath: hitRuntimePath,
 				}
-				definition["path"] = runtimePath
+				definition["path"] = hitRuntimePath
 				continue
 			}
 
@@ -540,6 +552,9 @@ func stageProviderRuntime(raw *config.RawConfig, policy appleRuntimePolicy, comp
 						record.CompileReason = compilation.Reason
 						logKeptSourceRuleProvider(name, compilation.Reason)
 					} else {
+						fileName = providerRuntimeCompiledFileName(namespace.kind, name)
+						runtimePath = filepath.Join(stagedDirectory, fileName)
+						record.File = fileName
 						if err := writeRuntimeProviderFile(runtimePath, compilation.artifact); err != nil {
 							return cleanupOnError(fmt.Errorf("hako: stage rule provider runtime: %w", err))
 						}
@@ -648,7 +663,7 @@ func stageProviderRuntime(raw *config.RawConfig, policy appleRuntimePolicy, comp
 			referenced[fileName] = struct{}{}
 			runtime.entries[key] = providerRuntimeEntry{
 				behavior: entryBehavior, format: entryFormat, sideUpdateSafe: sideUpdateSafe,
-				compiled:    record.CompileVerdict == compileVerdictCompiled,
+				compiled:    record.CompileVerdict == compileVerdictCompiled && record.Format != "mrs",
 				runtimePath: runtimePath,
 			}
 			definition["path"] = runtimePath
@@ -683,6 +698,12 @@ func providerRuntimeFileName(kind, name string) string {
 	digest := sha256.Sum256([]byte(providerRuntimeKey(kind, name)))
 	return hex.EncodeToString(digest[:]) + ".provider"
 }
+
+func providerRuntimeCompiledFileName(kind, name string) string {
+	return providerRuntimeFileName(kind, name) + providerRuntimeCompiledSuffix
+}
+
+const providerRuntimeCompiledSuffix = ".mrs"
 
 func pathInsideDirectory(path, directory string) bool {
 	relative, err := filepath.Rel(directory, path)
