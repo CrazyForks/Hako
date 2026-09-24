@@ -3,6 +3,8 @@ package dialer
 import (
 	"context"
 	"net"
+	"net/netip"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -11,6 +13,7 @@ import (
 
 type observedDial struct {
 	kind, network, address string
+	connect                uint64
 	event                  PhysicalDialEvent
 	err                    error
 }
@@ -20,10 +23,10 @@ type dialRecorder struct {
 	seen []observedDial
 }
 
-func (r *dialRecorder) observe(kind, network, address string, event PhysicalDialEvent, err error) {
+func (r *dialRecorder) observe(kind, network, address string, connect uint64, event PhysicalDialEvent, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.seen = append(r.seen, observedDial{kind, network, address, event, err})
+	r.seen = append(r.seen, observedDial{kind, network, address, connect, event, err})
 }
 
 func (r *dialRecorder) events() []observedDial {
@@ -107,5 +110,58 @@ func TestAUDPDialIsNotObserved(t *testing.T) {
 	_ = conn.Close()
 	if seen := recorder.events(); len(seen) != 0 {
 		t.Fatalf("a UDP dial must not be observed, got %+v", seen)
+	}
+}
+
+func TestEveryAddressOneConnectTriesCarriesTheSameConnectSerial(t *testing.T) {
+	recorder := installRecorder(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addrPort := netip.MustParseAddrPort(listener.Addr().String())
+	_ = listener.Close()
+	closed := []netip.Addr{addrPort.Addr(), addrPort.Addr()}
+	port := strconv.Itoa(int(addrPort.Port()))
+	r := stackResolver{four: func(context.Context) ([]netip.Addr, error) { return closed, nil }}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := DialContext(ctx, "tcp4", "example.invalid:"+port, WithResolver(r)); err == nil {
+		t.Fatal("dialling two closed ports must fail")
+	}
+	first := recorder.events()
+	if len(first) != 4 {
+		t.Fatalf("two addresses tried is four events, got %+v", first)
+	}
+	for _, event := range first {
+		if event.connect == 0 || event.connect != first[0].connect {
+			t.Fatalf("every event of one connect carries its serial, got %+v", first)
+		}
+	}
+
+	if _, err := DialContext(ctx, "tcp4", "example.invalid:"+port, WithResolver(r)); err == nil {
+		t.Fatal("dialling two closed ports must fail")
+	}
+	second := recorder.events()[4:]
+	if len(second) != 4 || second[0].connect == first[0].connect {
+		t.Fatalf("the next connect carries a serial of its own, got %+v after %+v", second, first)
+	}
+}
+
+func TestANestedDialIsAConnectOfItsOwn(t *testing.T) {
+	recorder := installRecorder(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := listener.Addr().String()
+	_ = listener.Close()
+	outer := withConnect(context.Background())
+	ctx, cancel := context.WithTimeout(outer, 5*time.Second)
+	defer cancel()
+	_, _ = DialContext(ctx, "tcp", closed)
+	seen := recorder.events()
+	if len(seen) != 2 || seen[0].connect == 0 || seen[0].connect == ConnectOf(outer) {
+		t.Fatalf("a nested dial carries a serial of its own, not the outer %d: %+v", ConnectOf(outer), seen)
 	}
 }

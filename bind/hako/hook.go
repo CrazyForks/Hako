@@ -34,6 +34,8 @@ func interfaceScopableTarget(address string) bool {
 
 var publishedInterfaceIndex = atomic.NewInt32(0)
 
+var publishedPathCellular atomic.Bool
+
 var noPathDialsLogged atomic.Bool
 
 var suspendedDialsLogged atomic.Bool

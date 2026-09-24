@@ -94,6 +94,7 @@ func (u *interfaceUpdater) UpdateDefaultInterface(name string, index int32, isEx
 		dialer.DefaultInterface.Store(name)
 	}
 	publishedInterfaceIndex.Store(index)
+	publishedPathCellular.Store(strings.HasPrefix(name, "pdp_ip"))
 	clearBindingSuspension()
 	if index == 0 || name == "" {
 		if !pause.IsNetworkPaused() {

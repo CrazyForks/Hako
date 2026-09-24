@@ -85,7 +85,7 @@ func observeQuestions(t *testing.T) *[]questionEvent {
 	t.Cleanup(func() { resolverBeyondThisLink = beyond })
 	var mu sync.Mutex
 	events := &[]questionEvent{}
-	dialer.SetPhysicalDialObserver(func(kind, network, address string, event dialer.PhysicalDialEvent, err error) {
+	dialer.SetPhysicalDialObserver(func(kind, network, address string, _ uint64, event dialer.PhysicalDialEvent, err error) {
 		mu.Lock()
 		defer mu.Unlock()
 		*events = append(*events, questionEvent{kind, network, address, event, err})

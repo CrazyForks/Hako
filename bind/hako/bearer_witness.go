@@ -44,11 +44,15 @@ const (
 )
 
 type bearerWitness struct {
-	mu          sync.Mutex
-	inFlight    int
+	mu       sync.Mutex
+	inFlight int
 	oldestStart time.Time
 	lastSuccess time.Time
 	timeouts    int
+	timedOut          map[uint64]struct{}
+	questionsTimedOut int
+	pending     map[uint64]int
+	unserialled int
 	lastRun     time.Time
 	running     bool
 	lastAddress  string
@@ -78,6 +82,7 @@ type bearerWitness struct {
 	setSilent func(bool)
 	resetNetwork func()
 	checkEveryProvider func()
+	pathIsCellular func() bool
 }
 
 const witnessDialKind = "witness"
@@ -86,7 +91,9 @@ var witness = newBearerWitness()
 
 func newBearerWitness() *bearerWitness {
 	return &bearerWitness{
-		now: time.Now,
+		now:      time.Now,
+		timedOut: map[uint64]struct{}{},
+		pending:  map[uint64]int{},
 		dialBound: func(ctx context.Context, address string) error {
 			conn, err := dialer.DialContext(dialer.WithDialKind(ctx, witnessDialKind), "tcp", address)
 			if err == nil {
@@ -112,6 +119,7 @@ func newBearerWitness() *bearerWitness {
 			resetOutboundSessions()
 		},
 		checkEveryProvider: checkEveryProviderOnce,
+		pathIsCellular:     publishedPathCellular.Load,
 	}
 }
 
@@ -119,7 +127,7 @@ func init() {
 	dialer.SetPhysicalDialObserver(witness.observe)
 }
 
-func (w *bearerWitness) observe(kind, network, address string, event dialer.PhysicalDialEvent, err error) {
+func (w *bearerWitness) observe(kind, network, address string, connect uint64, event dialer.PhysicalDialEvent, err error) {
 	question := kind == dialer.DialKindResolver
 	if (!question && (len(network) < 3 || network[:3] != "tcp")) || kind == witnessDialKind {
 		return
@@ -132,11 +140,19 @@ func (w *bearerWitness) observe(kind, network, address string, event dialer.Phys
 	if parseErr != nil || destination.Addr().IsLoopback() || destination.Addr().IsUnspecified() {
 		return
 	}
+	if target := destination.Addr().Unmap(); !question && (target.IsPrivate() || target.IsLinkLocalUnicast() || target.IsLinkLocalMulticast()) && w.pathIsCellular() {
+		return
+	}
 	now := w.now()
 
 	w.mu.Lock()
 	switch event {
 	case dialer.PhysicalDialStarted:
+		if connect == 0 {
+			w.unserialled++
+		} else {
+			w.pending[connect]++
+		}
 		w.inFlight++
 		if w.inFlight == 1 {
 			w.oldestStart = now
@@ -149,10 +165,12 @@ func (w *bearerWitness) observe(kind, network, address string, event dialer.Phys
 		}
 	case dialer.PhysicalDialSucceeded:
 		if !probe {
-			w.inFlight = max(0, w.inFlight-1)
+			w.endedLocked(connect, true)
 		}
 		w.lastSuccess = now
 		w.timeouts = 0
+		clear(w.timedOut)
+		w.questionsTimedOut = 0
 		w.oldestStart = now
 		outageSince := w.outageSince
 		w.setOutageLocked(time.Time{})
@@ -162,7 +180,10 @@ func (w *bearerWitness) observe(kind, network, address string, event dialer.Phys
 		}
 		return
 	case dialer.PhysicalDialFailed:
-		w.inFlight = max(0, w.inFlight-1)
+		if !w.endedLocked(connect, false) {
+			w.mu.Unlock()
+			return
+		}
 		if w.inFlight == 0 {
 			w.oldestStart = now
 		}
@@ -170,10 +191,39 @@ func (w *bearerWitness) observe(kind, network, address string, event dialer.Phys
 			w.mu.Unlock()
 			return
 		}
+		if connect == 0 {
+			w.questionsTimedOut++
+		} else if len(w.timedOut) < 2 {
+			w.timedOut[connect] = struct{}{}
+		}
 		w.timeouts++
 		w.noteSilentLocked(question, address, kind)
 	}
 	w.considerLocked(now, event == dialer.PhysicalDialFailed)
+}
+
+func (w *bearerWitness) endedLocked(connect uint64, connected bool) bool {
+	if connect == 0 {
+		w.unserialled = max(0, w.unserialled-1)
+		w.inFlight = max(0, w.inFlight-1)
+		return true
+	}
+	left, waiting := w.pending[connect]
+	if !waiting {
+		return false
+	}
+	if connected || left <= 1 {
+		delete(w.pending, connect)
+		w.inFlight = max(0, w.inFlight-left)
+		return true
+	}
+	w.pending[connect] = left - 1
+	w.inFlight = max(0, w.inFlight-1)
+	return true
+}
+
+func (w *bearerWitness) waitingConnectsLocked() int {
+	return len(w.pending) + w.unserialled
 }
 
 func (w *bearerWitness) noteSilentLocked(question bool, address, kind string) {
@@ -199,10 +249,10 @@ func (w *bearerWitness) setOutageLocked(since time.Time) {
 }
 
 func (w *bearerWitness) considerLocked(now time.Time, failed bool) {
-	stalled := w.inFlight >= bearerWitnessPending &&
+	stalled := w.inFlight >= bearerWitnessPending && w.waitingConnectsLocked() >= 2 &&
 		now.Sub(w.oldestStart) >= bearerWitnessStall &&
 		(w.lastSuccess.IsZero() || now.Sub(w.lastSuccess) >= bearerWitnessStall)
-	timedOut := failed && w.timeouts >= bearerWitnessAfter
+	timedOut := failed && w.timeouts >= bearerWitnessAfter && len(w.timedOut)+w.questionsTimedOut >= 2
 	due := (stalled || timedOut) && !w.running &&
 		(w.lastRun.IsZero() || now.Sub(w.lastRun) >= bearerWitnessInterval) &&
 		!now.Before(w.graceUntil)
@@ -415,6 +465,10 @@ func (w *bearerWitness) pathChanged(index int32) {
 	outage := w.outageSince
 	w.session++
 	w.inFlight, w.timeouts, w.running, w.stallArmed = 0, 0, false, false
+	clear(w.timedOut)
+	w.questionsTimedOut = 0
+	clear(w.pending)
+	w.unserialled = 0
 	w.oldestStart, w.lastRun = time.Time{}, time.Time{}
 	w.graceUntil = w.now().Add(bearerWitnessPathGrace)
 	w.setOutageLocked(time.Time{})
@@ -448,6 +502,10 @@ func (w *bearerWitness) reset() {
 	defer w.mu.Unlock()
 	w.session++
 	w.inFlight, w.timeouts, w.running, w.stallArmed = 0, 0, false, false
+	clear(w.timedOut)
+	w.questionsTimedOut = 0
+	clear(w.pending)
+	w.unserialled = 0
 	w.oldestStart, w.lastSuccess, w.lastRun, w.lastAt = time.Time{}, time.Time{}, time.Time{}, time.Time{}
 	w.lastAddress, w.lastDialKind, w.lastSilentAddress, w.lastSilentKind = "", "", "", ""
 	w.lastVerdict, w.lastKind, w.lastResolver, w.verdictAddress, w.verdictDialKind, w.lastSystem = "", "", "", "", "", ""

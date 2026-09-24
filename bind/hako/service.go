@@ -537,6 +537,7 @@ func (s *BoxService) closeInterfaceMonitor() {
 	}
 	pause.NetworkWake()
 	publishedInterfaceIndex.Store(0)
+	publishedPathCellular.Store(false)
 	witness.reset()
 }
 

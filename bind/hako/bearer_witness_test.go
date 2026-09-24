@@ -3,6 +3,7 @@ package hako
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"strings"
@@ -36,6 +37,8 @@ type witnessHarness struct {
 	resets    int
 	checks    int
 	actions   []string
+	connects uint64
+	cellular bool
 }
 
 type scheduledCall struct {
@@ -47,7 +50,9 @@ func newWitnessHarness(t *testing.T) *witnessHarness {
 	t.Helper()
 	h := &witnessHarness{clock: time.Unix(1_800_000_000, 0), verdicts: make(chan string, 8), resolvers: []string{"198.51.100.53:53"}}
 	h.bearerWitness = &bearerWitness{
-		now: func() time.Time { return h.clock },
+		now:      func() time.Time { return h.clock },
+		timedOut: map[uint64]struct{}{},
+		pending:  map[uint64]int{},
 		dialBound: func(_ context.Context, address string) error {
 			h.mu.Lock()
 			defer h.mu.Unlock()
@@ -109,6 +114,11 @@ func newWitnessHarness(t *testing.T) *witnessHarness {
 			defer h.mu.Unlock()
 			h.checks++
 		},
+		pathIsCellular: func() bool {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			return h.cellular
+		},
 	}
 	previous := publishedInterfaceIndex.Load()
 	publishedInterfaceIndex.Store(9)
@@ -137,22 +147,34 @@ func (h *witnessHarness) silent(t *testing.T) {
 }
 
 func (h *witnessHarness) timeout(kind, address string, err error) {
-	h.observe(kind, "tcp", address, dialer.PhysicalDialStarted, nil)
-	h.observe(kind, "tcp", address, dialer.PhysicalDialFailed, err)
+	h.timeoutOf(h.nextConnect(), kind, address, err)
+}
+
+func (h *witnessHarness) timeoutOf(connect uint64, kind, address string, err error) {
+	h.observe(kind, "tcp", address, connect, dialer.PhysicalDialStarted, nil)
+	h.observe(kind, "tcp", address, connect, dialer.PhysicalDialFailed, err)
+}
+
+func (h *witnessHarness) nextConnect() uint64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.connects++
+	return h.connects
 }
 
 func (h *witnessHarness) question(endpoint string, err error) {
-	h.observe(dialer.DialKindResolver, "udp", endpoint, dialer.PhysicalDialStarted, nil)
+	h.observe(dialer.DialKindResolver, "udp", endpoint, 0, dialer.PhysicalDialStarted, nil)
 	if err == nil {
-		h.observe(dialer.DialKindResolver, "udp", endpoint, dialer.PhysicalDialSucceeded, nil)
+		h.observe(dialer.DialKindResolver, "udp", endpoint, 0, dialer.PhysicalDialSucceeded, nil)
 		return
 	}
-	h.observe(dialer.DialKindResolver, "udp", endpoint, dialer.PhysicalDialFailed, err)
+	h.observe(dialer.DialKindResolver, "udp", endpoint, 0, dialer.PhysicalDialFailed, err)
 }
 
 func (h *witnessHarness) connected(kind, address string) {
-	h.observe(kind, "tcp", address, dialer.PhysicalDialStarted, nil)
-	h.observe(kind, "tcp", address, dialer.PhysicalDialSucceeded, nil)
+	connect := h.nextConnect()
+	h.observe(kind, "tcp", address, connect, dialer.PhysicalDialStarted, nil)
+	h.observe(kind, "tcp", address, connect, dialer.PhysicalDialSucceeded, nil)
 }
 
 func mustContain(t *testing.T, verdict string, wants ...string) {
@@ -194,8 +216,8 @@ func TestOnlySilenceCountsAndAnyConnectEndsTheRun(t *testing.T) {
 	}
 	h.timeout(dialer.DialKindDirect, "203.0.113.9:443", &net.OpError{Op: "dial", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)})
 	h.timeout(dialer.DialKindDirect, "203.0.113.9:443", &net.OpError{Op: "dial", Err: os.NewSyscallError("connect", syscall.ENETUNREACH)})
-	h.observe(dialer.DialKindDirect, "udp", "203.0.113.9:443", dialer.PhysicalDialStarted, nil)
-	h.observe(dialer.DialKindDirect, "udp", "203.0.113.9:443", dialer.PhysicalDialFailed, errIOTimeout)
+	h.observe(dialer.DialKindDirect, "udp", "203.0.113.9:443", h.nextConnect(), dialer.PhysicalDialStarted, nil)
+	h.observe(dialer.DialKindDirect, "udp", "203.0.113.9:443", h.nextConnect(), dialer.PhysicalDialFailed, errIOTimeout)
 	h.timeout("", "127.0.0.1:7874", errIOTimeout)
 	h.silent(t)
 
@@ -398,10 +420,10 @@ func TestFiveStalledDialsTriggerTheWitnessBeforeAnyTimesOut(t *testing.T) {
 	h := newWitnessHarness(t)
 	h.boundErr, h.unbErr = errIOTimeout, errIOTimeout
 	for i := 0; i < bearerWitnessPending-1; i++ {
-		h.observe(dialer.DialKindProxy, "tcp", relay, dialer.PhysicalDialStarted, nil)
+		h.observe(dialer.DialKindProxy, "tcp", relay, h.nextConnect(), dialer.PhysicalDialStarted, nil)
 	}
 	h.clock = h.clock.Add(bearerWitnessStall)
-	h.observe(dialer.DialKindProxy, "tcp", relay, dialer.PhysicalDialStarted, nil)
+	h.observe(dialer.DialKindProxy, "tcp", relay, h.nextConnect(), dialer.PhysicalDialStarted, nil)
 	verdict := h.verdict(t)
 	mustContain(t, verdict, "5 dials waiting unanswered")
 }
@@ -409,12 +431,12 @@ func TestFiveStalledDialsTriggerTheWitnessBeforeAnyTimesOut(t *testing.T) {
 func TestARecentConnectKeepsTheWitnessQuiet(t *testing.T) {
 	h := newWitnessHarness(t)
 	for i := 0; i < bearerWitnessPending; i++ {
-		h.observe(dialer.DialKindProxy, "tcp", relay, dialer.PhysicalDialStarted, nil)
+		h.observe(dialer.DialKindProxy, "tcp", relay, h.nextConnect(), dialer.PhysicalDialStarted, nil)
 	}
 	h.clock = h.clock.Add(bearerWitnessStall - 500*time.Millisecond)
 	h.connected(dialer.DialKindDirect, "203.0.113.9:443")
 	h.clock = h.clock.Add(500 * time.Millisecond)
-	h.observe(dialer.DialKindProxy, "tcp", relay, dialer.PhysicalDialStarted, nil)
+	h.observe(dialer.DialKindProxy, "tcp", relay, h.nextConnect(), dialer.PhysicalDialStarted, nil)
 	h.silent(t)
 }
 
@@ -437,7 +459,7 @@ func TestFiveSocketsStartingAtOnceRunTheWitnessWhenTheStallWindowClosesWithNoOth
 	h := newWitnessHarness(t)
 	h.boundErr, h.unbErr = errIOTimeout, errIOTimeout
 	for i := 0; i < bearerWitnessPending; i++ {
-		h.observe(dialer.DialKindProxy, "tcp", relay, dialer.PhysicalDialStarted, nil)
+		h.observe(dialer.DialKindProxy, "tcp", relay, h.nextConnect(), dialer.PhysicalDialStarted, nil)
 	}
 	h.mu.Lock()
 	if len(h.scheduled) != 1 || h.scheduled[0].after != bearerWitnessStall {
@@ -455,7 +477,7 @@ func TestFiveSocketsStartingAtOnceRunTheWitnessWhenTheStallWindowClosesWithNoOth
 func TestTheStallTimerFindsNothingWhenASocketConnectedMeanwhile(t *testing.T) {
 	h := newWitnessHarness(t)
 	for i := 0; i < bearerWitnessPending; i++ {
-		h.observe(dialer.DialKindProxy, "tcp", relay, dialer.PhysicalDialStarted, nil)
+		h.observe(dialer.DialKindProxy, "tcp", relay, h.nextConnect(), dialer.PhysicalDialStarted, nil)
 	}
 	h.clock = h.clock.Add(time.Second)
 	h.connected(dialer.DialKindDirect, "203.0.113.9:443")
@@ -485,7 +507,7 @@ func TestTheSystemStacksConnectTurnsTheNetworksSilenceIntoTheProcesss(t *testing
 		h.timeout(dialer.DialKindProxy, relay, errIOTimeout)
 	}
 	h.verdict(t)
-	h.observe(dialer.DialKindDirect, "tcp", "198.51.100.7:443", dialer.PhysicalDialStarted, nil)
+	h.observe(dialer.DialKindDirect, "tcp", "198.51.100.7:443", h.nextConnect(), dialer.PhysicalDialStarted, nil)
 	health, _ := h.health()
 	if health["address"] != relay {
 		t.Fatalf("DialHealthJSON must hand the platform the verdict's address, got %v", health["address"])
@@ -771,7 +793,7 @@ func TestTheVerdictsKindStaysWithItsAddress(t *testing.T) {
 		h.timeout(dialer.DialKindProxy, relay, errIOTimeout)
 	}
 	h.verdict(t)
-	h.observe(dialer.DialKindDirect, "tcp", "198.51.100.7:443", dialer.PhysicalDialStarted, nil)
+	h.observe(dialer.DialKindDirect, "tcp", "198.51.100.7:443", h.nextConnect(), dialer.PhysicalDialStarted, nil)
 	health, _ := h.health()
 	if health["address"] != relay || health["dialKind"] != dialer.DialKindProxy {
 		t.Fatalf("health %v, want the verdict's address and kind together", health)
@@ -1063,5 +1085,235 @@ func TestAHealthCheckRoundForASupersededPathDoesNotRun(t *testing.T) {
 	stale[0]()
 	if h.checks != 0 {
 		t.Fatalf("checks=%d, want the superseded round dropped", h.checks)
+	}
+}
+
+func TestTimeoutsFromOneConnectAloneDoNotRunTheWitness(t *testing.T) {
+	h := newWitnessHarness(t)
+	one := h.nextConnect()
+	for i := 0; i < 13; i++ {
+		h.timeoutOf(one, dialer.DialKindDirect, fmt.Sprintf("203.0.113.%d:80", i+1), errIOTimeout)
+	}
+	h.silent(t)
+	h.timeout(dialer.DialKindDirect, "203.0.113.50:443", errIOTimeout)
+	mustContain(t, h.verdict(t), "14 dials in a row timed out")
+}
+
+func TestSeveralConnectsWithManyRecordsCountEveryAddress(t *testing.T) {
+	h := newWitnessHarness(t)
+	h.boundErr, h.unbErr, h.askErr = errIOTimeout, errIOTimeout, errIOTimeout
+	for i := 0; i < 3; i++ {
+		connect := h.nextConnect()
+		h.timeoutOf(connect, dialer.DialKindDirect, fmt.Sprintf("203.0.113.%d:443", 2*i+1), errIOTimeout)
+		h.timeoutOf(connect, dialer.DialKindDirect, fmt.Sprintf("203.0.113.%d:443", 2*i+2), errIOTimeout)
+	}
+	mustContain(t, h.verdict(t), "5 dials in a row timed out")
+}
+
+func TestAPrivateDestinationOnCellularSaysNothingAboutTheBearer(t *testing.T) {
+	h := newWitnessHarness(t)
+	h.cellular = true
+	for _, address := range []string{"192.168.0.1:9090", "10.0.0.5:443", "[fe80::1]:80", "[fd12::1]:443", "169.254.1.1:80"} {
+		h.timeout(dialer.DialKindDirect, address, errIOTimeout)
+	}
+	h.silent(t)
+	if h.timeouts != 0 || h.inFlight != 0 {
+		t.Fatalf("private destinations on cellular are not counted, timeouts=%d inFlight=%d", h.timeouts, h.inFlight)
+	}
+	for i := 0; i < bearerWitnessAfter-1; i++ {
+		h.timeout(dialer.DialKindDirect, "203.0.113.9:443", errIOTimeout)
+	}
+	h.connected(dialer.DialKindDirect, "192.168.0.1:9090")
+	h.timeout(dialer.DialKindDirect, "203.0.113.9:443", errIOTimeout)
+	h.verdict(t)
+}
+
+func TestAPrivateDestinationOffCellularCounts(t *testing.T) {
+	h := newWitnessHarness(t)
+	for i := 0; i < bearerWitnessAfter; i++ {
+		h.timeout(dialer.DialKindDirect, "172.16.0.1:80", errIOTimeout)
+	}
+	h.verdict(t)
+}
+
+func TestAPrivateResolverOnCellularIsStillHeard(t *testing.T) {
+	h := newWitnessHarness(t)
+	h.cellular = true
+	for i := 0; i < bearerWitnessAfter; i++ {
+		h.question("[fd00:976a::9]:53", errIOTimeout)
+	}
+	h.verdict(t)
+}
+
+func TestOneConnectRacingManyAddressesDoesNotStall(t *testing.T) {
+	h := newWitnessHarness(t)
+	one := h.nextConnect()
+	for i := 0; i < 13; i++ {
+		h.observe(dialer.DialKindDirect, "tcp", fmt.Sprintf("203.0.113.%d:80", i+1), one, dialer.PhysicalDialStarted, nil)
+	}
+	h.clock = h.clock.Add(bearerWitnessStall)
+	h.mu.Lock()
+	timers := append([]scheduledCall(nil), h.scheduled...)
+	h.mu.Unlock()
+	for _, call := range timers {
+		call.run()
+	}
+	h.silent(t)
+}
+
+func TestFourConnectsRacingBothFamiliesStillStall(t *testing.T) {
+	h := newWitnessHarness(t)
+	h.boundErr, h.unbErr = errIOTimeout, errIOTimeout
+	for i := 0; i < 4; i++ {
+		connect := h.nextConnect()
+		h.observe(dialer.DialKindProxy, "tcp", "203.0.113.88:443", connect, dialer.PhysicalDialStarted, nil)
+		h.observe(dialer.DialKindProxy, "tcp", "[2001:db8:57::1]:443", connect, dialer.PhysicalDialStarted, nil)
+	}
+	h.clock = h.clock.Add(bearerWitnessStall)
+	h.mu.Lock()
+	timers := append([]scheduledCall(nil), h.scheduled...)
+	h.mu.Unlock()
+	for _, call := range timers {
+		call.run()
+	}
+	mustContain(t, h.verdict(t), "8 dials waiting unanswered")
+}
+
+func TestTheLosingRacersOfAConnectThatWonAreNotSilence(t *testing.T) {
+	h := newWitnessHarness(t)
+	one := h.nextConnect()
+	for i := 0; i < 3; i++ {
+		h.observe(dialer.DialKindDirect, "tcp", fmt.Sprintf("203.0.113.%d:80", i+1), one, dialer.PhysicalDialStarted, nil)
+	}
+	h.observe(dialer.DialKindDirect, "tcp", "203.0.113.1:80", one, dialer.PhysicalDialSucceeded, nil)
+	if h.inFlight != 0 {
+		t.Fatalf("a connect is done when its winner connects, inFlight=%d", h.inFlight)
+	}
+	h.clock = h.clock.Add(bearerWitnessStall)
+	h.observe(dialer.DialKindDirect, "tcp", "203.0.113.2:80", one, dialer.PhysicalDialFailed, errIOTimeout)
+	h.observe(dialer.DialKindDirect, "tcp", "203.0.113.3:80", one, dialer.PhysicalDialFailed, errIOTimeout)
+	if h.timeouts != 0 || h.inFlight != 0 {
+		t.Fatalf("the losers of a connect that won are not silence, timeouts=%d inFlight=%d", h.timeouts, h.inFlight)
+	}
+}
+
+func TestLosingRacersStayAnsweredAfterLaterConnects(t *testing.T) {
+	h := newWitnessHarness(t)
+	var won []uint64
+	for i := 0; i < bearerWitnessAfter; i++ {
+		connect := h.nextConnect()
+		won = append(won, connect)
+		h.observe(dialer.DialKindDirect, "tcp", "203.0.113.1:443", connect, dialer.PhysicalDialStarted, nil)
+		h.observe(dialer.DialKindDirect, "tcp", "[2001:db8::1]:443", connect, dialer.PhysicalDialStarted, nil)
+		h.observe(dialer.DialKindDirect, "tcp", "203.0.113.1:443", connect, dialer.PhysicalDialSucceeded, nil)
+	}
+	h.connected(dialer.DialKindDirect, "203.0.113.9:443")
+	h.clock = h.clock.Add(bearerWitnessStall)
+	for _, connect := range won {
+		h.observe(dialer.DialKindDirect, "tcp", "[2001:db8::1]:443", connect, dialer.PhysicalDialFailed, errIOTimeout)
+	}
+	h.silent(t)
+	if h.timeouts != 0 {
+		t.Fatalf("losers of connects that won are not silence, timeouts=%d", h.timeouts)
+	}
+}
+
+func (h *witnessHarness) fireTimers() {
+	h.mu.Lock()
+	timers := h.scheduled
+	h.scheduled = nil
+	h.mu.Unlock()
+	for _, call := range timers {
+		call.run()
+	}
+}
+
+func TestAPathChangeForgetsTheConnectsWaitingOnTheOldPath(t *testing.T) {
+	h := newWitnessHarness(t)
+	for i := 0; i < 3; i++ {
+		h.observe(dialer.DialKindDirect, "tcp", "203.0.113.9:443", h.nextConnect(), dialer.PhysicalDialStarted, nil)
+	}
+	h.observe(dialer.DialKindResolver, "udp", "198.51.100.53:53", 0, dialer.PhysicalDialStarted, nil)
+	h.pathChanged(9)
+	if h.inFlight != 0 || len(h.pending) != 0 || h.waitingConnectsLocked() != 0 {
+		t.Fatalf("a path change forgets the old path's waiting, inFlight=%d pending=%v connects=%d", h.inFlight, h.pending, h.waitingConnectsLocked())
+	}
+}
+
+func TestAConnectStillSilentAfterAnotherSucceedsCountsInTheNewRun(t *testing.T) {
+	h := newWitnessHarness(t)
+	slow := h.nextConnect()
+	h.observe(dialer.DialKindDirect, "tcp", "203.0.113.1:80", slow, dialer.PhysicalDialStarted, nil)
+	h.observe(dialer.DialKindDirect, "tcp", "203.0.113.2:80", slow, dialer.PhysicalDialStarted, nil)
+	h.observe(dialer.DialKindDirect, "tcp", "203.0.113.1:80", slow, dialer.PhysicalDialFailed, errIOTimeout)
+	h.connected(dialer.DialKindDirect, "198.51.100.9:443")
+	h.observe(dialer.DialKindDirect, "tcp", "203.0.113.2:80", slow, dialer.PhysicalDialFailed, errIOTimeout)
+	if h.timeouts != 1 {
+		t.Fatalf("a success starts a new run, and the connect still silent counts in it, timeouts=%d", h.timeouts)
+	}
+}
+
+func TestTheStallCountsFromWhenTrafficBeganWaitingNotPerConnect(t *testing.T) {
+	h := newWitnessHarness(t)
+	h.boundErr, h.unbErr = errIOTimeout, errIOTimeout
+	first := h.nextConnect()
+	h.observe(dialer.DialKindProxy, "tcp", relay, first, dialer.PhysicalDialStarted, nil)
+	h.clock = h.clock.Add(2 * time.Second)
+	h.observe(dialer.DialKindProxy, "tcp", relay, h.nextConnect(), dialer.PhysicalDialStarted, nil)
+	h.clock = h.clock.Add(2500 * time.Millisecond)
+	for i := 0; i < 4; i++ {
+		h.observe(dialer.DialKindProxy, "tcp", relay, h.nextConnect(), dialer.PhysicalDialStarted, nil)
+	}
+	h.clock = h.clock.Add(500*time.Millisecond - time.Millisecond)
+	h.observe(dialer.DialKindProxy, "tcp", relay, first, dialer.PhysicalDialFailed, errIOTimeout)
+	h.clock = h.clock.Add(time.Millisecond)
+	h.fireTimers()
+	mustContain(t, h.verdict(t), "5 dials waiting unanswered")
+}
+
+func TestResolverQuestionsAloneCanStall(t *testing.T) {
+	h := newWitnessHarness(t)
+	h.boundErr, h.unbErr, h.askErr = errIOTimeout, errIOTimeout, errIOTimeout
+	for i := 0; i < bearerWitnessPending; i++ {
+		h.observe(dialer.DialKindResolver, "udp", "198.51.100.53:53", 0, dialer.PhysicalDialStarted, nil)
+		h.clock = h.clock.Add(700 * time.Millisecond)
+	}
+	h.clock = h.clock.Add(bearerWitnessStall)
+	h.fireTimers()
+	mustContain(t, h.verdict(t), "5 dials waiting unanswered")
+}
+
+func TestAResetForgetsTheConnectsWaitingUnderTheOldCore(t *testing.T) {
+	h := newWitnessHarness(t)
+	old := h.nextConnect()
+	h.observe(dialer.DialKindDirect, "tcp", "203.0.113.9:443", old, dialer.PhysicalDialStarted, nil)
+	h.observe(dialer.DialKindResolver, "udp", "198.51.100.53:53", 0, dialer.PhysicalDialStarted, nil)
+	h.reset()
+	if h.inFlight != 0 || len(h.pending) != 0 || h.waitingConnectsLocked() != 0 {
+		t.Fatalf("a reset forgets what waited, inFlight=%d pending=%v connects=%d", h.inFlight, h.pending, h.waitingConnectsLocked())
+	}
+	h.observe(dialer.DialKindDirect, "tcp", "203.0.113.9:443", old, dialer.PhysicalDialFailed, errIOTimeout)
+	if h.timeouts != 0 {
+		t.Fatalf("the old core's socket is not the new core's silence, timeouts=%d", h.timeouts)
+	}
+}
+
+func TestARunForgetsItsConnectsWhenItEnds(t *testing.T) {
+	for _, end := range []string{"success", "reset"} {
+		t.Run(end, func(t *testing.T) {
+			h := newWitnessHarness(t)
+			h.timeout(dialer.DialKindDirect, "203.0.113.1:443", errIOTimeout)
+			h.timeout(dialer.DialKindDirect, "203.0.113.2:443", errIOTimeout)
+			if end == "success" {
+				h.connected(dialer.DialKindDirect, "198.51.100.9:443")
+			} else {
+				h.reset()
+			}
+			one := h.nextConnect()
+			for i := 0; i < 13; i++ {
+				h.timeoutOf(one, dialer.DialKindDirect, fmt.Sprintf("203.0.113.%d:80", i+10), errIOTimeout)
+			}
+			h.silent(t)
+		})
 	}
 }

@@ -38,6 +38,9 @@ func GetTcpConcurrent() bool {
 }
 
 func DialContext(ctx context.Context, network, address string, options ...Option) (net.Conn, error) {
+	if physicalDialObserver.Load() != nil {
+		ctx = withConnect(ctx)
+	}
 	opt := applyOptions(options...)
 	if policy := resolver.CurrentIPQueryPolicy(); policy != resolver.IPQueryLegacy {
 		return dialWithIPStack(ctx, network, address, opt, policy)
