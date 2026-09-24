@@ -13,10 +13,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
-        # Pin the development toolchain, not go.mod's minimum language version:
-        # the go1.20 fallback files (excluded by build tags on modern Go) fail
-        # vet under an old toolchain.
-        with: { go-version: '1.26.x' }
+        # Use the SDK module's exact toolchain directive for reproducible builds.
+        with: { go-version-file: 'bind/hako/go.mod' }
       - run: go build ./...
       - run: go vet ./...
       # vet, not just build: `go build` skips _test.go, so this module's tests can stop
@@ -38,7 +36,7 @@ jobs:
           # `git describe: exit status 128` before compiling anything.
           fetch-depth: 0
       - uses: actions/setup-go@v7
-        with: { go-version: '1.26.x' }
+        with: { go-version-file: 'bind/hako/go.mod' }
       - name: Make a core version available
         # Incremental source commits retain reachable release tags. The old
         # baseline may have no tag, so an unversioned development build still
