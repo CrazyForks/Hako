@@ -197,6 +197,7 @@ var bridgeCallbackClassification = map[string]string{
 	"STUNTestHandler":           "decorated",
 	"NetworkQualityTestHandler": "decorated",
 	"ConnectionOwnerResolver":   "decorated",
+	"LogBatchWriter":            "decorated",
 	"StringIterator":            "go-implemented",
 	"InterfaceUpdateListener":   "go-implemented",
 }
@@ -207,6 +208,7 @@ var bridgeCallbackDecorators = map[string]string{
 	"STUNTestHandler":           "bridgeSafeSTUNHandlerDecorator",
 	"NetworkQualityTestHandler": "bridgeSafeNQHandlerDecorator",
 	"ConnectionOwnerResolver":   "bridgeSafeOwnerResolverDecorator",
+	"LogBatchWriter":            "bridgeSafeLogBatchDecorator",
 }
 
 func bridgeStructuralViolations(fset *token.FileSet, files []*ast.File, fileNames map[*ast.File]string) []string {

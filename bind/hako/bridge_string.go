@@ -96,3 +96,19 @@ func bridgeSafeNQHandler(handler NetworkQualityTestHandler) NetworkQualityTestHa
 	}
 	return bridgeSafeNQHandlerDecorator{handler}
 }
+
+type bridgeSafeLogBatchDecorator struct{ LogBatchWriter }
+
+func (w bridgeSafeLogBatchDecorator) WriteLogBatch(linesJSON string) {
+	w.LogBatchWriter.WriteLogBatch(bridgeSafeString(linesJSON))
+}
+
+func bridgeSafeLogBatch(writer LogBatchWriter) LogBatchWriter {
+	if writer == nil {
+		return nil
+	}
+	if _, ok := writer.(bridgeSafeLogBatchDecorator); ok {
+		return writer
+	}
+	return bridgeSafeLogBatchDecorator{writer}
+}

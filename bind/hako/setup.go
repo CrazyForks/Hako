@@ -360,9 +360,31 @@ func (w *platformLogWriter) writeStartup(msg string) {
 
 func (w *platformLogWriter) drain() {
 	defer close(w.stopped)
+	batch := make([]logLine, 0, logBatchMax)
 	for {
 		select {
 		case line := <-w.ch:
+			if sink := logBatchWriter.Load(); sink != nil {
+				batch = append(batch[:0], line)
+				size := len(line.message)
+			collect:
+				for len(batch) < logBatchMax && size < logBatchBytes {
+					select {
+					case next := <-w.ch:
+						batch = append(batch, next)
+						size += len(next.message)
+					default:
+						break collect
+					}
+				}
+				writeLogBatch(*sink, batch)
+				for _, sent := range batch {
+					if sent.delivered != nil {
+						close(sent.delivered)
+					}
+				}
+				continue
+			}
 			w.platform.WriteLog(line.message)
 			if line.delivered != nil {
 				close(line.delivered)
