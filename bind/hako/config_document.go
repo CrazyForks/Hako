@@ -21,9 +21,6 @@ type ConfigDocument struct {
 }
 
 func NewConfigDocument(configContent string) (*ConfigDocument, error) {
-	if err := validateConfigurationInput(configContent); err != nil {
-		return nil, bridgeSafeError(err)
-	}
 	var root map[string]any
 	if err := yaml.Unmarshal([]byte(configContent), &root); err != nil {
 		return nil, bridgeSafeError(fmt.Errorf("hako: parse config: %w", err))
@@ -79,9 +76,6 @@ func (d *ConfigDocument) ProjectionJSON(kind string, packagesJSON string) (*Stri
 	}
 	payload, err := json.Marshal(projection)
 	if err != nil {
-		return nil, bridgeSafeError(err)
-	}
-	if err := validateConfigurationJSONResult(string(payload)); err != nil {
 		return nil, bridgeSafeError(err)
 	}
 	return WrapString(string(payload)), nil

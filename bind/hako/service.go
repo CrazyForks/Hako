@@ -20,9 +20,11 @@ import (
 	"github.com/TokenPLS/Hako/config"
 	constant "github.com/TokenPLS/Hako/constant"
 	provider "github.com/TokenPLS/Hako/constant/provider"
+	"github.com/TokenPLS/Hako/dns"
 	"github.com/TokenPLS/Hako/hub/executor"
 	coreListener "github.com/TokenPLS/Hako/listener"
 	LC "github.com/TokenPLS/Hako/listener/config"
+	"github.com/TokenPLS/Hako/listener/inner"
 	"github.com/TokenPLS/Hako/log"
 	"github.com/TokenPLS/Hako/tunnel"
 	"github.com/TokenPLS/Hako/tunnel/statistic"
@@ -89,6 +91,9 @@ func NewService(platform PlatformInterface) (*BoxService, error) {
 	logWriter := redirectLogs(platform)
 	armNEPacingForService(platform)
 	installSocketHook(platform)
+	setUnscopedResolversArePhysical(!platform.UnderNetworkExtension())
+	installLocalZoneResolver(true)
+	installNetworkInterfaceProvider(platform)
 	installListenerScopeHooks(platform.UnderNetworkExtension())
 	return &BoxService{platform: platform, tunFd: -1, liveTunFd: -1, logWriter: logWriter}, nil
 }
@@ -115,9 +120,6 @@ func (s *BoxService) start(configContent string) (startErr error) {
 	if s.running {
 		return errors.New("hako: service already started")
 	}
-	if err := validateConfigurationInput(configContent); err != nil {
-		return err
-	}
 	startupPhase("validated")
 	setupMu.Lock()
 	activeCoreCount.Add(1)
@@ -141,6 +143,8 @@ func (s *BoxService) start(configContent string) (startErr error) {
 	s.ifaceListener = listener
 	startupPhase("iface-monitor-up")
 
+	setStartupBreadcrumbRecording(currentRuntimePolicy(s.platform.UnderNetworkExtension()).networkExtension)
+	startupStageCounting("bind:unmarshal-begin", int64(len(configContent)))
 	var startedDNSTransports dnsTransportSnapshot
 	startedOutboundEndpointKinds := snapshotOutboundEndpointKinds(configContent)
 	var startedProviderRuntime *providerRuntime
@@ -338,9 +342,6 @@ func (s *BoxService) resetTunState() {
 }
 
 func (s *BoxService) Reload(configContent string) error {
-	if err := validateConfigurationInput(configContent); err != nil {
-		return bridgeSafeError(err)
-	}
 	s.stopSTUNSessions()
 	defer s.resumeSTUNSessions()
 	s.mu.Lock()
@@ -526,12 +527,21 @@ func (s *BoxService) closeInterfaceMonitor() {
 	}
 	listener := s.ifaceListener
 	s.ifaceListener = nil
+	if updater, ok := listener.(*interfaceUpdater); ok {
+		updater.stopSettling()
+	}
+	dns.SetSystemSubstituteRefresh(nil)
+	installLocalZoneResolver(false)
 	if err := s.platform.CloseDefaultInterfaceMonitor(listener); err != nil {
 		log.Warnln("[iOS] close interface monitor: %v", err)
 	}
+	pause.NetworkWake()
+	publishedInterfaceIndex.Store(0)
+	witness.reset()
 }
 
 func shutdownCore() {
+	inner.CloseTCPConnections()
 	CloseAllConnections()
 
 	proxies := tunnel.Proxies()
@@ -657,7 +667,20 @@ func (s *BoxService) RuntimeDiagnosticsJSON() string {
 		diagnostics["corePacketEgressWritePackets"] = packetIO.EgressWritePackets
 		diagnostics["corePacketEgressWriteBytes"] = packetIO.EgressWriteBytes
 		diagnostics["corePacketEgressWriteErrors"] = packetIO.EgressWriteErrors
+		diagnostics["corePacketEgressWriteWaits"] = packetIO.EgressWriteWaits
+		diagnostics["corePacketEgressWriteWaitExhausted"] = packetIO.EgressWriteWaitExhausted
 	}
+	tunEgress := tun.TunEgressSnapshot()
+	diagnostics["coreTunEgressWriteWaits"] = tunEgress.WriteWaits
+	diagnostics["coreTunEgressWriteWaitExhausted"] = tunEgress.WriteWaitExhausted
+	deferred := tun.DeferredHandshakeSnapshot()
+	diagnostics["coreDeferredHandshakes"] = deferred.Deferred
+	diagnostics["coreDeferredHandshakesBudgetSpent"] = deferred.BudgetSpent
+	diagnostics["coreDeferredHandshakesCompleted"] = deferred.Completed
+	diagnostics["coreDeferredHandshakesCompletedLate"] = deferred.CompletedLate
+	diagnostics["coreDeferredHandshakesNotCompleted"] = deferred.NotCompleted
+	diagnostics["coreDeferredHandshakesRefused"] = deferred.Refused
+	diagnostics["coreDeferredHandshakesPending"] = deferred.Pending
 	return bridgeSafeString(mustJSON(diagnostics))
 }
 

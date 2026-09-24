@@ -86,6 +86,23 @@ func underPacketTunnel(policy appleRuntimePolicy) bool {
 	return policy.networkExtension && policy.packetTunnel
 }
 
+var easyTierPlaceholderRule = deviationRule{
+	field:     "proxies",
+	ruleScan:  true,
+	category:  deviationForced,
+	effective: "the node stands as a reject placeholder with the same name: it keeps its place in every group and rule, and every connection through it is refused",
+	reason: "EasyTier is not built into the iPhone, iPad and Apple TV cores: its engine runs a " +
+		"WebAssembly interpreter whose memory exceeds what the tunnel is allowed to use",
+	source: "cmd/build_libbox/main.go notMacosTags carries no_easytier; adapter/outbound/easytier_stub.go; " +
+		"iPad Pro (iPad14,5) measurement 2026-09-16: about 190 MiB of live Go heap after one engine start, " +
+		"against the 50 MiB budget an Apple packet tunnel is killed at",
+	recoverable: false,
+	alternative: "use the node from the Mac app, or pick another node on this device",
+	applies:     easyTierWalledProfile,
+	mechanism: "the mobile slices are compiled with the no_easytier build tag, under which adapter/outbound/easytier_stub.go " +
+		"constructs a Reject outbound carrying the node's name; the engine, its WebAssembly module and wazero are not linked",
+}
+
 var deviationRules = []deviationRule{
 	{
 		field:       "tproxy-port",
@@ -163,6 +180,7 @@ var deviationRules = []deviationRule{
 			return policy.networkExtension && !policy.processMetadata().resolves("UID")
 		},
 	},
+	easyTierPlaceholderRule,
 	{
 		field:     "tun.route-address-set",
 		category:  deviationUnavailable,
@@ -707,6 +725,7 @@ func collectConfigDeviations(mergedYAML string, policy appleRuntimePolicy) ([]co
 		})
 	}
 	deviations = append(deviations, ownerMetadataRuleDeviations(root, policy)...)
+	deviations = append(deviations, easyTierPlaceholderDeviations(root, policy)...)
 	return deviations, nil
 }
 

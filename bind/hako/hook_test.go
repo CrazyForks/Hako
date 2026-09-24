@@ -23,6 +23,16 @@ func (p *hookPlatform) AutoDetectInterfaceControl(fd int32) error {
 	return p.controlErr
 }
 
+func withPublishedPath(t *testing.T, index int32) {
+	t.Helper()
+	previous := publishedInterfaceIndex.Load()
+	t.Cleanup(func() {
+		publishedInterfaceIndex.Store(previous)
+		noPathDialsLogged.Store(false)
+	})
+	publishedInterfaceIndex.Store(index)
+}
+
 func TestInstallSocketHook(t *testing.T) {
 	orig := dialer.DefaultSocketHook
 	origTransform := dialer.DefaultAddressTransform
@@ -30,6 +40,8 @@ func TestInstallSocketHook(t *testing.T) {
 		dialer.DefaultSocketHook = orig
 		dialer.DefaultAddressTransform = origTransform
 	})
+
+	withPublishedPath(t, 5)
 
 	dialer.DefaultSocketHook = func(_, _ string, _ syscall.RawConn) error { return nil }
 	installSocketHook(&hookPlatform{enabled: false})
@@ -76,6 +88,8 @@ func TestSocketHookLeavesLoopbackUnscoped(t *testing.T) {
 		dialer.DefaultSocketHook = orig
 		dialer.DefaultAddressTransform = origTransform
 	})
+
+	withPublishedPath(t, 5)
 
 	platform := &hookPlatform{enabled: true}
 	installSocketHook(platform)
@@ -135,5 +149,94 @@ func TestSocketHookLeavesLoopbackUnscoped(t *testing.T) {
 	}
 	if platform.callCount != before+1 {
 		t.Fatalf("an address the hook cannot read must stay scoped: callCount %d -> %d", before, platform.callCount)
+	}
+}
+
+func TestSocketHookDialsUnboundWhenNoPathIsPublished(t *testing.T) {
+	orig := dialer.DefaultSocketHook
+	origTransform := dialer.DefaultAddressTransform
+	previousIndex := publishedInterfaceIndex.Load()
+	t.Cleanup(func() {
+		dialer.DefaultSocketHook = orig
+		dialer.DefaultAddressTransform = origTransform
+		publishedInterfaceIndex.Store(previousIndex)
+		noPathDialsLogged.Store(false)
+	})
+
+	platform := &hookPlatform{enabled: true}
+	installSocketHook(platform)
+	if dialer.DefaultSocketHook == nil {
+		t.Fatal("opt-in must install DefaultSocketHook")
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("no loopback listener available: %v", err)
+	}
+	defer listener.Close()
+	rawConnOf := func(t *testing.T) syscall.RawConn {
+		t.Helper()
+		conn, err := net.Dial("tcp", listener.Addr().String())
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		t.Cleanup(func() { conn.Close() })
+		raw, err := conn.(*net.TCPConn).SyscallConn()
+		if err != nil {
+			t.Fatalf("syscall conn: %v", err)
+		}
+		return raw
+	}
+
+	const routable = "93.184.216.34:443"
+
+	publishedInterfaceIndex.Store(0)
+	noPathDialsLogged.Store(false)
+	before := platform.callCount
+	if err := dialer.DefaultSocketHook("tcp", routable, rawConnOf(t)); err != nil {
+		t.Fatalf("with no published path the dial must proceed unbound, got %v", err)
+	}
+	if platform.callCount != before {
+		t.Fatal("with no published path the platform must not be asked to scope the socket")
+	}
+
+	publishedInterfaceIndex.Store(7)
+	before = platform.callCount
+	if err := dialer.DefaultSocketHook("tcp", routable, rawConnOf(t)); err != nil {
+		t.Fatalf("with a published path the socket must still be scoped, got %v", err)
+	}
+	if platform.callCount != before+1 {
+		t.Fatal("with a published path the platform must scope the socket")
+	}
+}
+
+func TestPathMonitorPublishesTheIndexTheHookReads(t *testing.T) {
+	previousIndex := publishedInterfaceIndex.Load()
+	oldFlush, oldReset, oldClose, oldClear :=
+		flushInterfaceCache, resetResolverConnection, closeTrackedConnections, clearResolverCache
+	flushInterfaceCache = func() {}
+	resetResolverConnection = func() {}
+	closeTrackedConnections = func() {}
+	oldSessions := resetOutboundSessions
+	resetOutboundSessions = func() {}
+	clearResolverCache = func() {}
+	previousRead := readPhysicalResolvers
+	readPhysicalResolvers = func(int32) []string { return nil }
+	t.Cleanup(func() {
+		publishedInterfaceIndex.Store(previousIndex)
+		flushInterfaceCache, resetResolverConnection, closeTrackedConnections, clearResolverCache =
+			oldFlush, oldReset, oldClose, oldClear
+		resetOutboundSessions = oldSessions
+		readPhysicalResolvers = previousRead
+	})
+
+	updater := &interfaceUpdater{bindDefaultInterface: true}
+	updater.UpdateDefaultInterface("en0", 5, false, false, true, true)
+	if got := publishedInterfaceIndex.Load(); got != 5 {
+		t.Fatalf("published index = %d, want 5", got)
+	}
+	updater.UpdateDefaultInterface("", 0, false, false, false, false)
+	if got := publishedInterfaceIndex.Load(); got != 0 {
+		t.Fatalf("an unsatisfied path must publish index 0, got %d", got)
 	}
 }

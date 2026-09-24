@@ -3,6 +3,7 @@ package hako
 import (
 	"errors"
 	"fmt"
+	"github.com/TokenPLS/Hako/dns"
 	"io"
 	"math"
 	"os"
@@ -27,6 +28,8 @@ import (
 )
 
 type SetupOptions struct {
+	IPQueryMode string
+	TunIPv6Mode string
 	BasePath    string
 	WorkingPath string
 	TempPath    string
@@ -75,6 +78,8 @@ func applyGVisorTCPBufferOverride(basePath string) {
 }
 
 func Setup(options *SetupOptions) error {
+	appParseMu.Lock()
+	defer appParseMu.Unlock()
 	setupMu.Lock()
 	defer setupMu.Unlock()
 
@@ -83,6 +88,13 @@ func Setup(options *SetupOptions) error {
 	}
 	if options.BasePath == "" || options.WorkingPath == "" || options.TempPath == "" {
 		return bridgeSafeError(errors.New("hako: SetupOptions.BasePath, WorkingPath and TempPath are required"))
+	}
+	requestedIPStack, err := parseIPStackSettings(options.IPQueryMode, options.TunIPv6Mode)
+	if err != nil {
+		return bridgeSafeError(err)
+	}
+	if activeCoreCount.Load() > 0 && requestedIPStack != currentIPStackSettings() {
+		return bridgeSafeError(fmt.Errorf("hako: changing IP Stack requires restart"))
 	}
 	requestedRuntimeProfile, err := normalizeRuntimeProfile(options.RuntimeProfile)
 	if err != nil {
@@ -109,6 +121,7 @@ func Setup(options *SetupOptions) error {
 	includeAllNetworksRequested.Store(options.IncludeAllNetworks)
 	sing_tun.IncludeAllNetworks = options.IncludeAllNetworks
 	systemDNSSubstitutes.Store(&systemResolvers)
+	dns.SetSystemResolverDefaults(systemResolvers)
 	startupPhase("setup:entered")
 	requestedCertificateStore, err := ca.ParseStore(options.CertificateStore)
 	if err != nil {
@@ -208,6 +221,7 @@ func Setup(options *SetupOptions) error {
 	}
 	recentLogs.setMax(logMaxLines)
 	currentRuntimeSetup.logMaxLines = logMaxLines
+	setIPStackSettings(requestedIPStack)
 	setTunMTU(requestedTunMTU)
 	setupRuntimeProfile.Store(uint32(requestedRuntimeProfile))
 	armMemoryPressureMonitorForRuntime(

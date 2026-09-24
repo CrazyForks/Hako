@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/TokenPLS/Hako/common/orderedmap"
@@ -56,6 +57,23 @@ func substituteAddr(line string) netip.Addr {
 	}
 	addr, _ := netip.ParseAddr(line)
 	return addr
+}
+
+var (
+	configuredTunnelPrefixesMu sync.RWMutex
+	configuredTunnelPrefixes   []netip.Prefix
+)
+
+func setConfiguredTunnelPrefixes(prefixes []netip.Prefix) {
+	configuredTunnelPrefixesMu.Lock()
+	defer configuredTunnelPrefixesMu.Unlock()
+	configuredTunnelPrefixes = append([]netip.Prefix(nil), prefixes...)
+}
+
+func currentTunnelPrefixes() []netip.Prefix {
+	configuredTunnelPrefixesMu.RLock()
+	defer configuredTunnelPrefixesMu.RUnlock()
+	return configuredTunnelPrefixes
 }
 
 func tunnelPrefixesFromRaw(raw *config.RawConfig) []netip.Prefix {

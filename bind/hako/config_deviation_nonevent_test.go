@@ -79,6 +79,7 @@ func TestEveryForcedRuleNamesItsValueOrIsExempt(t *testing.T) {
 	exempt := map[string]string{
 		"tun.mtu":        "chosen at startup, not a constant",
 		"tun.dns-hijack": "a list; compared raw by dnsHijackAlreadyHijacksAll",
+		"proxies":        "a list scan; the placeholder stands in for a whole node, not a scalar the reader could have written",
 	}
 	for _, rule := range deviationRules {
 		if rule.category != deviationForced {

@@ -35,6 +35,7 @@ func TestAnExplicitStackIsHonoured(t *testing.T) {
 		"system": C.TunSystem,
 		"mixed":  C.TunMixed,
 		"gvisor": C.TunGvisor,
+		"mips":   C.TunMips,
 	} {
 		t.Run(name, func(t *testing.T) {
 			document := `
@@ -94,5 +95,26 @@ rules:
 	if !sawTunMTU {
 		t.Fatal("the deviation walk reported nothing for tun.mtu either, so this test proved " +
 			"nothing about tun.stack -- it measured an empty list")
+	}
+}
+
+func TestSilentConfigurationKeepsOneGvisorProcessorPerChannel(t *testing.T) {
+	const document = `
+tun:
+  enable: true
+proxies: []
+proxy-groups: []
+rules:
+  - MATCH,DIRECT
+`
+	mihomo, ours := parseBoth(t, document)
+	if mihomo.General.Tun.ProcessorsPerChannel != 1 {
+		t.Fatalf("fixture is wrong, not the code: upstream's silent default is %d, not 1",
+			mihomo.General.Tun.ProcessorsPerChannel)
+	}
+	finalizeConfigForIOS(ours, true)
+	if ours.General.Tun.ProcessorsPerChannel != 1 {
+		t.Fatalf("a silent configuration reaches the tun with %d processors per channel; the device A/B chose 1",
+			ours.General.Tun.ProcessorsPerChannel)
 	}
 }

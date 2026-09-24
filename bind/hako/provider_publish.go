@@ -8,11 +8,10 @@ import (
 )
 
 func StageProvidersForPublish(configContent string, targetProfile string, compileRuleSets bool) error {
+	appParseMu.Lock()
+	defer appParseMu.Unlock()
 	profile, err := normalizeRuntimeProfile(targetProfile)
 	if err != nil {
-		return bridgeSafeError(err)
-	}
-	if err := validateConfigurationInput(configContent); err != nil {
 		return bridgeSafeError(err)
 	}
 	raw, err := config.UnmarshalRawConfig([]byte(configContent))

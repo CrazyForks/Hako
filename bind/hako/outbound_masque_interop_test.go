@@ -38,6 +38,13 @@ import (
 )
 
 func TestControlledMASQUEH3Interop(t *testing.T) {
+	for _, mode := range []string{"auto", "mips"} {
+		t.Run(mode, func(t *testing.T) { testControlledMASQUEH3Interop(t, mode) })
+	}
+}
+
+func testControlledMASQUEH3Interop(t *testing.T, mode string) {
+	t.Helper()
 	pinUnifiedDelayOff(t)
 	serverCertificate, _, serverPublicKey := newControlledMASQUEIdentity(t, "localhost")
 	_, clientPrivateKey, _ := newControlledMASQUEIdentity(t, "client.controlled.test")
@@ -60,6 +67,7 @@ func TestControlledMASQUEH3Interop(t *testing.T) {
 	}
 	mapping := map[string]any{
 		"name":              "controlled-masque-h3-outbound",
+		"ip-stack":          map[string]any{"mode": mode},
 		"type":              "masque",
 		"server":            "127.0.0.1",
 		"port":              serverPort,
@@ -188,6 +196,13 @@ func TestControlledMASQUEH3Interop(t *testing.T) {
 }
 
 func TestControlledMASQUEH2Interop(t *testing.T) {
+	for _, mode := range []string{"auto", "mips"} {
+		t.Run(mode, func(t *testing.T) { testControlledMASQUEH2Interop(t, mode) })
+	}
+}
+
+func testControlledMASQUEH2Interop(t *testing.T, mode string) {
+	t.Helper()
 	pinUnifiedDelayOff(t)
 	serverCertificate, serverPrivateKey, serverPublicKey := newControlledMASQUEIdentity(t, "localhost")
 	_, clientPrivateKey, _ := newControlledMASQUEIdentity(t, "client.controlled.test")
@@ -210,6 +225,7 @@ func TestControlledMASQUEH2Interop(t *testing.T) {
 	}
 	mapping := map[string]any{
 		"name":              "controlled-masque-h2-outbound",
+		"ip-stack":          map[string]any{"mode": mode},
 		"type":              "masque",
 		"server":            "127.0.0.1",
 		"port":              serverPort,

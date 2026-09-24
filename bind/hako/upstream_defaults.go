@@ -12,6 +12,8 @@ import (
 )
 
 func UpstreamScalarDefaultsJSON() (*StringBox, error) {
+	appParseMu.Lock()
+	defer appParseMu.Unlock()
 	rendered, err := renderUpstreamDefaults()
 	if err != nil {
 		return nil, bridgeSafeError(fmt.Errorf("hako: render upstream defaults: %w", err))

@@ -46,6 +46,11 @@ func setPhysicalNetworkCapabilities(supportsIPv4, supportsIPv6 bool) {
 }
 
 func transformPhysicalAddressForApple(network string, destination netip.Addr) (netip.Addr, error) {
+	if currentIPStackSettings().tunIPv6Mode != "" &&
+		destination.Is6() && !destination.Is4In6() && destination.IsGlobalUnicast() && !destination.IsPrivate() &&
+		physicalPathSupportsIPv4.Load() && !physicalPathSupportsIPv6.Load() {
+		return netip.Addr{}, dialer.ErrPhysicalIPv6Unavailable
+	}
 	if !destination.IsValid() || !destination.Is4() || destination.IsLoopback() {
 		return destination, nil
 	}

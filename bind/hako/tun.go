@@ -55,6 +55,7 @@ func TunMTU() int32 {
 }
 
 type TunOptions interface {
+	GetIPv6Mode() string
 	GetInet4Address() RoutePrefixIterator
 	GetInet6Address() RoutePrefixIterator
 	GetDNSServerAddress() (*StringBox, error)
@@ -68,12 +69,15 @@ type TunOptions interface {
 }
 
 type tunOptions struct {
-	tun *LC.Tun
+	ipv6Mode string
+	tun      *LC.Tun
 }
 
 func newTunOptions(tun *LC.Tun) TunOptions {
-	return &tunOptions{tun: tun}
+	return &tunOptions{tun: tun, ipv6Mode: currentIPStackSettings().tunIPv6Mode}
 }
+
+func (o *tunOptions) GetIPv6Mode() string { return o.ipv6Mode }
 
 func (o *tunOptions) GetInet4Address() RoutePrefixIterator {
 	return mapRoutePrefix(o.tun.Inet4Address)

@@ -159,6 +159,7 @@ func runControlledVLESSVariant(
 		t.Fatalf("ParseProxy() error = %v", err)
 	}
 	defer proxy.Close()
+	testControlledRelayHTTPS(t, proxy)
 
 	target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodHead {

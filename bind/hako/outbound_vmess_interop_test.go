@@ -37,8 +37,14 @@ func TestControlledVMessInterop(t *testing.T) {
 		httpUpgrade bool
 		mkcpSeed    string
 		mkcpHeader  string
+		cipher      string
 	}{
 		{name: "TCP"},
+		{name: "TCPAES128GCM", cipher: "aes-128-gcm"},
+		{name: "TCPChaCha20Poly1305", cipher: "chacha20-poly1305"},
+		{name: "TCPNone", cipher: "none"},
+		{name: "WebSocket", network: "ws", wsPath: "/controlled-vmess"},
+		{name: "WebSocketTLS", network: "ws", tls: true, wsPath: "/controlled-vmess"},
 		{name: "TLSMTLS", tls: true},
 		{name: "WebSocketHTTPUpgrade", network: "ws", wsPath: "/controlled-vmess", httpUpgrade: true},
 		{name: "GRPCTLS", network: "grpc", tls: true, grpcService: "ControlledVMess"},
@@ -55,6 +61,7 @@ func TestControlledVMessInterop(t *testing.T) {
 				test.httpUpgrade,
 				test.mkcpSeed,
 				test.mkcpHeader,
+				test.cipher,
 				serverCertificate,
 				serverPrivateKey,
 				serverFingerprint,
@@ -75,6 +82,7 @@ func runControlledVMessVariant(
 	httpUpgrade bool,
 	mkcpSeed string,
 	mkcpHeader string,
+	cipher string,
 	serverCertificate string,
 	serverPrivateKey string,
 	serverFingerprint string,
@@ -148,11 +156,15 @@ func runControlledVMessVariant(
 		mapping["certificate"] = clientCertificate
 		mapping["private-key"] = clientPrivateKey
 	}
+	if cipher != "" {
+		mapping["cipher"] = cipher
+	}
 	proxy, err := adapter.ParseProxy(mapping)
 	if err != nil {
 		t.Fatalf("ParseProxy() error = %v", err)
 	}
 	defer proxy.Close()
+	testControlledRelayHTTPS(t, proxy)
 
 	target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodHead {

@@ -12,9 +12,6 @@ func ConfigDeviationsJSON(configContent string, targetProfile string) (*StringBo
 	if err != nil {
 		return nil, bridgeSafeError(err)
 	}
-	if err := validateConfigurationInput(configContent); err != nil {
-		return nil, bridgeSafeError(err)
-	}
 	deviations, err := collectConfigDeviations(configContent, runtimePolicyFor(profile, true))
 	if err != nil {
 		return nil, bridgeSafeError(fmt.Errorf("hako: collect config deviations: %w", err))

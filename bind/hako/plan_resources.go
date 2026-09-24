@@ -71,6 +71,7 @@ const (
 	planNoticeRouteSetInert                     = "route-set-inert"
 	planNoticeMetadataRulesInert                = "metadata-rules-inert"
 	planNoticeDNSSystemResolverStripped         = "dns-system-resolver-stripped"
+	planNoticeDNSLoopbackResolverStripped       = "dns-loopback-resolver-stripped"
 	planNoticeDNSSystemResolverSubstituted      = "dns-system-resolver-substituted"
 	planNoticeDNSBootstrapReplaced              = "dns-bootstrap-replaced"
 	planNoticeDNSFragmentUnroutable             = "dns-fragment-unroutable"
@@ -168,6 +169,7 @@ func (d *ConfigDocument) planResourcesJSON(policy appleRuntimePolicy) (*StringBo
 	}
 	res.note(strippedHostRouteKnobNotices(root, raw, policy)...)
 	res.note(strippedDNSSchemeNotices(root, policy)...)
+	res.note(strippedDNSLoopbackNotices(root, policy)...)
 	res.note(strippedDNSFragmentNotices(raw, policy)...)
 	if policy.networkExtension {
 		for _, loc := range outboundEgressOverrideLocations(raw) {
@@ -181,9 +183,6 @@ func (d *ConfigDocument) planResourcesJSON(policy appleRuntimePolicy) (*StringBo
 
 	b, err := json.Marshal(res)
 	if err != nil {
-		return nil, err
-	}
-	if err := validateConfigurationJSONResult(string(b)); err != nil {
 		return nil, err
 	}
 	return WrapString(string(b)), nil

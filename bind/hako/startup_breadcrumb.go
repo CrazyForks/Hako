@@ -24,6 +24,7 @@ var breadcrumbMutex sync.Mutex
 type startupBreadcrumb struct {
 	Stage string `json:"stage"`
 	Resource string `json:"resource"`
+	Count int64 `json:"count,omitempty"`
 	Completed      bool  `json:"completed"`
 	FootprintBytes int64 `json:"footprintBytes"`
 	BudgetBytes int64 `json:"budgetBytes,omitempty"`
@@ -49,6 +50,14 @@ func recordStartupStage(stage string) {
 }
 
 func recordStartupStageNaming(stage string, resource string) {
+	recordStartupStep(stage, resource, 0)
+}
+
+func recordStartupStageCounting(stage string, count int64) {
+	recordStartupStep(stage, "", count)
+}
+
+func recordStartupStep(stage string, resource string, count int64) {
 	breadcrumbMutex.Lock()
 	defer breadcrumbMutex.Unlock()
 
@@ -60,6 +69,7 @@ func recordStartupStageNaming(stage string, resource string) {
 	record := startupBreadcrumb{
 		Stage:          stage,
 		Resource:       resource,
+		Count:          count,
 		Completed:      false,
 		FootprintBytes: MemoryFootprint(),
 		BudgetBytes:    runtimeSetupSnapshot().softMemoryLimit,

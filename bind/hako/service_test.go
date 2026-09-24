@@ -346,6 +346,7 @@ func TestRuntimeDiagnosticsCarryTheLiveTunStack(t *testing.T) {
 		C.TunGvisor: "gVisor",
 		C.TunSystem: "System",
 		C.TunMixed:  "Mixed",
+		C.TunMips:   "Mips",
 	} {
 		coreListener.LastTunConf = LC.Tun{Enable: true, Stack: stack}
 		var diagnostics map[string]any

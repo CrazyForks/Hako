@@ -98,7 +98,10 @@ func reportsRegistration(rows []configDeviation, rule deviationRule) bool {
 
 func issuanceProbeDocument(t *testing.T) string {
 	t.Helper()
-	root := map[string]any{"proxies": []any{}}
+	root := map[string]any{"proxies": []any{map[string]any{
+		"name": "walled-easytier", "type": "easytier", "network-name": "probe",
+		"peers": []any{"tcp://203.0.113.10:11010"},
+	}}}
 	rules := []any{"UID,501,DIRECT", "MATCH,DIRECT"}
 	for _, rule := range deviationRules {
 		if rule.ruleScan || rule.defaultOnly || strings.Contains(rule.field, " ") {

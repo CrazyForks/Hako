@@ -44,9 +44,6 @@ func parseConfigForIOSRuntime(content string, underNE bool, entry string) (*conf
 }
 
 func parseConfigForIOSInternal(content string, underNE bool, stageRuntime bool) (*config.Config, *providerRuntime, error) {
-	if err := validateConfigurationInput(content); err != nil {
-		return nil, nil, err
-	}
 	raw, err := config.UnmarshalRawConfig([]byte(content))
 	if err != nil {
 		return nil, nil, fmt.Errorf("hako: parse config: %w", err)
@@ -59,7 +56,16 @@ func parseConfigForIOSInternal(content string, underNE bool, stageRuntime bool) 
 			return nil, nil, err
 		}
 	}
+	if stageRuntime {
+		setStartupBreadcrumbRecording(policy.networkExtension)
+		if policy.networkExtension {
+			geodata.SetGeodataProgressReporter(recordStartupResource)
+		} else {
+			geodata.SetGeodataProgressReporter(nil)
+		}
+	}
 	normalizeRawConfigForApple(raw, policy)
+	applyIPStackSettings(raw, currentIPStackSettings())
 	startupStage("bind:normalized")
 	applyStoreFakeIPDefault(raw)
 	applyUnifiedDelayDefault(raw, configExplicitlySetsUnifiedDelay([]byte(content)))
@@ -179,12 +185,6 @@ func normalizeRawConfigForApple(raw *config.RawConfig, policy appleRuntimePolicy
 	}
 	geodata.SetCompiledGeoSiteOnly(policy.compiledGeoSiteOnly)
 	geodata.SetCompiledGeoIPOnly(policy.compiledGeoIPOnly)
-	setStartupBreadcrumbRecording(policy.networkExtension)
-	if policy.networkExtension {
-		geodata.SetGeodataProgressReporter(recordStartupResource)
-	} else {
-		geodata.SetGeodataProgressReporter(nil)
-	}
 	raw.GeoAutoUpdate = false
 	raw.GeoXUrl = config.RawGeoXUrl{
 		GeoIp:   disabledGeoURL,
@@ -192,19 +192,38 @@ func normalizeRawConfigForApple(raw *config.RawConfig, policy appleRuntimePolicy
 		ASN:     disabledGeoURL,
 		GeoSite: disabledGeoURL,
 	}
+	if easyTierWalledProfile(policy) {
+		for _, ns := range stripEasyTierNameservers(raw) {
+			log.Warnln("[Apple %s] DNS %s asks an EasyTier node for overlay DNS; EasyTier is not built into this core, so the entry is stripped and the config still starts", policy.profile.String(), ns)
+		}
+	}
 	if policy.networkExtension {
 		normalizeRawNetworkExtensionSurfaces(raw, policy.processMetadata())
+		setConfiguredTunnelPrefixes(tunnelPrefixesFromRaw(raw))
 		if supplied := systemDNSServerSubstitutes(); len(supplied) != 0 {
 			usable, dropped := usableSystemResolverSubstitutes(supplied, tunnelPrefixesFromRaw(raw))
 			if len(dropped) != 0 {
 				log.Warnln("[Apple %s] DNS SystemDNSServerLines %s fall inside this configuration's own tunnel ranges and are ignored: the App read the system resolvers after the tunnel's DNS settings applied", policy.profile.String(), strings.Join(dropped, ", "))
 			}
-			for _, change := range substituteSystemResolvers(raw, usable) {
+			changes := substituteSystemResolvers(raw, usable)
+			for _, change := range changes {
 				log.Warnln("[Apple %s] DNS %s %s resolves through the system resolvers the App read before the tunnel: %s", policy.profile.String(), change.where(), change.entry, strings.Join(usable, ", "))
 			}
+			if len(changes) != 0 {
+				dns.MarkSystemSubstitutes(usable)
+			} else {
+				dns.MarkSystemSubstitutes(nil)
+			}
+		} else {
+			dns.MarkSystemSubstitutes(nil)
 		}
 		for _, ns := range stripNEIncompatibleNameservers(raw) {
 			log.Warnln("[Apple %s] DNS %s cannot work from a packet tunnel (system resolves only to the tunnel's own DNS address, which mihomo blacklists, so it yields nothing; dhcp:// must bind 0.0.0.0:68 on a physical interface -- unverified); stripped, resolution stays inside the core and the config still starts", policy.profile.String(), ns)
+		}
+		if policy.stripLoopbackResolvers {
+			for _, ns := range stripLoopbackResolvers(raw) {
+				log.Warnln("[Apple %s] DNS %s: it points at this device and no dns.listen in this configuration answers on that port; nothing else on this platform can, so the entry is stripped -- to use it, add dns.listen on the same port to the same configuration", policy.profile.String(), ns)
+			}
 		}
 		if policy.repairPacketTunnelDNS {
 			for _, repair := range repairApplePacketTunnelDNS(raw) {
@@ -533,6 +552,10 @@ func repairApplePacketTunnelDNS(raw *config.RawConfig) []string {
 }
 
 func filterPolicyNameservers(field string, policy *orderedmap.OrderedMap[string, any]) []string {
+	return filterPolicyNameserversWhere(field, policy, isNEIncompatibleNameserver)
+}
+
+func filterPolicyNameserversWhere(field string, policy *orderedmap.OrderedMap[string, any], strip func(string) bool) []string {
 	if policy == nil {
 		return nil
 	}
@@ -551,7 +574,7 @@ func filterPolicyNameservers(field string, policy *orderedmap.OrderedMap[string,
 		kept := make([]any, 0, len(servers))
 		removed := false
 		for _, ns := range servers {
-			if isNEIncompatibleNameserver(ns) {
+			if strip(ns) {
 				stripped = append(stripped, field+" "+pair.Key+" "+ns)
 				removed = true
 				continue

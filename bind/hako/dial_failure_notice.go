@@ -77,6 +77,9 @@ func DialHealthJSON() string {
 	if !dialFailureWatch.firstAt.IsZero() {
 		health["sinceUnix"] = dialFailureWatch.firstAt.Unix()
 	}
+	if bearer, spoke := witness.health(); spoke {
+		health["bearerWitness"] = bearer
+	}
 	return bridgeSafeString(mustJSON(health))
 }
 

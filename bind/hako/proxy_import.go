@@ -208,10 +208,12 @@ var proxyImportQueryFieldLedger = map[string]map[string]struct{}{
 		"tlsServerName", "allowInsecure", "allow_insecure", "insecure", "skip-cert-verify", "alpn",
 		"fingerprint", "fp", "hpkp", "pcs", "pbk", "publicKey", "sid", "shortId", "security",
 		"type", "proto", "network", "obfs", "obfsParam", "path", "host", "serviceName", "plugin",
+		"protoParam",
 	),
 	"ss": queryFieldSet(
 		"title", "remark", "remarks", "name", "tfo", "fastopen", "udp", "udp-over-tcp", "uot", "plugin",
 		"obfs", "obfsParam", "path", "client-fingerprint",
+		"tls", "sni", "peer", "allowInsecure", "allow_insecure", "insecure", "skip-cert-verify",
 	),
 	"snell": queryFieldSet(
 		"title", "remark", "remarks", "name", "tfo", "fastopen", "psk", "password", "version", "v",
@@ -229,7 +231,7 @@ var proxyImportQueryFieldLedger = map[string]map[string]struct{}{
 	"hysteria": queryFieldSet(
 		"title", "remark", "remarks", "name", "tfo", "fastopen", "auth", "peer", "sni", "serverName",
 		"tlsServerName", "allowInsecure", "allow_insecure", "insecure", "skip-cert-verify", "up", "upmbps",
-		"down", "downmbps", "alpn", "obfs", "protocol", "fingerprint", "hpkp", "pinSHA256", "keepalive",
+		"down", "downmbps", "alpn", "obfs", "obfsParam", "protocol", "fingerprint", "hpkp", "pinSHA256", "keepalive",
 	),
 	"hysteria2": queryFieldSet(
 		"title", "remark", "remarks", "name", "tfo", "fastopen", "peer", "sni", "serverName",
@@ -249,7 +251,7 @@ var proxyImportQueryFieldLedger = map[string]map[string]struct{}{
 		"title", "remark", "remarks", "name", "profile", "tfo", "fastopen", "publicKey", "public-key",
 		"privateKey", "private-key", "ip", "presharedKey", "preSharedKey", "pre-shared-key", "password",
 		"mtu", "keepalive", "persistent-keepalive", "dns", "reserved", "udp", "sni", "peer",
-		"preshared-key",
+		"preshared-key", "presharedkey", "publickey", "address",
 	),
 	"masque": queryFieldSet(
 		"title", "remark", "remarks", "name", "profile", "tfo", "fastopen", "publicKey", "public-key",
@@ -788,9 +790,11 @@ func surgeProxyMapping(name string, fields []string) (map[string]any, error) {
 	case "ss", "shadowsocks":
 		mergeFieldSet(allowed, "encrypt-method", "method", "cipher", "password")
 	case "trojan":
-		mergeFieldSet(allowed, "password", "sni", "peer", "server-name", "skip-cert-verify", "allow-insecure")
+		mergeFieldSet(allowed, "password", "sni", "peer", "server-name", "skip-cert-verify", "allow-insecure",
+			"ws", "ws-path", "ws-headers")
 	case "vmess":
-		mergeFieldSet(allowed, "username", "uuid", "tls", "sni", "peer", "server-name", "skip-cert-verify", "allow-insecure")
+		mergeFieldSet(allowed, "username", "uuid", "tls", "sni", "peer", "server-name", "skip-cert-verify", "allow-insecure",
+			"ws", "ws-path", "ws-headers", "vmess-aead")
 	case "http", "https", "socks5", "socks":
 		mergeFieldSet(allowed, "username", "password", "tls", "sni", "peer", "server-name", "skip-cert-verify", "allow-insecure")
 	case "snell":
@@ -798,6 +802,9 @@ func surgeProxyMapping(name string, fields []string) (map[string]any, error) {
 	}
 	if err := validateStringMapKeys("surge."+kind, options, allowed); err != nil {
 		return nil, err
+	}
+	if kind == "vmess" && options["vmess-aead"] != "" && !stringMapBoolean(options, "vmess-aead") {
+		return nil, unsupportedProxyImportField("surge.vmess.vmess-aead", "the legacy header needs an alterId this line does not carry")
 	}
 	proxy := map[string]any{"name": name, "server": server, "port": port}
 	switch kind {
@@ -815,6 +822,9 @@ func surgeProxyMapping(name string, fields []string) (map[string]any, error) {
 		proxy["uuid"] = firstStringMapValue(options, "username", "uuid")
 		proxy["alterId"] = 0
 		proxy["cipher"] = "auto"
+		if stringMapBoolean(options, "tls") {
+			proxy["tls"] = true
+		}
 	case "http", "https":
 		proxy["type"] = "http"
 		proxy["username"] = options["username"]
@@ -833,6 +843,25 @@ func surgeProxyMapping(name string, fields []string) (map[string]any, error) {
 		}
 	default:
 		return nil, fmt.Errorf("unsupported proxy type %q", kind)
+	}
+	if (kind == "vmess" || kind == "trojan") && stringMapBoolean(options, "ws") {
+		proxy["network"] = "ws"
+		opts := map[string]any{}
+		if path := options["ws-path"]; path != "" {
+			opts["path"] = path
+		}
+		if raw := options["ws-headers"]; raw != "" {
+			headers := map[string]any{}
+			for _, pair := range strings.Split(raw, "|") {
+				if name, value, ok := strings.Cut(pair, ":"); ok && strings.TrimSpace(name) != "" {
+					headers[strings.TrimSpace(name)] = strings.Trim(strings.TrimSpace(value), `"`)
+				}
+			}
+			if len(headers) > 0 {
+				opts["headers"] = headers
+			}
+		}
+		proxy["ws-opts"] = opts
 	}
 	if sni := firstStringMapValue(options, "sni", "peer", "server-name"); sni != "" {
 		if kind == "vmess" {
@@ -2498,7 +2527,7 @@ func proxyImportPluginMode(pluginName, raw string) string {
 	mode := strings.ToLower(strings.TrimSpace(raw))
 	switch {
 	case strings.Contains(strings.ToLower(pluginName), "v2ray-plugin"):
-		if mode == "ws" || mode == "websocket" {
+		if mode == "" || mode == "ws" || mode == "websocket" {
 			return "websocket"
 		}
 		return ""
@@ -2508,6 +2537,52 @@ func proxyImportPluginMode(pluginName, raw string) string {
 		}
 		return ""
 	}
+}
+
+func uncarriedProxyImportTransport(canonicalType, raw string) string {
+	obfs := strings.ToLower(strings.TrimSpace(raw))
+	carried := map[string][]string{
+		"ss":     {"", "none", "http", "tls", "ws", "websocket", "wss", "httpupgrade"},
+		"trojan": {"", "none", "ws", "websocket", "wss", "httpupgrade", "grpc"},
+		"vmess":  {"", "none", "ws", "websocket", "wss", "httpupgrade", "grpc", "h2", "http"},
+		"vless":  {"", "none", "ws", "websocket", "wss", "httpupgrade", "grpc", "h2", "http", "xhttp"},
+	}
+	known, judged := carried[canonicalType]
+	if !judged {
+		return ""
+	}
+	for _, value := range known {
+		if obfs == value {
+			return ""
+		}
+	}
+	return fmt.Sprintf("mihomo's %s has no %q transport here, so the node is imported without it", canonicalType, obfs)
+}
+
+func unhonouredShadowsocksTLSKey(canonicalType, key string, query url.Values) string {
+	if canonicalType != "ss" {
+		return ""
+	}
+	switch key {
+	case "tls", "sni", "peer", "allowInsecure", "allow_insecure", "insecure", "skip-cert-verify":
+	default:
+		return ""
+	}
+	obfs := strings.ToLower(query.Get("obfs"))
+	websocket := query.Get("plugin") == "" && (obfs == "ws" || obfs == "websocket" || obfs == "wss" || obfs == "httpupgrade")
+	if !websocket {
+		return "ss carries TLS only through v2ray-plugin, which this link does not use"
+	}
+	if key == "sni" || key == "peer" {
+		host := firstQueryValue(query, "obfsParam", "obfs-host", "host")
+		if name := query.Get(key); host != "" && !strings.EqualFold(name, host) {
+			return "v2ray-plugin uses its Host as the TLS server name, so this one is not used"
+		}
+		if sni := query.Get("sni"); key == "peer" && host == "" && sni != "" && !strings.EqualFold(sni, query.Get("peer")) {
+			return "v2ray-plugin takes one server name, and sni is the one used"
+		}
+	}
+	return ""
 }
 
 func unbuildableProxyImportPlugin(canonicalType, raw string) string {
@@ -2559,6 +2634,14 @@ func validateProxyShareLinkQueryFields(link string, capability proxyImportCapabi
 	if err != nil {
 		return nil, nil
 	}
+	switch capability.CanonicalType {
+	case "ss", "http", "socks5":
+		if unwrapped, ok := normalizeEncodedProxyAuthority(strings.TrimSpace(link)); ok {
+			if reparsed, parseErr := url.Parse(unwrapped); parseErr == nil {
+				parsed = reparsed
+			}
+		}
+	}
 	normalizeShadowrocketRawQuery(parsed)
 	allowed, exists := proxyImportQueryFieldLedger[capability.CanonicalType]
 	if !exists {
@@ -2569,8 +2652,15 @@ func validateProxyShareLinkQueryFields(link string, capability proxyImportCapabi
 	if reason := unbuildableProxyImportPlugin(capability.CanonicalType, parsed.Query().Get("plugin")); reason != "" {
 		notHonoured = append(notHonoured, capability.Scheme+".query.plugin: "+reason)
 	}
+	if reason := uncarriedProxyImportTransport(capability.CanonicalType, parsed.Query().Get("obfs")); reason != "" {
+		notHonoured = append(notHonoured, capability.Scheme+".query.obfs: "+reason)
+	}
 	for key := range parsed.Query() {
 		if reason, registered := unhonoured[key]; registered {
+			notHonoured = append(notHonoured, capability.Scheme+".query."+key+": "+reason)
+			continue
+		}
+		if reason := unhonouredShadowsocksTLSKey(capability.CanonicalType, key, parsed.Query()); reason != "" {
 			notHonoured = append(notHonoured, capability.Scheme+".query."+key+": "+reason)
 			continue
 		}
@@ -2774,6 +2864,11 @@ func normalizeProxyShareLinkDialect(link string, capability proxyImportCapabilit
 			canonicalLink, portRange = normalized, spec
 		}
 	}
+	if scheme == "ss" {
+		if normalized, ok := normalizeEncodedProxyAuthority(canonicalLink); ok {
+			canonicalLink = normalized
+		}
+	}
 	_, supportsHopping := proxyImportPortHoppingTypes[capability.CanonicalType]
 	if normalized, spec, ok := normalizeShareLinkPortRange(canonicalLink, supportsHopping); ok {
 		canonicalLink = normalized
@@ -2875,21 +2970,117 @@ func normalizeEncodedUserinfo(link string) (string, bool) {
 }
 
 func normalizeEncodedProxyAuthority(link string) (string, bool) {
-	parsed, err := url.Parse(link)
-	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.Port() != "" {
+	scheme, rest, found := strings.Cut(link, "://")
+	if !found || scheme == "" {
 		return link, false
 	}
-	decoded, err := convert.TryDecodeBase64(parsed.Host)
+	tokenEnd := strings.IndexAny(rest, "?#")
+	if tokenEnd < 0 {
+		tokenEnd = len(rest)
+	}
+	token, outer := rest[:tokenEnd], rest[tokenEnd:]
+	if token == "" || strings.ContainsAny(token, "@:") {
+		return link, false
+	}
+	decodedBytes, err := convert.TryDecodeBase64(strings.TrimRight(token, "/"))
 	if err != nil {
 		return link, false
 	}
-	authority, err := url.Parse(parsed.Scheme + "://" + string(decoded))
-	if err != nil || authority.Hostname() == "" || authority.Port() == "" {
-		return link, false
+	decoded := strings.TrimSpace(string(decodedBytes))
+	var credentials, tail, host, port string
+	endpointAt := func(start int) (string, string, string, bool) {
+		end := start
+		for end < len(decoded) && strings.IndexByte("/?#@", decoded[end]) < 0 {
+			end++
+		}
+		if end < len(decoded) && decoded[end] == '@' {
+			return "", "", "", false
+		}
+		h, p, err := net.SplitHostPort(decoded[start:end])
+		if err != nil || h == "" {
+			return "", "", "", false
+		}
+		first := p
+		if cut := strings.IndexAny(p, "-,"); cut >= 0 {
+			first = p[:cut]
+			if strings.Trim(p, "0123456789-,") != "" {
+				return "", "", "", false
+			}
+		}
+		if number, err := strconv.Atoi(first); err != nil || number < 1 || number > 65535 {
+			return "", "", "", false
+		}
+		return h, p, decoded[end:], true
 	}
-	authority.RawQuery = parsed.RawQuery
-	authority.Fragment = parsed.Fragment
-	return authority.String(), true
+	split := false
+	if strings.Contains(decoded, "@") {
+		for at := strings.IndexByte(decoded, '@'); at >= 0; {
+			if h, p, rest, ok := endpointAt(at + 1); ok {
+				credentials, host, port, tail, split = decoded[:at], h, p, rest, true
+				break
+			}
+			next := strings.IndexByte(decoded[at+1:], '@')
+			if next < 0 {
+				break
+			}
+			at += 1 + next
+		}
+	}
+	if !split {
+		head := decoded
+		if hash := strings.IndexByte(decoded, '#'); hash >= 0 {
+			head = decoded[:hash]
+		}
+		if strings.Contains(head, "@") {
+			return link, false
+		}
+		if host, port, tail, split = endpointAt(0); !split {
+			return link, false
+		}
+	}
+	innerQuery, innerTitle := "", ""
+	if hash := strings.Index(tail, "#"); hash >= 0 {
+		innerTitle = tail[hash+1:]
+		tail = tail[:hash]
+	}
+	if question := strings.Index(tail, "?"); question >= 0 {
+		innerQuery = tail[question+1:]
+	}
+	rebuilt := &url.URL{Scheme: scheme, Host: net.JoinHostPort(host, port)}
+	if credentials != "" {
+		username, password, hasPassword := strings.Cut(credentials, ":")
+		if hasPassword {
+			rebuilt.User = url.UserPassword(username, password)
+		} else {
+			rebuilt.User = url.User(username)
+		}
+	}
+	outerQuery, outerTitle := "", ""
+	if hash := strings.Index(outer, "#"); hash >= 0 {
+		outerTitle = outer[hash+1:]
+		outer = outer[:hash]
+	}
+	outerQuery = strings.TrimPrefix(outer, "?")
+	switch {
+	case outerQuery != "" && innerQuery != "":
+		rebuilt.RawQuery = outerQuery + "&" + innerQuery
+	case outerQuery != "":
+		rebuilt.RawQuery = outerQuery
+	default:
+		rebuilt.RawQuery = innerQuery
+	}
+	title := outerTitle
+	if unescaped, err := url.PathUnescape(title); err == nil {
+		title = unescaped
+	}
+	if title == "" {
+		title = innerTitle
+		if unescaped, err := url.PathUnescape(title); err == nil {
+			title = unescaped
+		}
+	}
+	rebuilt.Fragment = title
+	return rebuilt.String(), true
 }
 
 func normalizeShadowrocketRawQuery(parsed *url.URL) {
@@ -2981,11 +3172,61 @@ func parseLegacyVMessShareLink(link string) (map[string]any, string, bool, error
 func applyTransportDialect(proxy map[string]any, query url.Values) {
 	obfs := strings.ToLower(query.Get("obfs"))
 	if obfs == "" && query.Get("obfsParam") != "" {
+		if standard := strings.ToLower(firstQueryValue(query, "type", "network")); standard == "" || standard == "ws" || standard == "shadowsocks" {
+			obfs = "websocket"
+		}
+	}
+	upgrade := obfs == "httpupgrade"
+	if obfs == "wss" {
+		proxy["tls"] = true
+		nameKey := "servername"
+		if anyString(proxy["type"]) == "trojan" {
+			nameKey = "sni"
+		}
+		if _, named := proxy[nameKey]; !named {
+			if serverName := firstQueryValue(query, "peer", "sni", "serverName", "tlsServerName"); serverName != "" {
+				proxy[nameKey] = serverName
+			}
+		}
+	}
+	if obfs == "wss" || upgrade {
 		obfs = "websocket"
 	}
+	defer func() {
+		if upgrade && anyString(proxy["network"]) == "ws" {
+			if opts, _ := proxy["ws-opts"].(map[string]any); opts != nil {
+				opts["v2ray-http-upgrade"] = true
+			}
+		}
+	}()
 	switch obfs {
 	case "websocket", "ws":
+		if anyString(proxy["network"]) == "ws" {
+			opts, _ := proxy["ws-opts"].(map[string]any)
+			if opts == nil {
+				opts = map[string]any{}
+				proxy["ws-opts"] = opts
+			}
+			if path := query.Get("path"); path != "" {
+				opts["path"] = path
+			}
+			if host := firstQueryValue(query, "obfsParam", "obfs-host", "host"); host != "" {
+				headers, _ := opts["headers"].(map[string]any)
+				if headers == nil {
+					headers = map[string]any{}
+					opts["headers"] = headers
+				}
+				for key := range headers {
+					if strings.EqualFold(key, "Host") {
+						delete(headers, key)
+					}
+				}
+				headers["Host"] = host
+			}
+			break
+		}
 		proxy["network"] = "ws"
+		clearOtherTransportOptions(proxy, "ws-opts")
 		headers := map[string]any{}
 		if host := firstQueryValue(query, "obfsParam", "obfs-host", "host"); host != "" {
 			headers["Host"] = host
@@ -2996,10 +3237,95 @@ func applyTransportDialect(proxy map[string]any, query url.Values) {
 		}
 	case "grpc":
 		proxy["network"] = "grpc"
-		if name := firstQueryValue(query, "path", "serviceName", "grpc-service-name"); name != "" {
+		clearOtherTransportOptions(proxy, "grpc-opts")
+		if name := firstQueryValue(query, "serviceName", "grpc-service-name", "path"); name != "" {
 			proxy["grpc-opts"] = map[string]any{"grpc-service-name": name}
 		}
+	case "xhttp":
+		if anyString(proxy["type"]) != "vless" {
+			return
+		}
+		proxy["network"] = "xhttp"
+		clearOtherTransportOptions(proxy, "xhttp-opts")
+		opts, _ := proxy["xhttp-opts"].(map[string]any)
+		if opts == nil {
+			opts = map[string]any{}
+		}
+		if path := query.Get("path"); path != "" {
+			opts["path"] = path
+		}
+		if host := firstQueryValue(query, "obfsParam", "obfs-host", "host"); host != "" {
+			opts["host"] = host
+		}
+		if mode := strings.ToLower(query.Get("mode")); mode != "" {
+			opts["mode"] = mode
+		}
+		proxy["xhttp-opts"] = opts
+	case "h2", "http":
+		kind := anyString(proxy["type"])
+		if kind != "vmess" && kind != "vless" {
+			return
+		}
+		host := firstQueryValue(query, "obfsParam", "obfs-host", "host")
+		path := query.Get("path")
+		if obfs == "h2" {
+			proxy["network"] = "h2"
+			clearOtherTransportOptions(proxy, "h2-opts")
+			opts := map[string]any{}
+			if path != "" {
+				opts["path"] = path
+			}
+			if host != "" {
+				opts["host"] = []any{host}
+			}
+			proxy["h2-opts"] = opts
+			return
+		}
+		clearOtherTransportOptions(proxy, "http-opts")
+		proxy["network"] = "http"
+		opts := map[string]any{}
+		if path != "" {
+			opts["path"] = []any{path}
+		}
+		if host != "" {
+			opts["headers"] = map[string]any{"Host": []any{host}}
+		}
+		proxy["http-opts"] = opts
 	}
+}
+
+func clearOtherTransportOptions(proxy map[string]any, keep string) {
+	for _, key := range []string{"ws-opts", "grpc-opts", "h2-opts", "http-opts", "xhttp-opts"} {
+		if key != keep {
+			delete(proxy, key)
+		}
+	}
+}
+
+func applyStandardWebsocketHost(proxy map[string]any, query url.Values) {
+	if anyString(proxy["network"]) != "ws" {
+		return
+	}
+	host := query.Get("host")
+	if host == "" {
+		return
+	}
+	opts, _ := proxy["ws-opts"].(map[string]any)
+	if opts == nil {
+		opts = map[string]any{}
+		proxy["ws-opts"] = opts
+	}
+	headers, _ := opts["headers"].(map[string]any)
+	if headers == nil {
+		headers = map[string]any{}
+		opts["headers"] = headers
+	}
+	for key := range headers {
+		if strings.EqualFold(key, "Host") {
+			return
+		}
+	}
+	headers["Host"] = host
 }
 
 func applyProxyShareLinkDialect(proxy map[string]any, parsed *url.URL) error {
@@ -3024,6 +3350,13 @@ func applyProxyShareLinkDialect(proxy map[string]any, parsed *url.URL) error {
 			}
 		}
 	case "tuic":
+		if parsed.User != nil && parsed.User.Username() == "" {
+			if token, set := parsed.User.Password(); set && token != "" {
+				delete(proxy, "uuid")
+				delete(proxy, "password")
+				proxy["token"] = token
+			}
+		}
 		if queryBoolean(query, "insecure", "allowInsecure", "allow_insecure", "skip-cert-verify") {
 			proxy["skip-cert-verify"] = true
 		}
@@ -3032,6 +3365,7 @@ func applyProxyShareLinkDialect(proxy map[string]any, parsed *url.URL) error {
 		}
 	case "trojan":
 		applyTransportDialect(proxy, query)
+		applyStandardWebsocketHost(proxy, query)
 		if publicKey := realityPublicKeyOrNothing(firstQueryValue(query, "pbk", "publicKey")); publicKey != "" {
 			proxy["reality-opts"] = map[string]any{
 				"public-key": publicKey,
@@ -3043,6 +3377,14 @@ func applyProxyShareLinkDialect(proxy map[string]any, parsed *url.URL) error {
 		}
 		if err := applyShadowrocketTrojanPlugin(proxy, query.Get("plugin")); err != nil {
 			return err
+		}
+		if strings.EqualFold(parsed.Query().Get("proto"), "shadowsocks") {
+			if anyString(proxy["network"]) == "shadowsocks" {
+				delete(proxy, "network")
+			}
+			if method, password, ok := strings.Cut(query.Get("protoParam"), ":"); ok && method != "" {
+				proxy["ss-opts"] = map[string]any{"enabled": true, "method": method, "password": password}
+			}
 		}
 	case "ss":
 		if plugin := query.Get("plugin"); plugin != "" {
@@ -3083,7 +3425,7 @@ func applyProxyShareLinkDialect(proxy map[string]any, parsed *url.URL) error {
 					if path := firstQueryValue(values, "path", "obfs-uri"); path != "" {
 						opts["path"] = path
 					}
-					if queryBoolean(values, "tls") {
+					if flag, present := values["tls"]; present && (len(flag) == 0 || flag[0] == "" || queryBoolean(values, "tls")) {
 						opts["tls"] = true
 					}
 					proxy["plugin"] = "v2ray-plugin"
@@ -3093,13 +3435,26 @@ func applyProxyShareLinkDialect(proxy map[string]any, parsed *url.URL) error {
 				delete(proxy, "plugin")
 				delete(proxy, "plugin-opts")
 			}
-		} else if obfs := strings.ToLower(query.Get("obfs")); obfs == "websocket" || obfs == "ws" {
+		} else if obfs := strings.ToLower(query.Get("obfs")); obfs == "websocket" || obfs == "ws" || obfs == "wss" || obfs == "httpupgrade" {
 			opts := map[string]any{"mode": "websocket"}
-			if host := firstQueryValue(query, "obfsParam", "obfs-host", "host"); host != "" {
+			host := firstQueryValue(query, "obfsParam", "obfs-host", "host")
+			if host == "" {
+				host = firstQueryValue(query, "sni", "peer")
+			}
+			if host != "" {
 				opts["host"] = host
 			}
 			if path := query.Get("path"); path != "" {
 				opts["path"] = path
+			}
+			if obfs == "wss" || queryBoolean(query, "tls") {
+				opts["tls"] = true
+			}
+			if queryBoolean(query, "allowInsecure", "allow_insecure", "insecure", "skip-cert-verify") {
+				opts["skip-cert-verify"] = true
+			}
+			if obfs == "httpupgrade" {
+				opts["v2ray-http-upgrade"] = true
 			}
 			proxy["plugin"] = "v2ray-plugin"
 			proxy["plugin-opts"] = opts
@@ -3120,7 +3475,21 @@ func applyProxyShareLinkDialect(proxy map[string]any, parsed *url.URL) error {
 		if pin := certificatePinOrNothing(anyString(proxy["type"]), firstQueryValue(query, "hpkp", "pinSHA256", "fingerprint")); pin != "" {
 			proxy["fingerprint"] = pin
 		}
+		if password := query.Get("obfsParam"); password != "" {
+			if mode := strings.ToLower(query.Get("obfs")); mode == "" || mode == "xplus" {
+				proxy["obfs"] = password
+			}
+		}
 	case "hysteria2":
+		if _, realm := proxy["realm-opts"]; !realm && parsed.User != nil {
+			auth := parsed.User.Username()
+			if password, set := parsed.User.Password(); set {
+				auth += ":" + password
+			}
+			if auth != "" {
+				proxy["password"] = auth
+			}
+		}
 		if spec := firstQueryValue(query, "ports", "mport"); spec != "" {
 			proxy["ports"] = spec
 		}
@@ -3135,6 +3504,12 @@ func applyProxyShareLinkDialect(proxy map[string]any, parsed *url.URL) error {
 			proxy["client-fingerprint"] = fingerprint
 		}
 	case "http":
+		if parsed.User != nil {
+			if password, set := parsed.User.Password(); set {
+				proxy["username"] = parsed.User.Username()
+				proxy["password"] = password
+			}
+		}
 		if strings.EqualFold(parsed.Scheme, "https") {
 			proxy["tls"] = true
 		}
@@ -3148,6 +3523,12 @@ func applyProxyShareLinkDialect(proxy map[string]any, parsed *url.URL) error {
 			proxy["tls"] = true
 		}
 	case "socks5":
+		if parsed.User != nil {
+			if password, set := parsed.User.Password(); set {
+				proxy["username"] = parsed.User.Username()
+				proxy["password"] = password
+			}
+		}
 		if queryBoolean(query, "tls") || strings.EqualFold(firstQueryValue(query, "security"), "tls") {
 			proxy["tls"] = true
 		}
@@ -3392,6 +3773,11 @@ func parseSSHShareLink(link string) (map[string]any, error) {
 		proxy["password"] = password
 	}
 	if privateKey := firstQueryValue(query, "private-key", "privateKey", "pk"); privateKey != "" {
+		if !strings.Contains(privateKey, "PRIVATE KEY") {
+			if decoded, err := convert.TryDecodeBase64(privateKey); err == nil && strings.Contains(string(decoded), "PRIVATE KEY") {
+				privateKey = string(decoded)
+			}
+		}
 		proxy["private-key"] = privateKey
 	}
 	if passphrase := firstQueryValue(query, "private-key-passphrase", "privateKeyPassphrase", "pp"); passphrase != "" {
@@ -3410,8 +3796,15 @@ func parseWireGuardShareLink(link string) (map[string]any, error) {
 	}
 	query := parsed.Query()
 	privateKey := firstQueryValue(query, "privateKey", "private-key")
-	publicKey := firstQueryValue(query, "publicKey", "public-key")
-	ipv4, ipv6 := splitIPValues(query["ip"])
+	if privateKey == "" && parsed.User != nil {
+		privateKey = parsed.User.Username()
+	}
+	publicKey := firstQueryValue(query, "publicKey", "public-key", "publickey")
+	addresses := query["ip"]
+	if len(addresses) == 0 {
+		addresses = query["address"]
+	}
+	ipv4, ipv6 := splitIPValues(addresses)
 	if privateKey == "" || publicKey == "" || (ipv4 == "" && ipv6 == "") {
 		return nil, fmt.Errorf("hako: wireguard proxy requires privateKey, publicKey and ip")
 	}
@@ -3425,7 +3818,7 @@ func parseWireGuardShareLink(link string) (map[string]any, error) {
 	if ipv6 != "" {
 		proxy["ipv6"] = ipv6
 	}
-	if psk := firstQueryValue(query, "presharedKey", "preSharedKey", "pre-shared-key", "preshared-key", "password"); psk != "" {
+	if psk := firstQueryValue(query, "presharedKey", "preSharedKey", "pre-shared-key", "preshared-key", "presharedkey", "password"); psk != "" {
 		proxy["pre-shared-key"] = psk
 	}
 	if value := query.Get("mtu"); value != "" {

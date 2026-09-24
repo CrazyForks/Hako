@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/netip"
 	"sort"
+	"sync"
 
 	"github.com/TokenPLS/Hako/config"
 	"go.yaml.in/yaml/v3"
@@ -25,6 +26,8 @@ type platformConfigIntent struct {
 const platformConfigIntentSchemaVersion = 2
 
 type tunRestartIntent struct {
+	IPQueryMode                     string   `json:"ipQueryMode,omitempty"`
+	TunIPv6Mode                     string   `json:"tunIPv6Mode,omitempty"`
 	IPv4Address                     string   `json:"ipv4Address"`
 	IPv6Enabled                     bool     `json:"ipv6Enabled"`
 	IPv6Addresses                   []string `json:"ipv6Addresses"`
@@ -41,6 +44,8 @@ type tunRestartIntent struct {
 	ICMPTimeout                     int64    `json:"icmpTimeout"`
 }
 
+var appParseMu sync.Mutex
+
 func CheckConfig(configContent string) error {
 	setupMu.Lock()
 	ready := setupDone
@@ -48,14 +53,13 @@ func CheckConfig(configContent string) error {
 	if !ready {
 		return bridgeSafeError(fmt.Errorf("hako: call Setup before CheckConfig"))
 	}
+	appParseMu.Lock()
+	defer appParseMu.Unlock()
 	_, err := parseConfigForIOS(configContent, true)
 	return bridgeSafeError(err)
 }
 
 func ValidateConfigShape(configContent string) error {
-	if err := validateConfigurationInput(configContent); err != nil {
-		return bridgeSafeError(err)
-	}
 	if _, err := config.UnmarshalRawConfig([]byte(configContent)); err != nil {
 		return bridgeSafeError(fmt.Errorf("hako: parse config: %w", err))
 	}
@@ -63,9 +67,6 @@ func ValidateConfigShape(configContent string) error {
 }
 
 func PlatformConfigIntentJSON(configContent string) (*StringBox, error) {
-	if err := validateConfigurationInput(configContent); err != nil {
-		return nil, bridgeSafeError(err)
-	}
 	raw, err := config.UnmarshalRawConfig([]byte(configContent))
 	if err != nil {
 		return nil, bridgeSafeError(fmt.Errorf("hako: parse config: %w", err))
@@ -73,8 +74,10 @@ func PlatformConfigIntentJSON(configContent string) (*StringBox, error) {
 	if err := validateRawNetworkExtensionIntent(raw); err != nil {
 		return nil, bridgeSafeError(err)
 	}
+	stack := currentIPStackSettings()
+	applyIPStackSettings(raw, stack)
 	tun := raw.Tun
-	fingerprint, err := tunRestartFingerprint(raw)
+	fingerprint, err := tunRestartFingerprintWithIPStack(raw, stack)
 	if err != nil {
 		return nil, bridgeSafeError(err)
 	}
@@ -95,6 +98,10 @@ func PlatformConfigIntentJSON(configContent string) (*StringBox, error) {
 }
 
 func tunRestartFingerprint(raw *config.RawConfig) (string, error) {
+	return tunRestartFingerprintWithIPStack(raw, currentIPStackSettings())
+}
+
+func tunRestartFingerprintWithIPStack(raw *config.RawConfig, stack ipStackSettings) (string, error) {
 	var address netip.Prefix
 	if raw.DNS.FakeIPRange == "" {
 		address = netip.MustParsePrefix("198.18.0.1/16")
@@ -106,6 +113,8 @@ func tunRestartFingerprint(raw *config.RawConfig) (string, error) {
 		address = parsed
 	}
 	intent := tunRestartIntent{
+		IPQueryMode:                     stack.queryMode.String(),
+		TunIPv6Mode:                     stack.tunIPv6Mode,
 		IPv4Address:                     netip.PrefixFrom(address.Addr(), 30).String(),
 		IPv6Enabled:                     raw.IPv6,
 		LoopbackAddresses:               sortedAddresses(raw.Tun.LoopbackAddress),
@@ -120,7 +129,7 @@ func tunRestartFingerprint(raw *config.RawConfig) (string, error) {
 		UDPTimeout:                      raw.Tun.UDPTimeout,
 		ICMPTimeout:                     raw.Tun.ICMPTimeout,
 	}
-	if raw.IPv6 {
+	if raw.IPv6 || raw.PreserveTunIPv6 {
 		intent.IPv6Addresses = sortedPrefixes(raw.Tun.Inet6Address)
 	}
 	data, err := json.Marshal(intent)
@@ -150,9 +159,6 @@ func sortedAddresses(addresses []netip.Addr) []string {
 }
 
 func FormatConfig(configContent string) (*StringBox, error) {
-	if err := validateConfigurationInput(configContent); err != nil {
-		return nil, bridgeSafeError(err)
-	}
 	if _, err := config.UnmarshalRawConfig([]byte(configContent)); err != nil {
 		return nil, bridgeSafeError(fmt.Errorf("hako: parse config: %w", err))
 	}
@@ -169,9 +175,6 @@ func FormatConfig(configContent string) (*StringBox, error) {
 	}
 	if err := encoder.Close(); err != nil {
 		return nil, bridgeSafeError(fmt.Errorf("hako: finish config formatting: %w", err))
-	}
-	if err := validateConfigurationResult(buffer.String()); err != nil {
-		return nil, bridgeSafeError(err)
 	}
 	return WrapString(buffer.String()), nil
 }

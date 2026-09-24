@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/TokenPLS/Hako/component/dialer"
+	"github.com/TokenPLS/Hako/component/pause"
 )
 
 func TestInterfaceUpdaterUpdatesDialer(t *testing.T) {
@@ -160,5 +161,106 @@ func TestInterfaceUpdaterCanRefreshStateWithoutForcingDefaultInterface(t *testin
 	if flushes.Load() != 2 || resets.Load() != 2 || closes.Load() != 1 {
 		t.Fatalf("unbound updater close/flush/reset = %d/%d/%d, want 1/2/2",
 			closes.Load(), flushes.Load(), resets.Load())
+	}
+}
+
+func TestNoDefaultNetworkSuspendsPeriodicWork(t *testing.T) {
+	oldFlush, oldReset, oldClose, oldClear :=
+		flushInterfaceCache, resetResolverConnection, closeTrackedConnections, clearResolverCache
+	flushInterfaceCache = func() {}
+	resetResolverConnection = func() {}
+	closeTrackedConnections = func() {}
+	clearResolverCache = func() {}
+	previousRead := readPhysicalResolvers
+	readPhysicalResolvers = func(int32) []string { return nil }
+	t.Cleanup(func() {
+		flushInterfaceCache, resetResolverConnection, closeTrackedConnections, clearResolverCache =
+			oldFlush, oldReset, oldClose, oldClear
+		readPhysicalResolvers = previousRead
+		pause.NetworkWake()
+	})
+
+	pause.NetworkWake()
+	updater := &interfaceUpdater{bindDefaultInterface: true}
+	updater.UpdateDefaultInterface("en0", 5, false, false, true, true)
+	if pause.IsNetworkPaused() {
+		t.Fatal("a usable default network must not suspend anything")
+	}
+
+	updater.UpdateDefaultInterface("", 0, false, false, false, false)
+	if !pause.IsNetworkPaused() {
+		t.Fatal("no usable default network must suspend the periodic work")
+	}
+
+	updater.UpdateDefaultInterface("pdp_ip0", 7, true, false, true, false)
+	if pause.IsNetworkPaused() {
+		t.Fatal("a network returning must resume the periodic work")
+	}
+	if networkPauseStarted.Load().IsZero() {
+		t.Fatal("the window's start must be recorded so the closing line can report its length")
+	}
+}
+
+func TestNetworkPauseWindowIsStampedOnceAtItsStart(t *testing.T) {
+	oldFlush, oldReset, oldClose, oldClear :=
+		flushInterfaceCache, resetResolverConnection, closeTrackedConnections, clearResolverCache
+	flushInterfaceCache = func() {}
+	resetResolverConnection = func() {}
+	closeTrackedConnections = func() {}
+	clearResolverCache = func() {}
+	previousRead := readPhysicalResolvers
+	readPhysicalResolvers = func(int32) []string { return nil }
+	t.Cleanup(func() {
+		flushInterfaceCache, resetResolverConnection, closeTrackedConnections, clearResolverCache =
+			oldFlush, oldReset, oldClose, oldClear
+		readPhysicalResolvers = previousRead
+		pause.NetworkWake()
+	})
+	pause.NetworkWake()
+
+	updater := &interfaceUpdater{bindDefaultInterface: true}
+	updater.UpdateDefaultInterface("en0", 5, false, false, true, true)
+	updater.UpdateDefaultInterface("", 0, false, false, false, false)
+	opened := networkPauseStarted.Load()
+	if opened.IsZero() {
+		t.Fatal("opening the window must stamp its start")
+	}
+	updater.UpdateDefaultInterface("", 0, true, false, false, false)
+	if got := networkPauseStarted.Load(); !got.Equal(opened) {
+		t.Fatalf("the stamp moved inside one window: %v -> %v", opened, got)
+	}
+}
+
+func TestClosingReleasesANetworkPause(t *testing.T) {
+	t.Cleanup(func() { pause.NetworkWake() })
+	pause.NetworkPause()
+	if !pause.IsNetworkPaused() {
+		t.Fatal("precondition: the network pause must be in force")
+	}
+	pause.NetworkWake()
+	if pause.IsNetworkPaused() {
+		t.Fatal("closing must release a network pause this service put in force")
+	}
+}
+
+func TestANewDefaultInterfaceResetsTheOutboundsSessions(t *testing.T) {
+	orig := dialer.DefaultInterface.Load()
+	t.Cleanup(func() { dialer.DefaultInterface.Store(orig) })
+	var sessionResets atomic.Int32
+	oldFlush, oldReset, oldClose, oldSessions := flushInterfaceCache, resetResolverConnection, closeTrackedConnections, resetOutboundSessions
+	flushInterfaceCache, resetResolverConnection, closeTrackedConnections = func() {}, func() {}, func() {}
+	resetOutboundSessions = func() { sessionResets.Add(1) }
+	t.Cleanup(func() {
+		flushInterfaceCache, resetResolverConnection, closeTrackedConnections, resetOutboundSessions = oldFlush, oldReset, oldClose, oldSessions
+	})
+	u := &interfaceUpdater{bindDefaultInterface: true}
+	u.UpdateDefaultInterface("en0", 4, false, false, true, true)
+	u.UpdateDefaultInterface("en0", 4, true, false, true, true)
+	if got := sessionResets.Load(); got != 0 {
+		t.Fatalf("the first path and a flag flip reset %d sessions, want none", got)
+	}
+	u.UpdateDefaultInterface("pdp_ip0", 2, true, false, true, true)
+	if got := sessionResets.Load(); got != 1 {
+		t.Fatalf("a new default interface reset sessions %d times, want once", got)
 	}
 }

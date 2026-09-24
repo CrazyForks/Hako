@@ -123,6 +123,7 @@ func runControlledTrojanVariant(
 		t.Fatalf("ParseProxy() error = %v", err)
 	}
 	defer proxy.Close()
+	testControlledRelayHTTPS(t, proxy)
 
 	var targetRequests atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

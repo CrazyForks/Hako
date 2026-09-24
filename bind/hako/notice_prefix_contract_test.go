@@ -28,6 +28,17 @@ func TestNoNewLogPrefixArrivesUnnoticed(t *testing.T) {
 			"level. A failure inside one of them gets its own Warnln -- see geosite_cache.go " +
 			"and geoip_cache.go -- because a category that will not compile is a statement " +
 			"about the user's rules, not about this process"},
+		"mDNS|Infoln": {"Infoln", "developer-facing: one line per multicast-DNS query with its " +
+			"answer count and elapsed time. Instrumentation, not a notice -- a Bonjour " +
+			"name resolving is not something to tell a user about. It exists because the path " +
+			"was unobservable and a device round could not tell a sandbox that blocks the " +
+			"daemon's socket from a query that never reached the core at all"},
+		"mDNS|Warnln": {"Warnln", "developer-facing: a multicast-DNS query that did not answer. " +
+			"Two wordings on purpose -- \"unreachable\" means the daemon's socket could not be " +
+			"reached, which inside a Network Extension is the sandbox question and the errno " +
+			"is the whole evidence for it; \"failed\" means the daemon answered and did not " +
+			"resolve the name, which is a result. Also the concurrency-cap refusal. NOT " +
+			"selected by the app: a user has nothing to do about either"},
 		"Memory|Warnln": {"Warnln", "developer-facing: pressure and threshold telemetry"},
 		"Memory|Infoln": {"Infoln", "developer-facing: pressure sampling"},
 		"mem|Infoln":    {"Infoln", "developer-facing: allocator sampling"},

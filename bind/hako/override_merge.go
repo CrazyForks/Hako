@@ -13,12 +13,6 @@ type overrideSpec struct {
 }
 
 func MergeOverrideForIOS(rawYAML string, overrideJSON string) (*StringBox, error) {
-	if err := validateConfigurationInput(rawYAML); err != nil {
-		return nil, bridgeSafeError(err)
-	}
-	if err := validateConfigurationJSONInput(overrideJSON); err != nil {
-		return nil, bridgeSafeError(err)
-	}
 	if overrideJSON == "" {
 		return WrapString(rawYAML), nil
 	}
@@ -44,9 +38,6 @@ func MergeOverrideForIOS(rawYAML string, overrideJSON string) (*StringBox, error
 		return nil, bridgeSafeError(err)
 	}
 	merged := restoreKeyOrderFrom(string(out), rawYAML, patchDocument(overrideJSON))
-	if err := validateConfigurationResult(merged); err != nil {
-		return nil, bridgeSafeError(err)
-	}
 	return WrapString(merged), nil
 }
 

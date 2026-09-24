@@ -103,6 +103,9 @@ func TestSetupStoresSystemDNSServerLinesAndRejectsWhatIsNotAnAddress(t *testing.
 	if got, want := systemDNSServerSubstitutes(), []string{"119.29.29.29", "[2402:4e00::]:53"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("substitutes after Setup = %v, want %v", got, want)
 	}
+	if got, want := dns.SystemResolverDefaultAddresses(), []string{"119.29.29.29:53", "[2402:4e00::]:53"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("system resolver defaults after Setup = %v, want %v", got, want)
+	}
 	err := Setup(options("119.29.29.29\ndns.google\n"))
 	if err == nil {
 		t.Fatal("Setup accepted a hostname in SystemDNSServerLines")

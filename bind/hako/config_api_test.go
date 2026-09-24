@@ -504,7 +504,7 @@ func TestValidateConfigShapeMatchesFormatConfigOnOrdinaryDocuments(t *testing.T)
 	}
 }
 
-func TestValidateConfigShapeAcceptsWhatOnlyTheDiscardedResultLimitRejected(t *testing.T) {
+func TestValidateConfigShapeAndFormatConfigBothAcceptADocumentWhoseFormattedFormIsLarge(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("rules: [")
 	for i := 0; i < 1_200_000; i++ {
@@ -516,8 +516,8 @@ func TestValidateConfigShapeAcceptsWhatOnlyTheDiscardedResultLimitRejected(t *te
 	b.WriteString("]\n")
 	doc := b.String()
 
-	if _, err := FormatConfig(doc); err == nil {
-		t.Skip("fixture no longer trips FormatConfig's result limit; regenerate a larger one")
+	if _, err := FormatConfig(doc); err != nil {
+		t.Fatalf("FormatConfig refused a legal document: %v", err)
 	}
 	if err := ValidateConfigShape(doc); err != nil {
 		t.Fatalf("the typed shape is legal ([]string); rejection must not survive: %v", err)

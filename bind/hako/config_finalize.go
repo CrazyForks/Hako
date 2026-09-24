@@ -22,12 +22,6 @@ type resourceMap struct {
 }
 
 func FinalizeForIOS(mergedYAML string, resourceMapJSON string) (*StringBox, error) {
-	if err := validateConfigurationInput(mergedYAML); err != nil {
-		return nil, bridgeSafeError(err)
-	}
-	if err := validateConfigurationJSONInput(resourceMapJSON); err != nil {
-		return nil, bridgeSafeError(err)
-	}
 	var rm resourceMap
 	if resourceMapJSON != "" {
 		if err := json.Unmarshal([]byte(resourceMapJSON), &rm); err != nil {
@@ -69,9 +63,6 @@ func FinalizeForIOS(mergedYAML string, resourceMapJSON string) (*StringBox, erro
 		return nil, bridgeSafeError(err)
 	}
 	finalized := restoreSourceKeyOrder(mergedYAML, string(out))
-	if err := validateConfigurationResult(finalized); err != nil {
-		return nil, bridgeSafeError(err)
-	}
 	return WrapString(finalized), nil
 }
 

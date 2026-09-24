@@ -12,6 +12,7 @@ import (
 	C "github.com/TokenPLS/Hako/constant"
 )
 
+
 func breadcrumbHome(t *testing.T) string {
 	t.Helper()
 	options := testOptions(t)
@@ -133,8 +134,10 @@ dns:
 rules:
   - MATCH,DIRECT
 `
-	if _, err := parseConfigForIOS(config, true); err != nil {
+	if _, runtime, err := parseConfigForIOSRuntime(config, true, "breadcrumb-test"); err != nil {
 		t.Logf("parse stopped with: %v (a failure is still a recorded stage)", err)
+	} else if runtime != nil {
+		runtime.close()
 	}
 
 	explanation := ExplainLastStartup()

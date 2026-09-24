@@ -5,7 +5,9 @@ import (
 	"net/netip"
 	"syscall"
 
+	"github.com/TokenPLS/Hako/common/atomic"
 	"github.com/TokenPLS/Hako/component/dialer"
+	"github.com/TokenPLS/Hako/log"
 )
 
 func interfaceScopableTarget(address string) bool {
@@ -30,6 +32,12 @@ func interfaceScopableTarget(address string) bool {
 	return addrPort.Addr().Unmap().IsGlobalUnicast()
 }
 
+var publishedInterfaceIndex = atomic.NewInt32(0)
+
+var noPathDialsLogged atomic.Bool
+
+var suspendedDialsLogged atomic.Bool
+
 func installSocketHook(platform PlatformInterface) {
 	if platform == nil || !platform.UsePlatformAutoDetectInterfaceControl() {
 		dialer.DefaultSocketHook = nil
@@ -43,6 +51,20 @@ func installSocketHook(platform PlatformInterface) {
 		if !interfaceScopableTarget(address) {
 			return nil
 		}
+		if publishedInterfaceIndex.Load() == 0 {
+			if noPathDialsLogged.CompareAndSwap(false, true) {
+				log.Warnln("[Apple] no physical path is published; outbound sockets dial unbound until one is, rather than failing")
+			}
+			return nil
+		}
+		noPathDialsLogged.Store(false)
+		if index := publishedInterfaceIndex.Load(); bindingSuspended(index) {
+			if suspendedDialsLogged.CompareAndSwap(false, true) {
+				log.Warnln("[Apple] outbound sockets dial unbound: the bearer witness found interface index %d bound but not carrying; binding resumes at the next path change", index)
+			}
+			return nil
+		}
+		suspendedDialsLogged.Store(false)
 		var ctrlErr error
 		if err := conn.Control(func(fd uintptr) {
 			ctrlErr = platform.AutoDetectInterfaceControl(int32(fd))

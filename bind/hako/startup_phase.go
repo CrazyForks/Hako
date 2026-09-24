@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,6 +42,24 @@ func startupStageNamingPeak(name string, resource string, peakBytes int64) {
 	}
 }
 
+func startupStageCounting(name string, count int64) {
+	if startupProbing.Load() {
+		startupPhaseLine(name, 0, count)
+	}
+	if breadcrumbRecording.Load() {
+		recordStartupStageCounting(name, count)
+	}
+}
+
+func nodeListBegin(section string) (nodes int64, ok bool) {
+	rest, matched := strings.CutPrefix(section, "proxies-begin:")
+	if !matched {
+		return 0, false
+	}
+	nodes, err := strconv.ParseInt(rest, 10, 64)
+	return nodes, err == nil
+}
+
 func providerStepKind(step string) (resource string, begin bool, ok bool) {
 	for _, candidate := range []struct {
 		prefix string
@@ -61,7 +80,13 @@ func providerStepKind(step string) (resource string, begin bool, ok bool) {
 
 func armStartupProbes() func() {
 	startupProbing.Store(true)
-	config.StartupProbe = func(section string) { startupStage("parse:" + section) }
+	config.StartupProbe = func(section string) {
+		if nodes, ok := nodeListBegin(section); ok {
+			startupStageCounting("parse:proxies-begin", nodes)
+			return
+		}
+		startupStage("parse:" + section)
+	}
 	executor.StartupProbe = func(step string) {
 		resource, begin, isProvider := providerStepKind(step)
 		switch {
@@ -110,11 +135,18 @@ func startupPhase(name string) {
 }
 
 func startupPhaseWithPeak(name string, peakBytes int64) {
+	startupPhaseLine(name, peakBytes, 0)
+}
+
+func startupPhaseLine(name string, peakBytes int64, count int64) {
 	line := fmt.Sprintf("%s  go-phase=%-24s fp=%.1fMiB",
 		time.Now().Format("15:04:05.000"),
 		name, float64(MemoryFootprint())/(1024*1024))
 	if peakBytes > 0 {
 		line += fmt.Sprintf(" peak=%.1fMiB", float64(peakBytes)/(1024*1024))
+	}
+	if count > 0 {
+		line += fmt.Sprintf(" count=%d", count)
 	}
 	phaseMu.Lock()
 	phaseTrace = append(phaseTrace, line)

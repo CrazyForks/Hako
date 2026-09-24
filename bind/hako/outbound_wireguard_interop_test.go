@@ -30,6 +30,13 @@ import (
 )
 
 func TestControlledWireGuardInterop(t *testing.T) {
+	for _, mode := range []string{"auto", "mips"} {
+		t.Run(mode, func(t *testing.T) { testControlledWireGuardInterop(t, mode) })
+	}
+}
+
+func testControlledWireGuardInterop(t *testing.T, mode string) {
+	t.Helper()
 	pinUnifiedDelayOff(t)
 	const operationTimeout = 15 * time.Second
 
@@ -52,6 +59,7 @@ func TestControlledWireGuardInterop(t *testing.T) {
 		"public-key":           base64.StdEncoding.EncodeToString(serverPublic),
 		"persistent-keepalive": 1,
 		"udp":                  true,
+		"ip-stack":             map[string]any{"mode": mode},
 	}
 	proxy, err := adapter.ParseProxy(mapping)
 	if err != nil {

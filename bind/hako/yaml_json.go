@@ -12,9 +12,6 @@ import (
 )
 
 func YamlToJSON(rawYAML string) (*StringBox, error) {
-	if err := validateConfigurationInput(rawYAML); err != nil {
-		return nil, bridgeSafeError(err)
-	}
 	decoder := yaml.NewDecoder(strings.NewReader(rawYAML))
 	var document yaml.Node
 	if err := decoder.Decode(&document); err != nil {
@@ -31,9 +28,6 @@ func YamlToJSON(rawYAML string) (*StringBox, error) {
 
 	var payload bytes.Buffer
 	if err := encodeYAMLNodeAsJSON(document.Content[0], &payload); err != nil {
-		return nil, bridgeSafeError(err)
-	}
-	if err := validateConfigurationJSONResult(payload.String()); err != nil {
 		return nil, bridgeSafeError(err)
 	}
 	return WrapString(payload.String()), nil
@@ -198,9 +192,6 @@ func mergeSources(value *yaml.Node) ([]*yaml.Node, error) {
 }
 
 func JSONToYaml(rawJSON string) (*StringBox, error) {
-	if err := validateConfigurationJSONInput(rawJSON); err != nil {
-		return nil, bridgeSafeError(err)
-	}
 	decoder := json.NewDecoder(strings.NewReader(rawJSON))
 	decoder.UseNumber()
 	rootNode, err := decodeJSONValueAsYAMLNode(decoder, 0)
@@ -226,9 +217,6 @@ func JSONToYaml(rawJSON string) (*StringBox, error) {
 	}
 	if err := encoder.Close(); err != nil {
 		return nil, bridgeSafeError(fmt.Errorf("hako: finish YAML encoding: %w", err))
-	}
-	if err := validateConfigurationResult(output.String()); err != nil {
-		return nil, bridgeSafeError(err)
 	}
 	return WrapString(output.String()), nil
 }
